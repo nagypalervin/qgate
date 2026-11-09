@@ -24,7 +24,7 @@ use qgate_analyzers::duplication::{ChangedSource, DuplicationIndex};
 use qgate_analyzers::{Analyzer, FileChange};
 use qgate_config::Config;
 use qgate_core::{Finding, Location, Severity};
-use qgate_git::{BlobId, BlobReader, ChangedFile, GitError, Repository};
+use qgate_git::{BlobId, BlobReader, ChangedFile, Changes, GitError, Repository};
 use qgate_lang::{FileModel, Language, ParseError, Token};
 use qgate_report::render_text;
 
@@ -277,8 +277,11 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
     // The diff first: it checks both revisions and their merge base, so an
     // unknown base (a shallow clone) is reported as such, never hidden
     // behind a broken qgate.toml.
-    let files = repo
-        .changed_files(base, head)
+    let Changes {
+        changed: files,
+        deleted,
+    } = repo
+        .changes(base, head)
         .map_err(|e| git_message(&e, base))?;
     // Checked before any file is analyzed.
     let architecture = architecture_analyzer(&load_config(&repo, base, head)?)?;
@@ -312,12 +315,7 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
         }
     }
     if !analyzed.is_empty() {
-        for deleted in repo
-            .deleted_files(base, head)
-            .map_err(|e| git_message(&e, base))?
-        {
-            left.push((deleted.path, deleted.id));
-        }
+        left.extend(deleted.into_iter().map(|file| (file.path, file.id)));
         findings.extend(duplication(
             &repo,
             base,
@@ -351,8 +349,11 @@ fn duplication(
     // counts as empty.
     let mut gone: Vec<(String, Vec<Token>)> = Vec::new();
     for (path, id) in left {
-        let Some(language) = language_of(path) else {
-            continue;
+        // A deleted JavaScript file's code counts too, like a renamed one's.
+        let language = match language_of(path) {
+            Some(language) => language,
+            None if is_javascript(path) => Language::Tsx,
+            None => continue,
         };
         let tokens = match read_source(&mut reader, id)? {
             Some(bytes) => match parse_blob(language, bytes)? {

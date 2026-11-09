@@ -12,6 +12,8 @@
 //! - [`Repository::read_blob`] returns the exact bytes of one version.
 //! - [`Repository::file_at`] reads one regular file, such as `qgate.toml`,
 //!   as a revision has it; the path is taken literally.
+//! - [`Repository::changes`] adds the deleted regular files, with their
+//!   base contents, to the changed ones, from the same diff.
 //! - [`Repository::files_at`] lists every regular file of a revision, and
 //!   [`Repository::blob_reader`] reads many blobs through one
 //!   `git cat-file --batch` process, for analyses that need a whole tree.
@@ -460,23 +462,18 @@ impl Repository {
     /// [`GitError::NoMergeBase`] if they share no history, or another
     /// [`GitError`] if git fails.
     pub fn changed_files(&self, base: &str, head: &str) -> Result<Vec<ChangedFile>, GitError> {
-        Ok(self.diff(base, head)?.changed)
+        Ok(self.changes(base, head)?.changed)
     }
 
-    /// Regular files that the head no longer has as regular files: deleted
-    /// from the merge base of `base` and `head` to `head`, or replaced by a
-    /// symlink or submodule. Each with its path and contents at the merge
-    /// base, sorted by path.
+    /// The changed files, as [`Repository::changed_files`] gives them, and
+    /// the regular files the head no longer has as regular files (deleted,
+    /// or replaced by a symlink or submodule) with their contents at the
+    /// merge base, both sorted by path, from one diff.
     ///
     /// # Errors
     ///
     /// As [`Repository::changed_files`].
-    pub fn deleted_files(&self, base: &str, head: &str) -> Result<Vec<TreeFile>, GitError> {
-        Ok(self.diff(base, head)?.deleted)
-    }
-
-    /// The raw diff from the merge base of `base` and `head` to `head`.
-    fn diff(&self, base: &str, head: &str) -> Result<RawDiff, GitError> {
+    pub fn changes(&self, base: &str, head: &str) -> Result<Changes, GitError> {
         let (merge_base, head) = self.merge_base_of(base, head)?;
         let args = [
             "diff",
@@ -709,10 +706,13 @@ impl Repository {
 /// `160000`) is skipped.
 const REGULAR_MODES: [&str; 2] = ["100644", "100755"];
 
-/// What a raw diff says about regular files.
-struct RawDiff {
-    changed: Vec<ChangedFile>,
-    deleted: Vec<TreeFile>,
+/// What a diff says about regular files: see [`Repository::changes`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Changes {
+    /// Added, modified and renamed regular files.
+    pub changed: Vec<ChangedFile>,
+    /// Regular files that are gone, with their base contents.
+    pub deleted: Vec<TreeFile>,
 }
 
 /// Parse `git diff --raw -z` output into the changed and the deleted
@@ -721,7 +721,7 @@ struct RawDiff {
 /// Each record is `:<old-mode> <new-mode> <old-id> <new-id> <status>`,
 /// NUL, path, NUL; renames and copies (`R<score>`, `C<score>`) carry the
 /// old path and then the new path.
-fn parse_raw_diff(raw: &[u8]) -> Result<RawDiff, String> {
+fn parse_raw_diff(raw: &[u8]) -> Result<Changes, String> {
     let mut fields = raw.split(|&b| b == 0);
     let mut files = Vec::new();
     let mut deleted = Vec::new();
@@ -778,7 +778,7 @@ fn parse_raw_diff(raw: &[u8]) -> Result<RawDiff, String> {
             after: BlobId(new_id.to_owned()),
         });
     }
-    Ok(RawDiff {
+    Ok(Changes {
         changed: files,
         deleted,
     })
@@ -1350,6 +1350,8 @@ mod tests {
             reader.read(&missing),
             Err(GitError::UnexpectedOutput { .. })
         ));
+        // A missing object keeps the reader in step.
+        assert!(!reader.is_closed());
         // A tree is not a blob either.
         let tree = BlobId(repo.git(&["rev-parse", "HEAD^{tree}"]));
         assert!(matches!(
@@ -1427,6 +1429,7 @@ mod tests {
             reader.read(&BlobId("not an id".to_owned())),
             Err(GitError::UnexpectedOutput { .. })
         ));
+        assert!(reader.is_closed());
         match reader.read(&blob(&repo, "HEAD", "a.ts")) {
             Err(GitError::UnexpectedOutput { detail, .. }) => {
                 assert!(detail.contains("closed"), "{detail}");
@@ -1567,7 +1570,7 @@ mod tests {
         repo.commit("head");
         let found = Repository::discover(&repo.dir).expect("a repository");
         assert_eq!(
-            found.deleted_files("HEAD~1", "HEAD").expect("deleted"),
+            found.changes("HEAD~1", "HEAD").expect("changes").deleted,
             vec![
                 TreeFile {
                     path: "a.ts".to_owned(),

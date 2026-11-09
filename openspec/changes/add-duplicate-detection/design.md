@@ -115,7 +115,8 @@ let findings = index.findings();
    candidate hash, records the occurrence `(path, token index, first
    line, last line)`. Other windows are dropped, so memory grows with the
    changed code, not with the repository.
-4. **`findings`.**
+4. **`findings`.** *Superseded in PR 3 (Implementation Notes, review
+   round 2): counted per file that holds a key, not per occurrence.*
    - A candidate is a new duplicate if it occurs at least twice in the
      head and `delta > 0`.
    - Its occurrences in the changed files are ordered by path and
@@ -127,6 +128,9 @@ let findings = index.findings();
 
 ### D4: Blocks and their counterparts
 
+- *Superseded in PR 3 (see Implementation Notes, review rounds 1 and 2):
+  blocks follow one copy in another file, and only copies across files
+  count.*
 - **Blocks.** In each changed file, the reported window starts are merged
   when consecutive (`i`, `i+1`, ...). A block covers tokens `first ..
   last + K`, so its token count is `last - first + K`, and its lines run
@@ -178,7 +182,8 @@ The two-file form never builds an index.
   - result: 1.4 s wall time and 21 MB peak memory (three runs, all within
     0.02 s); all 20 copies found.
 
-  - a 400-file change on the same repository: 2.4 s and 317 MB peak.
+  - a 400-file change on the same repository: 2.4 s and 308 MB peak
+    (re-measured after review round 2; 20 files: 1.4 s, 21 MB).
 
   Memory does not depend on the repository size, because only the
   changed files' windows are kept (D3), but it is high per changed token:
@@ -186,19 +191,13 @@ The two-file form never builds an index.
   token texts and compacting the window maps are the follow-ups, with
   caching and parallel parsing, before qgate meets very large pull
   requests.
-- **[Which copy is new within one file]** Old and new are told apart by
-  counts, not by a diff. Within one file, the first occurrences by
-  position count as old, so a copy inserted *above* the block it copies is
-  reported at the old block and names the new one. The duplication is
-  real; only the side shown is wrong. → Accepted (decided at PR 3 review)
-  and stated in the spec and the README; a token diff per changed file
-  is the fix if it matters.
 - **[False positives of type-2 normalization]** Structurally identical
   but unrelated code (switch arms, test tables, configuration objects)
   can match. → Kept member names, the exclusions and the 50-token
   threshold limit this; it is a Warning that fails nothing by default;
   thresholds and excludes in `qgate.toml` are the next step.
-- **[Hash collisions]** Checked against the tokens before reporting (D4).
+- **[Hash collisions]** Ruled out in practice by two independent 64-bit
+  hashes per window (Implementation Notes, PR 3).
 - **[Grammar lag]** A head file the grammar cannot parse takes no part,
   silently. A copy of code that sits in such a file is not found.
 - **[Changed-file order]** Which new occurrence counts as the original
@@ -367,3 +366,24 @@ finding, which does not fail a run by default.
   - Not changed: a changed file whose base version cannot be parsed is
     `input/unparsable` and takes no part in duplication either, as
     "Compared files" says for files that cannot be parsed.
+- **PR 3, review round 2 (one question answered by the human):**
+  - Repetition within one file produced many findings: a 256-number table
+    gave nine identical lines, and three consecutive copies of a block
+    merged into one finding that overlapped itself. The human chose
+    duplication *across files only*. A block now counts per file that
+    holds it (its first place there), and new duplication is a growth in
+    the number of files. This removes the overlap rule (`apart`) and the
+    "within one file, position decides" limitation.
+  - The spec says how blocks and their copies are chosen: a block follows
+    one copy in another file, the finding names the first file by path
+    whose copy covers it, and "k more" counts further such files.
+  - `Repository::changes` returns changed and deleted files from one diff,
+    replacing a second diff; a deleted JavaScript file counts as before,
+    like a renamed one; `is_closed` is tested; the first place per file
+    of each key is cached for the block search.
+  - Mutation checks for the new counting: the subtraction of files that
+    held a block before, the "only files new to the key" filter, the
+    original rule, the per-block budget, keeping only continuing copies
+    and splitting blocks each fail a test. The copy filter for the
+    block's own file was redundant (that place is always the reported
+    one) and is gone.

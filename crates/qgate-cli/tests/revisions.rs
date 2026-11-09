@@ -134,12 +134,9 @@ fn stderr(output: &Output) -> String {
 /// A function named `name` with `decisions` decision points, so its
 /// cyclomatic complexity is `decisions + 1`.
 fn function(name: &str, decisions: usize) -> String {
-    let mut text = format!("export function {name}(c: Flags): number {{\n");
-    // A different member name per line, so the decisions are not repeated
-    // code: `if (c[0])` and `if (c[1])` tokenize alike and would make the
-    // function a duplicate of itself (duplication/duplicate-block).
+    let mut text = format!("export function {name}(c: boolean[]): number {{\n");
     for i in 0..decisions {
-        let _ = writeln!(text, "  if (c.k{i}) {{ return {i}; }}");
+        let _ = writeln!(text, "  if (c[{i}]) {{ return {i}; }}");
     }
     text.push_str("  return -1;\n}\n");
     text
@@ -1116,6 +1113,19 @@ fn code_moved_out_of_a_file_renamed_to_another_language_is_not_a_new_copy() {
     repo.write("src/c.ts", DATE_HELPER);
     repo.commit("base");
     repo.git(&["mv", "src/a.ts", "src/a.js"]);
+    repo.write("src/b.ts", format!("{}{DATE_HELPER}", padding(30)));
+    repo.commit("move");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+}
+
+#[test]
+fn code_moved_out_of_a_deleted_javascript_file_is_not_a_new_copy() {
+    let repo = Repo::new();
+    repo.write("src/a.js", DATE_HELPER);
+    repo.write("src/c.ts", DATE_HELPER);
+    repo.commit("base");
+    repo.remove("src/a.js");
     repo.write("src/b.ts", format!("{}{DATE_HELPER}", padding(30)));
     repo.commit("move");
     let out = repo.qgate(&["--base", "HEAD~1"]);

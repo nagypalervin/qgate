@@ -83,15 +83,14 @@ warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 
     under other names is still a copy;
   - member names (`.getFullYear`), keywords and operators are compared;
   - comments, semicolons, imports and type annotations are ignored.
+- **Copies across files only.** A block counts when it occurs in two or
+  more files; repetition within one file (a data table, similar test
+  cases one after another) does not.
 - **Only new copies are reported.** Duplication the code base already has
   is not; nor is code that only moved, also out of a deleted file; nor a
-  file renamed from `.js` to `.ts`. When a change adds the same block
-  twice, the first counts as the original. Within one file the earlier
-  copy counts as the old one, so a copy pasted *above* its original is
-  reported at the original.
-- **A block must span at least 50 tokens**, about 5 to 8 lines. Repeated
-  statements in one function count too, once the repetition is long
-  enough not to overlap itself.
+  file renamed or moved from `.js` to `.ts`. When a change adds the same
+  block to two new files, the first by path counts as the original.
+- **A block must span at least 50 tokens**, about 5 to 8 lines.
 - It is a Warning, so it fails a run only with `--fail-on warning`. The
   two-file form does not check duplication.
 
