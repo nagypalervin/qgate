@@ -29,6 +29,10 @@ pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, Parse
             message: "tree-sitter returned no tree".to_owned(),
         })?;
 
+    if let Some(line) = first_error_line(tree.root_node()) {
+        return Err(ParseError::Syntax { line });
+    }
+
     let mut walker = Walker::new(source.as_bytes());
     walker.walk(tree.root_node());
     Ok(FileModel {
@@ -283,6 +287,27 @@ impl<'s> Walker<'s> {
     }
 }
 
+/// Line of the earliest `ERROR` or missing node, if the tree has any.
+/// Only subtrees that contain an error are visited.
+fn first_error_line(root: Node<'_>) -> Option<u32> {
+    if !root.has_error() {
+        return None;
+    }
+    let mut first: Option<Node<'_>> = None;
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        if node.is_error() || node.is_missing() {
+            if first.is_none_or(|f| node.start_byte() < f.start_byte()) {
+                first = Some(node);
+            }
+            continue;
+        }
+        let mut cursor = node.walk();
+        pending.extend(node.children(&mut cursor).filter(Node::has_error));
+    }
+    first.map(line_of)
+}
+
 /// Whether the node adds one to the enclosing unit's complexity.
 fn is_decision_point(node: Node<'_>) -> bool {
     let kind = node.kind();
@@ -388,6 +413,33 @@ mod tests {
                 ("default", 121, 2),
             ])
         );
+    }
+
+    #[test]
+    fn syntax_error_reports_first_error_line() {
+        let source = include_str!("../fixtures/typescript/syntax_error.ts");
+        assert_eq!(
+            parse(Language::TypeScript, source),
+            Err(ParseError::Syntax { line: 7 })
+        );
+    }
+
+    #[test]
+    fn tsx_uses_the_tsx_grammar() {
+        let source = include_str!("../fixtures/typescript/component.tsx");
+        assert_eq!(
+            units(Language::Tsx, source),
+            triples(&[
+                // ternary inside JSX
+                ("Greeting", 4, 2),
+                // && inside the anonymous map callback
+                ("List", 8, 2),
+            ])
+        );
+        assert!(matches!(
+            parse(Language::TypeScript, source),
+            Err(ParseError::Syntax { .. })
+        ));
     }
 
     fn expected(pairs: &[(&str, u32)]) -> Vec<(String, u32)> {

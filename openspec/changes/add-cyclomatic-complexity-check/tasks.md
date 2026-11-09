@@ -15,7 +15,7 @@ and `cargo test --workspace` passing.
 - [x] 1.4 Write the decision-point fixtures (loops, switch, catch/finally, conditional expression, `&&`/`||`/`??`, logical assignment, `?.`, default values, type-level syntax) with failing tests that assert the expected complexity per spec "Decision points" and "Type-level syntax is not counted"
 - [x] 1.5 Implement the tree walk and counting (design D3) and verify the 1.4 tests pass
 - [x] 1.6 Write naming and unit-boundary fixtures (class members incl. getter/setter, class field arrow, object methods, named nested function, anonymous callback, module-level code and `describe`/`it`, unnamed default export, overloads, duplicate names) with failing tests that assert `(name, line, cyclomatic)` per spec; then implement naming and duplicate suffixes until they pass
-- [ ] 1.7 Write a fixture with a syntax error and a TSX fixture; verify `ParseError::Syntax` carries the line of the first error (design D4) and that TSX parses with the TSX grammar
+- [x] 1.7 Write a fixture with a syntax error and a TSX fixture; verify `ParseError::Syntax` carries the line of the first error (design D4) and that TSX parses with the TSX grammar
 - [ ] 1.8 Run the one-off ESLint comparison (design D10) over the lang fixtures, record the table and any deviation under "Implementation Notes" in `design.md`; verify every difference is one of the two expected kinds, or stop and ask
 - [ ] 1.9 Update the `qgate-lang` module docs (no longer a placeholder) and verify `cargo doc -p qgate-lang --no-deps` builds without warnings
 
