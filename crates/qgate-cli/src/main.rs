@@ -18,6 +18,7 @@ use clap::error::ErrorKind as ClapErrorKind;
 use clap::{Arg, ArgMatches, Command, ValueEnum, value_parser};
 use qgate_analyzers::complexity::ComplexityAnalyzer;
 use qgate_analyzers::{Analyzer, FileChange};
+use qgate_config::Config;
 use qgate_core::{Finding, Location, Severity};
 use qgate_git::{ChangedFile, GitError, Repository};
 use qgate_lang::{FileModel, Language, ParseError};
@@ -29,6 +30,9 @@ const FAILED: u8 = 1;
 
 /// Exit code for invalid invocations and inputs.
 const INVALID: u8 = 2;
+
+/// The configuration file, at the repository root.
+const CONFIG_FILE: &str = "qgate.toml";
 
 /// Rule id for a file that revision mode could not analyze. A public API
 /// like every rule id; only the CLI creates it (design D4).
@@ -263,11 +267,17 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
     let cwd =
         std::env::current_dir().map_err(|e| format!("cannot read the current directory: {e}"))?;
     let repo = Repository::discover(&cwd).map_err(|e| git_message(&e, base))?;
-    let mut findings = Vec::new();
-    for file in repo
+    // The diff first: it checks both revisions and their merge base, so an
+    // unknown base (a shallow clone) is reported as such, never hidden
+    // behind a broken qgate.toml.
+    let files = repo
         .changed_files(base, head)
-        .map_err(|e| git_message(&e, base))?
-    {
+        .map_err(|e| git_message(&e, base))?;
+    // Checked before any file is analyzed. The architecture analyzer
+    // applies the rules (add-forbidden-imports PR 3).
+    let _config = load_config(&repo, base, head)?;
+    let mut findings = Vec::new();
+    for file in files {
         let Some(language) = language_of(&file.path) else {
             continue;
         };
@@ -278,6 +288,18 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
     }
     sort(&mut findings);
     Ok(findings)
+}
+
+/// The configuration as the head revision has it (ADR 0003): uncommitted
+/// changes do not count, and a missing file is an empty configuration.
+fn load_config(repo: &Repository, base: &str, head: &str) -> Result<Config, String> {
+    match repo
+        .file_at(head, CONFIG_FILE)
+        .map_err(|e| git_message(&e, base))?
+    {
+        Some(bytes) => qgate_config::parse(&bytes).map_err(|e| format!("{CONFIG_FILE}: {e}")),
+        None => Ok(Config::default()),
+    }
 }
 
 /// Both versions of one changed file as models, or an `input/unparsable`

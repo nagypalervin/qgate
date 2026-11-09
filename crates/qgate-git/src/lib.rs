@@ -10,6 +10,8 @@
 //!   them. Renames carry their old path; deleted files, symlinks,
 //!   submodules and type changes are left out.
 //! - [`Repository::read_blob`] returns the exact bytes of one version.
+//! - [`Repository::file_at`] reads one regular file, such as `qgate.toml`,
+//!   as a revision has it; the path is taken literally.
 //!
 //! User-supplied revisions starting with `-` are rejected, the rest only
 //! reach `git rev-parse --verify`; later commands receive full commit ids,
@@ -106,6 +108,14 @@ pub enum GitError {
         /// What was unexpected.
         detail: String,
     },
+    /// A path names something other than a regular file (a directory, a
+    /// symlink or a submodule) in a revision.
+    NotARegularFile {
+        /// The path, relative to the repository root.
+        path: String,
+        /// The revision as the caller gave it.
+        revision: String,
+    },
     /// Any other failure of a git command.
     Command {
         /// The arguments passed to `git`.
@@ -125,6 +135,9 @@ impl fmt::Display for GitError {
             Self::UnknownRevision { revision } => write!(f, "unknown revision `{revision}`"),
             Self::NoMergeBase { base, head } => {
                 write!(f, "`{base}` and `{head}` have no merge base")
+            }
+            Self::NotARegularFile { path, revision } => {
+                write!(f, "`{path}` is not a regular file in `{revision}`")
             }
             Self::UnexpectedOutput { args, detail } => {
                 write!(
@@ -225,6 +238,50 @@ impl Repository {
             })?;
         files.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(files)
+    }
+
+    /// The contents of the regular file at `path` (relative to the
+    /// repository root, `/`-separated) in the commit `revision` names, or
+    /// `None` if that commit has nothing at `path`. The path is taken
+    /// literally, never as a pattern.
+    ///
+    /// # Errors
+    ///
+    /// [`GitError::UnknownRevision`] if `revision` does not name a commit,
+    /// [`GitError::NotARegularFile`] if `path` is a directory, symlink or
+    /// submodule, or another [`GitError`] if git fails.
+    pub fn file_at(&self, revision: &str, path: &str) -> Result<Option<Vec<u8>>, GitError> {
+        let commit = self.resolve(revision)?;
+        let args = ["--literal-pathspecs", "ls-tree", "-z", &commit, "--", path];
+        let out = self.git(&args)?;
+        if !out.status.success() {
+            return Err(command_error(&args, &out));
+        }
+        // Each entry: `<mode> SP <type> SP <id> TAB <path>`, NUL-terminated.
+        let unexpected = |detail: String| GitError::UnexpectedOutput {
+            args: args.iter().map(|&a| a.to_owned()).collect(),
+            detail,
+        };
+        for entry in out.stdout.split(|&b| b == 0).filter(|e| !e.is_empty()) {
+            let entry = String::from_utf8_lossy(entry);
+            let (header, entry_path) = entry
+                .split_once('\t')
+                .ok_or_else(|| unexpected(format!("no tab in entry: {entry}")))?;
+            if entry_path != path {
+                continue;
+            }
+            let [mode, kind, id] = header.split(' ').collect::<Vec<_>>()[..] else {
+                return Err(unexpected(format!("expected 3 fields: {header}")));
+            };
+            if kind != "blob" || !REGULAR_MODES.contains(&mode) {
+                return Err(GitError::NotARegularFile {
+                    path: path.to_owned(),
+                    revision: revision.to_owned(),
+                });
+            }
+            return self.read_blob(&BlobId(id.to_owned())).map(Some);
+        }
+        Ok(None)
     }
 
     /// The raw contents of a blob.
@@ -363,6 +420,16 @@ fn run<S: AsRef<OsStr>>(dir: &Path, args: &[S]) -> Result<Output, GitError> {
         .args(args)
         .current_dir(dir)
         .env("GIT_TERMINAL_PROMPT", "0");
+    // `file_at` passes `--literal-pathspecs`, which git refuses next to
+    // any other global pathspec setting a user may have exported.
+    for variable in [
+        "GIT_LITERAL_PATHSPECS",
+        "GIT_GLOB_PATHSPECS",
+        "GIT_NOGLOB_PATHSPECS",
+        "GIT_ICASE_PATHSPECS",
+    ] {
+        command.env_remove(variable);
+    }
     // Tests run the code under test isolated from the developer's git
     // configuration and repository variables, like the fixtures (design D5).
     #[cfg(test)]
@@ -717,6 +784,93 @@ mod tests {
         let found = changes(&repo, "HEAD~1", "HEAD");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].path, "bad-\u{fffd}.ts");
+    }
+
+    #[test]
+    fn file_at_reads_regular_files_of_the_named_revision() {
+        let repo = TestRepo::new();
+        repo.write("qgate.toml", "old\n");
+        repo.commit("base");
+        repo.write("qgate.toml", b"new \xff\n");
+        repo.write("run.sh", "#!/bin/sh\n");
+        repo.git(&["add", "--chmod=+x", "run.sh"]);
+        repo.commit("head");
+        repo.write("qgate.toml", "uncommitted\n");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        assert_eq!(
+            found.file_at("HEAD~1", "qgate.toml").expect("read"),
+            Some(b"old\n".to_vec())
+        );
+        assert_eq!(
+            found.file_at("HEAD", "qgate.toml").expect("read"),
+            Some(b"new \xff\n".to_vec()),
+            "the commit, not the working tree"
+        );
+        assert_eq!(
+            found.file_at("HEAD", "run.sh").expect("read"),
+            Some(b"#!/bin/sh\n".to_vec()),
+            "an executable file is a regular file"
+        );
+    }
+
+    #[test]
+    fn file_at_missing_file_is_none_and_paths_are_literal() {
+        let repo = TestRepo::new();
+        repo.write("qgate.toml", "x");
+        repo.write("sub/qgate.toml", "y");
+        repo.commit("base");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        for path in [
+            "absent.toml",
+            "*.toml",
+            "qgate.tom?",
+            ":(glob)*.toml",
+            "qgate",
+        ] {
+            assert_eq!(found.file_at("HEAD", path), Ok(None), "{path}");
+        }
+        assert_eq!(
+            found.file_at("HEAD", "sub/qgate.toml"),
+            Ok(Some(b"y".to_vec()))
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn file_at_rejects_directories_and_symlinks() {
+        let repo = TestRepo::new();
+        repo.write("qgate.toml/inner", "x");
+        repo.write("target.toml", "x");
+        std::os::unix::fs::symlink("target.toml", repo.dir.join("link.toml")).expect("symlink");
+        repo.commit("base");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        for path in ["qgate.toml", "link.toml"] {
+            assert_eq!(
+                found.file_at("HEAD", path),
+                Err(GitError::NotARegularFile {
+                    path: path.to_owned(),
+                    revision: "HEAD".to_owned(),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn file_at_option_like_revision_is_unknown_and_writes_nothing() {
+        let repo = TestRepo::new();
+        repo.write("qgate.toml", "x");
+        repo.commit("base");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let before = entries(&repo.dir);
+        for revision in ["--output=written-by-git", "-", "no-such-branch"] {
+            assert_eq!(
+                found.file_at(revision, "qgate.toml"),
+                Err(GitError::UnknownRevision {
+                    revision: revision.to_owned(),
+                })
+            );
+        }
+        assert_eq!(entries(&repo.dir), before, "git wrote into the work tree");
     }
 
     #[test]

@@ -6,6 +6,7 @@ members = [
     "crates/qgate-analyzers",
     "crates/qgate-report",
     "crates/qgate-git",
+    "crates/qgate-config",
     "crates/qgate-cli",
 ]
 
@@ -23,11 +24,14 @@ qgate-lang = { path = "crates/qgate-lang", version = "0.0.1" }
 qgate-analyzers = { path = "crates/qgate-analyzers", version = "0.0.1" }
 qgate-report = { path = "crates/qgate-report", version = "0.0.1" }
 qgate-git = { path = "crates/qgate-git", version = "0.0.1" }
+qgate-config = { path = "crates/qgate-config", version = "0.0.1" }
 
 # External
 clap = { version = "4.6", default-features = false, features = ["std", "help", "usage", "error-context"] }
 tree-sitter = "0.26"
 tree-sitter-typescript = "0.23"
+serde = { version = "1", features = ["derive"] }
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

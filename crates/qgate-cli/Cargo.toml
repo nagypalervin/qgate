@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 clap.workspace = true
 qgate-analyzers.workspace = true
+qgate-config.workspace = true
 qgate-core.workspace = true
 qgate-git.workspace = true
 qgate-lang.workspace = true

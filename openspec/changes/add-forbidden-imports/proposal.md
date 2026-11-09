@@ -122,10 +122,11 @@ new exit-2 case belongs to `configuration`.
   head).
 - **`qgate-cli`:** reads the configuration in revision mode and runs the
   architecture analyzer when rules exist.
-- **New dependencies, measured in a throwaway crate:**
-  - `toml` 0.9 (features `parse`, `serde`, `std`) and `serde` with
-    `derive` add about 11 crates, most of them build-time proc-macro crates
-    (`syn`, `quote`, `serde_derive`);
+- **New dependencies, measured against the workspace's `Cargo.lock`:**
+  - `toml` 1.x (features `parse`, `serde`, `std`) adds 5 built crates
+    (`toml`, `toml_parser`, `toml_datetime`, `serde_spanned`, `winnow`);
+    `serde` with `derive` was already in the lock (corrected at the PR 2
+    review; the first count, about 11, came from a standalone crate);
   - `globset` adds 2 (`globset`, `bstr`); its regex crates are already in
     the tree through tree-sitter.
 - **Docs:** README (rules table, a `qgate.toml` section), the crate docs.

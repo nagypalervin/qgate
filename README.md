@@ -145,6 +145,7 @@ crates/
   qgate-analyzers/  architecture, complexity, duplication, tests
   qgate-report/     terminal, JSON, SARIF, Markdown
   qgate-git/        changed files and blobs, via the `git` command
+  qgate-config/     reads qgate.toml
   qgate-cli/        the `qgate` binary
 docs/adr/               architecture decision records
 docs/journal/           notes on how AI-assisted development went
