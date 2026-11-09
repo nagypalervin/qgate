@@ -1,6 +1,12 @@
-# Spec Delta
+# architecture-analysis Specification
 
-## ADDED Requirements
+## Purpose
+
+Architecture analysis keeps the boundaries of a codebase from eroding:
+it reports the imports that a change newly introduces across a boundary
+the repository forbids in `qgate.toml`.
+
+## Requirements
 
 ### Requirement: Forbid rules
 

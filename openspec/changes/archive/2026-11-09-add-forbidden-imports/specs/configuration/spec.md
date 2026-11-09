@@ -1,5 +1,11 @@
 # Spec Delta
 
+## Purpose
+
+Configuration lets a repository tell qgate what to enforce: it defines
+where `qgate.toml` is read from and in which revision, and what happens
+when the file is missing or invalid.
+
 ## ADDED Requirements
 
 ### Requirement: Configuration from the head revision
