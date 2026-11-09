@@ -138,11 +138,12 @@ let findings = index.findings();
     candidate too, so its occurrence was recorded.
   - "and `k` more" counts the other occurrences of the first window that
     are not reported.
-- **Hash collisions** are possible in principle. Before a block is
-  reported, the tokens of its first window are compared with the
-  counterpart's. The counterpart's tokens come from the head file, which
-  is read again only for this check; that happens rarely and only for
-  reported blocks.
+- **Hash collisions** are possible in principle. *Superseded in PR 3 (see
+  Implementation Notes): two independent hashes per window, no re-read.*
+  Before a block is reported, the tokens of its first window are compared
+  with the counterpart's. The counterpart's tokens come from the head
+  file, which is read again only for this check; that happens rarely and
+  only for reported blocks.
 
 ### D5: CLI wiring
 
@@ -154,7 +155,9 @@ changed file could be analyzed:
    `parse`, then `index.add`, dropping the model at once. A file that
    cannot be parsed, or is not UTF-8, is skipped silently.
 3. The changed files' head versions are added from their models, which
-   are already parsed.
+   are already parsed. *Superseded in PR 3: `DuplicationIndex::new`
+   counts them itself; deleted files and files renamed to another
+   language are base-only inputs.*
 4. `index.findings()` joins the other findings before sorting.
 
 The two-file form never builds an index.
@@ -175,9 +178,21 @@ The two-file form never builds an index.
   - result: 1.4 s wall time and 21 MB peak memory (three runs, all within
     0.02 s); all 20 copies found.
 
-  Memory stays flat because only the changed files' windows are kept (D3).
-  Caching and parallel parsing remain the follow-ups for much larger
-  repositories.
+  - a 400-file change on the same repository: 2.4 s and 317 MB peak.
+
+  Memory does not depend on the repository size, because only the
+  changed files' windows are kept (D3), but it is high per changed token:
+  every token is a `String`, and every window a map entry. Interning
+  token texts and compacting the window maps are the follow-ups, with
+  caching and parallel parsing, before qgate meets very large pull
+  requests.
+- **[Which copy is new within one file]** Old and new are told apart by
+  counts, not by a diff. Within one file, the first occurrences by
+  position count as old, so a copy inserted *above* the block it copies is
+  reported at the old block and names the new one. The duplication is
+  real; only the side shown is wrong. → Accepted (decided at PR 3 review)
+  and stated in the spec and the README; a token diff per changed file
+  is the fix if it matters.
 - **[False positives of type-2 normalization]** Structurally identical
   but unrelated code (switch arms, test tables, configuration objects)
   can match. → Kept member names, the exclusions and the 50-token
@@ -330,3 +345,25 @@ finding, which does not fail a run by default.
     import rules live in `qgate-lang` and were checked the same way in
     PR 1. A one-place fast path (`places.len() < 2`) is an equivalent
     mutant: the original rule covers it.
+- **PR 3, review round 1:**
+  - Code moved out of a deleted file, or out of a file renamed to another
+    language, was reported as a new copy: only changed files counted as
+    "before". `Repository::deleted_files` lists regular files the head no
+    longer has (deleted, or replaced by a symlink), and the CLI feeds them
+    and the renamed-away files as base-only inputs. E2e tests cover both.
+  - A block now extends only as far as one copy continues it, and the
+    finding names a copy of the whole block (the first by path that
+    covers it), with "and k more" counting the copies of the whole block
+    that do not overlap each other. Before, a run could join windows with
+    different counterparts, name a partial copy, or count shifted views.
+  - The before totals per key are summed once in `new`. Before, each key
+    looped over every changed file, which took 31 s for 800 changed files
+    in the reviewer's measurement.
+  - A read error that closed the batch reader is fatal (`is_closed`),
+    like a git process that ended; only a single unreadable object is
+    skipped.
+  - Known limitation recorded (human decision): within one file, the
+    first occurrences count as old (see Risks).
+  - Not changed: a changed file whose base version cannot be parsed is
+    `input/unparsable` and takes no part in duplication either, as
+    "Compared files" says for files that cannot be parsed.

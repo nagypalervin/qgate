@@ -85,8 +85,7 @@ A duplicate block SHALL be reported only if the change increased its
 number of occurrences: it occurs at least twice in the head revision, and
 the changed files contain more occurrences after the change than before.
 Only occurrences the change added SHALL be reported. When every occurrence
-is new, the first by path and position SHALL count as the original. A file
-renamed from JavaScript counts its JavaScript version as before.
+is new, the first by path and position SHALL count as the original.
 
 #### Scenario: Existing duplication
 
@@ -100,17 +99,36 @@ renamed from JavaScript counts its JavaScript version as before.
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** no `duplication/duplicate-block` finding is reported
 
+#### Scenario: Copy within the change
+
+- **GIVEN** the change adds the same 60-token block to new files `src/a.ts` and `src/b.ts`
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** one finding is reported, for `src/b.ts`, naming `src/a.ts`
+
+### Requirement: What existed before
+
+The base versions of the changed files SHALL count as before, including
+files the change deletes or renames to another language, and the
+JavaScript version of a file renamed from JavaScript. Within one file, the
+first occurrences by position SHALL count as the ones that existed before.
+
+#### Scenario: Code moved out of a deleted file
+
+- **GIVEN** `src/a.ts` and `src/c.ts` share a 60-token block, and the change deletes `src/a.ts` and adds `src/b.ts` with the block and other code
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** no `duplication/duplicate-block` finding is reported
+
 #### Scenario: Renamed from JavaScript
 
 - **GIVEN** `src/util.js` shares a 60-token block with `src/a.ts`, and the change renames `src/util.js` to `src/util.ts` without other edits
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** no `duplication/duplicate-block` finding is reported
 
-#### Scenario: Copy within the change
+#### Scenario: Copy inserted above its original
 
-- **GIVEN** the change adds the same 60-token block to new files `src/a.ts` and `src/b.ts`
+- **GIVEN** `src/a.ts` holds a 60-token block, and the change inserts a copy of it near the top of the same file
 - **WHEN** the user runs `qgate check --base main`
-- **THEN** one finding is reported, for `src/b.ts`, naming `src/a.ts`
+- **THEN** one finding is reported, at the original block, naming the inserted copy (a known limitation: within a file, position decides)
 
 ### Requirement: Duplicate block finding
 

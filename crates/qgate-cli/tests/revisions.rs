@@ -1090,3 +1090,34 @@ fn renamed_from_javascript_is_not_a_new_copy() {
         );
     }
 }
+
+#[test]
+fn code_moved_out_of_a_deleted_file_is_not_a_new_copy() {
+    // a.ts and c.ts share the helper; the change deletes a.ts and adds
+    // b.ts with the helper and more code, so git sees no rename.
+    let repo = Repo::new();
+    repo.write("src/a.ts", DATE_HELPER);
+    repo.write("src/c.ts", DATE_HELPER);
+    repo.commit("base");
+    repo.remove("src/a.ts");
+    repo.write(
+        "src/b.ts",
+        format!("{}{DATE_HELPER}{}", padding(30), function("other", 1)),
+    );
+    repo.commit("move");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+}
+
+#[test]
+fn code_moved_out_of_a_file_renamed_to_another_language_is_not_a_new_copy() {
+    let repo = Repo::new();
+    repo.write("src/a.ts", DATE_HELPER);
+    repo.write("src/c.ts", DATE_HELPER);
+    repo.commit("base");
+    repo.git(&["mv", "src/a.ts", "src/a.js"]);
+    repo.write("src/b.ts", format!("{}{DATE_HELPER}", padding(30)));
+    repo.commit("move");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+}

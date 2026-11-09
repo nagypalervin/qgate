@@ -84,9 +84,11 @@ warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 
   - member names (`.getFullYear`), keywords and operators are compared;
   - comments, semicolons, imports and type annotations are ignored.
 - **Only new copies are reported.** Duplication the code base already has
-  is not; nor is code that only moved; nor a file renamed from `.js` to
-  `.ts`. When a change adds the same block twice, the first counts as the
-  original.
+  is not; nor is code that only moved, also out of a deleted file; nor a
+  file renamed from `.js` to `.ts`. When a change adds the same block
+  twice, the first counts as the original. Within one file the earlier
+  copy counts as the old one, so a copy pasted *above* its original is
+  reported at the original.
 - **A block must span at least 50 tokens**, about 5 to 8 lines. Repeated
   statements in one function count too, once the repetition is long
   enough not to overlap itself.

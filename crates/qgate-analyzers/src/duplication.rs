@@ -64,6 +64,8 @@ pub struct DuplicationIndex {
     changed: Vec<Vec<(Key, Place)>>,
     /// Per changed file and key: occurrences in the base version.
     before: HashMap<(usize, Key), usize>,
+    /// Per key: occurrences in the base versions of all changed files.
+    before_total: HashMap<Key, usize>,
     /// Per key that a changed file contains: every place in the head
     /// revision, changed files included.
     places: HashMap<Key, Vec<Place>>,
@@ -84,6 +86,7 @@ impl DuplicationIndex {
             paths: Vec::new(),
             changed: Vec::new(),
             before: HashMap::new(),
+            before_total: HashMap::new(),
             places: HashMap::new(),
             token_hash,
         };
@@ -101,7 +104,9 @@ impl DuplicationIndex {
                 by_key.entry(key).or_default().push(place);
             }
             for (key, places) in by_key {
-                index.before.insert((file, key), apart(&places).len());
+                let count = apart(&places).len();
+                index.before.insert((file, key), count);
+                *index.before_total.entry(key).or_default() += count;
             }
         }
         index
@@ -133,12 +138,11 @@ impl DuplicationIndex {
     #[must_use]
     pub fn findings(&self) -> Vec<Finding> {
         let reported = self.reported();
+        let mut lookup = Lookup::default();
         let mut findings = Vec::new();
         for (file, windows) in self.changed.iter().enumerate() {
             for (first, last) in runs(windows, &reported, file) {
-                if let Some(finding) = self.finding(file, first, last, &reported) {
-                    findings.push(finding);
-                }
+                findings.extend(self.blocks(file, first, last, &reported, &mut lookup));
             }
         }
         findings
@@ -166,9 +170,7 @@ impl DuplicationIndex {
                 in_changed += 1;
             }
             // Every changed file counts, also one the block left.
-            let before_total: usize = (0..self.changed.len())
-                .map(|file| self.before.get(&(file, *key)).copied().unwrap_or(0))
-                .sum();
+            let before_total = self.before_total.get(key).copied().unwrap_or(0);
             // How many occurrences the change added in all: code that only
             // moved between changed files adds none.
             let mut budget = in_changed.saturating_sub(before_total);
@@ -196,55 +198,87 @@ impl DuplicationIndex {
         reported
     }
 
-    /// The finding for the reported windows `first..=last` of a changed
-    /// file, naming the first other occurrence that is not reported.
-    fn finding(
+    /// The findings for a run of reported windows `first..=last` of a
+    /// changed file. A block extends only as far as one copy elsewhere
+    /// continues it, so each finding names a copy of the whole block; where
+    /// no copy continues, a new block starts.
+    fn blocks(
         &self,
         file: usize,
         first: usize,
         last: usize,
         reported: &BTreeSet<(usize, usize)>,
-    ) -> Option<Finding> {
+        lookup: &mut Lookup,
+    ) -> Vec<Finding> {
         let windows = &self.changed[file];
-        let (first_key, first_place) = windows[first];
-        let (last_key, last_place) = windows[last];
-        let mut others: Vec<&Place> = self.places[&first_key]
-            .iter()
-            // Not this occurrence, nor a shifted view of it.
-            .filter(|p| !(p.path == file && p.start.abs_diff(first_place.start) < MIN_TOKENS))
-            .filter(|p| !(p.path < self.changed.len() && reported.contains(&(p.path, p.start))))
-            .collect();
-        others.sort_by_key(|p| (&self.paths[p.path], p.first_line, p.start));
-        let counterpart = *others.first()?;
-        // Its extent: the place of the block's last window at the same
-        // offset in that file, or its first window alone.
-        let offset = last_place.start - first_place.start;
-        let counterpart_last_line = self.places[&last_key]
-            .iter()
-            .find(|p| p.path == counterpart.path && p.start == counterpart.start + offset)
-            .map_or(counterpart.last_line, |p| p.last_line);
-        let tokens = offset + MIN_TOKENS;
-        let more = match others.len() - 1 {
-            0 => String::new(),
-            k => format!(", and {k} more"),
-        };
-        Some(Finding {
-            rule: RULE.to_owned(),
-            severity: Severity::Warning,
-            message: format!(
-                "duplicates {}:{}-{} (lines {}-{}, {tokens} tokens{more})",
-                self.paths[counterpart.path],
-                counterpart.first_line,
-                counterpart_last_line,
-                first_place.first_line,
-                last_place.last_line,
-            ),
-            location: Location {
-                path: PathBuf::from(&self.paths[file]),
-                line: Some(first_place.first_line),
-            },
-            metric: None,
-        })
+        let mut findings = Vec::new();
+        let mut start = first;
+        while start <= last {
+            let (key, place) = windows[start];
+            // Copies of the first window: apart from each other and not
+            // reported. This occurrence is one of the places `apart` keeps
+            // (only kept places are reported), so the reported filter also
+            // removes it, and `apart` keeps no place overlapping it.
+            let mut copies: Vec<Place> = apart(&self.places[&key])
+                .into_iter()
+                .filter(|p| !(p.path < self.changed.len() && reported.contains(&(p.path, p.start))))
+                .collect();
+            if copies.is_empty() {
+                start += 1;
+                continue;
+            }
+            // Extend while at least one copy continues the block.
+            let mut end = start;
+            while end < last {
+                let offset = end + 1 - start;
+                let (next_key, _) = windows[end + 1];
+                let continuing: Vec<Place> = copies
+                    .iter()
+                    .copied()
+                    .filter(|c| lookup.contains(self, next_key, c.path, c.start + offset))
+                    .collect();
+                if continuing.is_empty() {
+                    break;
+                }
+                copies = continuing;
+                end += 1;
+            }
+            copies.sort_by_key(|c| (&self.paths[c.path], c.first_line, c.start));
+            let counterpart = copies[0];
+            let offset = end - start;
+            let counterpart_last_line = lookup
+                .last_line(
+                    self,
+                    windows[end].0,
+                    counterpart.path,
+                    counterpart.start + offset,
+                )
+                .unwrap_or(counterpart.last_line);
+            let more = match copies.len() - 1 {
+                0 => String::new(),
+                k => format!(", and {k} more"),
+            };
+            findings.push(Finding {
+                rule: RULE.to_owned(),
+                severity: Severity::Warning,
+                message: format!(
+                    "duplicates {}:{}-{} (lines {}-{}, {} tokens{more})",
+                    self.paths[counterpart.path],
+                    counterpart.first_line,
+                    counterpart_last_line,
+                    place.first_line,
+                    windows[end].1.last_line,
+                    offset + MIN_TOKENS,
+                ),
+                location: Location {
+                    path: PathBuf::from(&self.paths[file]),
+                    line: Some(place.first_line),
+                },
+                metric: None,
+            });
+            start = end + 1;
+        }
+        findings
     }
 
     /// Every window of `tokens` with its key and place.
@@ -284,6 +318,38 @@ impl DuplicationIndex {
             }
         }
         windows
+    }
+}
+
+/// Places of a key by (file, start), built on first use, to follow a copy
+/// window by window.
+#[derive(Default)]
+struct Lookup {
+    by_key: HashMap<Key, HashMap<(usize, usize), u32>>,
+}
+
+impl Lookup {
+    fn last_line(
+        &mut self,
+        index: &DuplicationIndex,
+        key: Key,
+        path: usize,
+        start: usize,
+    ) -> Option<u32> {
+        self.by_key
+            .entry(key)
+            .or_insert_with(|| {
+                index.places[&key]
+                    .iter()
+                    .map(|p| ((p.path, p.start), p.last_line))
+                    .collect()
+            })
+            .get(&(path, start))
+            .copied()
+    }
+
+    fn contains(&mut self, index: &DuplicationIndex, key: Key, path: usize, start: usize) -> bool {
+        self.last_line(index, key, path, start).is_some()
     }
 }
 
@@ -659,8 +725,109 @@ mod tests {
         // first without overlapping it.
         let periodic: Vec<String> = (0..100).map(|i| format!("p{}", i % 5)).collect();
         let found = run(&[("a.ts", vec![], synthetic(&periodic))], &[]);
+        // The first 50 tokens are the original; the copy starts where it
+        // no longer overlaps them.
+        assert_eq!(
+            found,
+            [(
+                "a.ts".to_owned(),
+                51,
+                "duplicates a.ts:1-50 (lines 51-100, 50 tokens)".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn shifted_views_are_not_counted_as_more_copies() {
+        // A 50-token periodic block copied from a file that holds a
+        // 60-token run of it: one copy, not three.
+        let periodic =
+            |n: usize| -> Vec<String> { (0..n).map(|i| format!("p{}", i % 5)).collect() };
+        let found = run(
+            &[("new.ts", vec![], synthetic(&periodic(50)))],
+            &[("u.ts", synthetic(&periodic(60)))],
+        );
         assert_eq!(found.len(), 1, "{found:?}");
-        assert!(found[0].2.starts_with("duplicates a.ts:1-"), "{found:?}");
+        assert!(!found[0].2.contains("more"), "{found:?}");
+    }
+
+    #[test]
+    fn a_block_names_a_copy_of_all_of_it() {
+        // New X of 70 tokens; u1 holds its first 60, u2 its last 60: no
+        // 70-token copy exists, so two blocks, each with its own copy.
+        let x = texts("x", 70);
+        assert_eq!(
+            run(
+                &[("new.ts", vec![], synthetic(&x))],
+                &[
+                    ("u1.ts", synthetic(&x[..60])),
+                    ("u2.ts", synthetic(&x[10..]))
+                ],
+            ),
+            [
+                (
+                    "new.ts".to_owned(),
+                    1,
+                    "duplicates u1.ts:1-60 (lines 1-60, 60 tokens)".to_owned()
+                ),
+                (
+                    "new.ts".to_owned(),
+                    12,
+                    "duplicates u2.ts:2-60 (lines 12-70, 59 tokens)".to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_full_copy_is_preferred_to_a_partial_one() {
+        let x = texts("x", 70);
+        assert_eq!(
+            run(
+                &[("new.ts", vec![], synthetic(&x))],
+                &[
+                    ("a_short.ts", synthetic(&x[..50])),
+                    ("b_full.ts", synthetic(&x))
+                ],
+            ),
+            [(
+                "new.ts".to_owned(),
+                1,
+                "duplicates b_full.ts:1-70 (lines 1-70, 70 tokens)".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn a_periodic_base_counts_as_one_copy() {
+        // The base holds one 60-token run of a 5-token statement; the
+        // change adds a second run far enough away: one new copy.
+        let periodic: Vec<String> = (0..60).map(|i| format!("p{}", i % 5)).collect();
+        let mut after = periodic.clone();
+        after.extend(texts("x", 3));
+        after.extend(periodic.iter().cloned());
+        let found = run(&[("a.ts", synthetic(&periodic), synthetic(&after))], &[]);
+        assert_eq!(found.len(), 1, "{found:?}");
+    }
+
+    #[test]
+    fn within_one_file_position_decides_which_copy_is_new() {
+        // A known limitation: a copy inserted above its original is
+        // reported at the original, which now comes second.
+        let x = texts("x", 60);
+        let mut before = texts("o", 20);
+        before.extend(x.iter().cloned());
+        let mut after = x.clone();
+        after.extend(texts("o", 20));
+        after.extend(x.iter().cloned());
+        assert_eq!(
+            run(&[("a.ts", synthetic(&before), synthetic(&after))], &[]),
+            [(
+                "a.ts".to_owned(),
+                81,
+                "duplicates a.ts:1-60 (lines 81-140, 60 tokens)".to_owned()
+            )]
+        );
     }
 
     #[test]
