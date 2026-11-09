@@ -79,8 +79,16 @@ skips comments. Normalization:
     same environment as `run`.
   - `BlobReader::read(&mut self, id) -> Result<Vec<u8>, GitError>`
     writes `<id>\n`, then reads `<id> <type> <size>\n`, then `<size>`
-    bytes and the trailing `\n`. A `missing` answer is an error.
-  - Dropping the reader closes stdin and waits for the process.
+    bytes and the trailing `\n`.
+  - A `missing` answer, a non-blob object or a blob above 64 MiB is an
+    error that leaves the reader in step. An answer out of step closes
+    it. When git ends, the error carries its exit status and the end of
+    its stderr.
+  - Git's stderr is drained on a thread while git runs, keeping the last
+    8 KiB.
+  - Dropping the reader closes stdin and stdout and waits for the
+    process. The drain is not joined: a process git started may still
+    hold stderr open, and the thread ends on its own.
 
 The git crate stays language-free: the CLI picks the supported paths.
 
@@ -242,3 +250,53 @@ finding, which does not fail a run by default.
   - Known exception: a namespace that holds only types keeps its skeleton
     (`export namespace $id { }`, five tokens). It is far below the
     50-token threshold.
+- **PR 2, reading the head tree:**
+  - `run` and the batch process share one `git_command` helper (same
+    environment, test isolation and spawn errors).
+  - The batch process's stderr is drained on a thread and its end kept
+    for error messages (see "PR 2, review round 2").
+  - An id that names a tree or commit is an error, but its contents are
+    read and discarded first, so the next answer starts cleanly; a test
+    reads a blob after a tree.
+  - `files_at` sorts by path explicitly, although git's tree order already
+    agrees with byte order for full paths.
+- **PR 2, review round 1:**
+  - Dropping a reader could hang if an answer was left unread: `wait()`
+    ran while stdout was still open and git was blocked writing. `close`
+    now drops stdin and stdout before waiting, so git exits on end of
+    input or on the closed output.
+  - When the process ends or a pipe fails, `read` waits for it and
+    reports its real exit status and stderr. Before, every case was
+    "failed with a signal: Broken pipe", and git's message was lost.
+  - An answer out of step (one that does not start with the requested id,
+    has a bad size, or lacks the trailing newline) closes the reader, and
+    every later `read` fails at once instead of parsing leftover bytes.
+    `<id> missing` and a non-blob object keep it in step.
+  - Tests: a 1.5 MB blob with NULs and newlines, a commit id, a repository
+    without `.git` (exit 128 and git's message), a killed process, an
+    answer out of step, and a drop with an unread 2 MB answer (with a
+    timeout, so it fails rather than hangs).
+  - `TreeFile.path` documents its lossy UTF-8, like `ChangedFile.path`.
+- **PR 2, review round 2:**
+  - Reading stderr only after git ended brought back a deadlock: with a
+    `GIT_TRACE*` setting git can write more than a pipe holds while it
+    is still answering, and then blocks. A thread now drains stderr while
+    git runs and keeps its last 8 KiB. A test reads 1,500 packed blobs
+    with `GIT_TRACE_PACK_ACCESS` and a timeout.
+  - A blob above 64 MiB is skipped (read and discarded) with an error
+    that keeps the reader in step, instead of a size-sized allocation;
+    tests use a 2 MiB limit to exceed it cheaply. PR 3 treats a read
+    error for an unchanged head file like an unparsable file: skipped.
+  - A header that is not UTF-8 is a protocol error, not an I/O error;
+    stderr is decoded lossily like `stderr_of`; `exchange` takes the open
+    pipes, so the duplicate "closed" guard is gone.
+- **PR 2, review round 3:**
+  - `Drop` no longer joins the stderr drain: a process git started (a
+    lazy fetch, an ssh helper) can inherit stderr and keep it open, which
+    made every drop wait for that process. `fail` still joins it, after
+    git has exited, because it needs the text.
+  - The drain retries on `Interrupted`; a thread that cannot be started
+    is a `GitError`, not a panic.
+  - Object sizes are parsed as `u64`, so a blob too large for `usize`
+    is skipped like any oversized one; a test reads a blob of exactly
+    the limit.
