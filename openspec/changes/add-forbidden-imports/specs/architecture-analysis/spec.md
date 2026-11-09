@@ -81,9 +81,7 @@ A pattern SHALL be a glob over `/`-separated paths, relative to the
 repository root: `*` and `?` match within one segment, `**` matches any
 number of segments, and `[...]` is a character class. A pattern without
 glob characters SHALL also match everything below it, and a pattern ending
-in `/**` SHALL also match the directory itself. Leading `./`, empty and
-`.` segments and a trailing `/` SHALL be ignored; a pattern that then
-starts with `/` or contains `..` is invalid.
+in `/**` SHALL also match the directory itself.
 
 #### Scenario: Package name
 
@@ -96,6 +94,18 @@ starts with `/` or contains `..` is invalid.
 - **GIVEN** `to = ["src/ui/**"]`
 - **WHEN** `src/domain/a.ts` imports `"../ui"`
 - **THEN** the target `src/ui` matches
+
+#### Scenario: Single segment wildcard
+
+- **GIVEN** `from = ["src/*/model.ts"]`
+- **THEN** `src/order/model.ts` matches and `src/order/sub/model.ts` does not
+
+### Requirement: Pattern spelling
+
+Once leading `./` are removed, a pattern that starts with `/` or has a
+`..` segment SHALL be invalid. Empty and `.` segments and a trailing `/`
+SHALL be ignored. Braces and `\` escapes are glob syntax and SHALL NOT be
+normalized.
 
 #### Scenario: Equivalent spellings
 
@@ -110,11 +120,6 @@ starts with `/` or contains `..` is invalid.
 - **THEN** standard error names the rule and the pattern `/src/ui/**`
 - **AND** the exit code is 2
 
-#### Scenario: Single segment wildcard
-
-- **GIVEN** `from = ["src/*/model.ts"]`
-- **THEN** `src/order/model.ts` matches and `src/order/sub/model.ts` does not
-
 ### Requirement: Only new violations are reported
 
 A violation is a file, a rule and a target. The system SHALL report a
@@ -122,7 +127,8 @@ violation of the head version of a changed file only if the base version
 of that file did not have the same violation under the same rules. For a
 renamed file the base version is checked at its old path; for a file
 renamed from JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) only the imports
-of that version count. An added file has no base version.
+of that version count, and none if it cannot be read. An added file has
+no base version.
 
 #### Scenario: Existing violation
 

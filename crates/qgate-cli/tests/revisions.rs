@@ -909,7 +909,7 @@ fn absolute_pattern_is_invalid() {
 }
 
 #[test]
-fn renamed_from_unreadable_javascript_is_unparsable() {
+fn renamed_from_unreadable_javascript_reports_no_import() {
     let repo = Repo::new();
     repo.write("qgate.toml", RULE);
     // Latin-1, not UTF-8.
@@ -924,12 +924,41 @@ fn renamed_from_unreadable_javascript_is_unparsable() {
     );
     repo.commit("migrate to TypeScript");
     let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn renamed_from_unreadable_javascript_without_configuration_is_unchanged() {
+    // As before qgate.toml existed: the functions are analyzed as new.
+    let repo = Repo::new();
+    let mut latin1 = function("big", 24).into_bytes();
+    latin1.extend_from_slice(b"// caf\xe9\n");
+    repo.write("src/util.js", latin1);
+    repo.commit("base");
+    repo.remove("src/util.js");
+    repo.write("src/util.ts", function("big", 24) + "// cafe\n");
+    repo.commit("migrate to TypeScript");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
     assert_eq!(
         stdout(&out),
-        "warning src/domain/order.ts  file not analyzed: the base version is not valid \
-         UTF-8  [input/unparsable]\n",
+        "error   src/util.ts:1  big: new function, cyclomatic complexity 25  \
+         [complexity/cyclomatic-new]\n",
         "{}",
         stderr(&out)
     );
-    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn renamed_from_another_unsupported_extension_is_added() {
+    let repo = Repo::new();
+    repo.write("qgate.toml", RULE);
+    repo.write("src/domain/order.coffee", ORDER_WITH_BUTTON);
+    repo.commit("base");
+    repo.git(&["mv", "src/domain/order.coffee", "src/domain/order.ts"]);
+    repo.commit("rename");
+    // No earlier version: the import counts as new.
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), BUTTON_FINDING, "{}", stderr(&out));
 }

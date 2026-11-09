@@ -332,3 +332,17 @@ None. Without a `qgate.toml`, behaviour is unchanged.
   - The spec states that an empty specifier has no target. The README
     lists root-absolute imports (`"/src/ui/Button"`) as not supported:
     patterns cannot start with `/`.
+- **PR 3, review round 3:**
+  - Round 2 made an unreadable JavaScript old version `input/unparsable`.
+    That changed complexity results and exit codes for repositories
+    without `qgate.toml` (an Error became a Warning), against "Missing
+    configuration". Now the file is analyzed as added, exactly as on
+    `main`, and the head's own imports stand in for the unreadable base
+    imports, so the architecture rules report none of them as new. The
+    `revision-input` delta and the architecture spec say so; e2e tests
+    cover the case with and without `qgate.toml`, and a non-JavaScript
+    rename (`.coffee`) still counts as added.
+  - The pattern wording now matches `normalize`: leading `./` are removed
+    first, then a leading `/` or a `..` segment is invalid. Braces and
+    `\` escapes are glob syntax and are not normalized. The README notes
+    that `**/ui/` does not match below `ui`.
