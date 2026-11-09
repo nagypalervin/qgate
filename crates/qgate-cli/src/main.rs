@@ -386,6 +386,20 @@ fn file_change(
                 }
             }
         }
+        // Renamed from JavaScript (a JS-to-TS migration): no earlier version
+        // of its functions, but the imports it already had are not new.
+        (Some(id), None) if file.old_path.as_deref().is_some_and(is_javascript) => {
+            let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
+            match parse_blob(Language::Tsx, bytes)? {
+                Ok(model) => FileModel {
+                    functions: Vec::new(),
+                    imports: model.imports,
+                },
+                // JavaScript the grammar cannot read (Flow, say): treated
+                // as an added file, like any other language.
+                Err(_) => FileModel::default(),
+            }
+        }
         _ => FileModel::default(),
     };
 
@@ -414,6 +428,15 @@ fn parse_blob(language: Language, bytes: Vec<u8>) -> Result<Result<FileModel, Un
         Err(ParseError::Syntax { line }) => Ok(Err(Unparsable::Syntax(line))),
         Err(ParseError::Parser { message }) => Err(format!("parser failure: {message}")),
     }
+}
+
+/// Whether a path is a JavaScript file, whose imports qgate reads when it
+/// is renamed to TypeScript (`add-forbidden-imports`, PR 3 review).
+fn is_javascript(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| matches!(ext, "js" | "jsx" | "mjs" | "cjs"))
 }
 
 /// The language of a path, from its extension.

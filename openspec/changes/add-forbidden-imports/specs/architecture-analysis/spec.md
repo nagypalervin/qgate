@@ -80,7 +80,8 @@ A pattern SHALL be a glob over `/`-separated paths, relative to the
 repository root: `*` and `?` match within one segment, `**` matches any
 number of segments, and `[...]` is a character class. A pattern without
 glob characters SHALL also match everything below it, and a pattern ending
-in `/**` SHALL also match the directory itself.
+in `/**` SHALL also match the directory itself. A leading `./` and a
+trailing `/` SHALL be ignored; a pattern starting with `/` is invalid.
 
 #### Scenario: Package name
 
@@ -94,6 +95,11 @@ in `/**` SHALL also match the directory itself.
 - **WHEN** `src/domain/a.ts` imports `"../ui"`
 - **THEN** the target `src/ui` matches
 
+#### Scenario: Equivalent spellings
+
+- **GIVEN** `from = ["./src/domain/"]`
+- **THEN** it matches `src/domain/order.ts`, like `from = ["src/domain"]`
+
 #### Scenario: Single segment wildcard
 
 - **GIVEN** `from = ["src/*/model.ts"]`
@@ -104,8 +110,9 @@ in `/**` SHALL also match the directory itself.
 A violation is a file, a rule and a target. The system SHALL report a
 violation of the head version of a changed file only if the base version
 of that file did not have the same violation under the same rules. For a
-renamed file the base version is checked at its old path; an added file
-has no base version.
+renamed file the base version is checked at its old path; for a file
+renamed from JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) only the imports
+of that version count. An added file has no base version.
 
 #### Scenario: Existing violation
 
@@ -124,6 +131,12 @@ has no base version.
 - **GIVEN** `src/app/order.ts`, which imports `"../ui/Button"`, is renamed to `src/domain/order.ts`
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** the import of `src/ui/Button` is reported
+
+#### Scenario: Renamed from JavaScript
+
+- **GIVEN** `src/domain/order.js`, which imports `"../ui/Button"`, is renamed to `src/domain/order.ts`, which also adds an import of `"../ui/Modal"`
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** only the import of `src/ui/Modal` is reported
 
 #### Scenario: Rule added in the same change
 

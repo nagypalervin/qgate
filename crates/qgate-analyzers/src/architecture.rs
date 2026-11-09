@@ -171,15 +171,19 @@ impl Analyzer for ArchitectureAnalyzer {
     }
 }
 
-/// A path as git writes it, with `/` separators.
+/// A path as git wrote it: revision mode builds every path from git's
+/// `/`-separated output.
 fn slash_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    path.to_string_lossy().into_owned()
 }
 
 /// The target of `specifier` imported by the file at `importer` (design
 /// D7): a relative specifier resolved from the importer's directory, or
 /// the specifier itself. `None` if a relative specifier leaves the root.
 fn target(importer: &str, specifier: &str) -> Option<String> {
+    if specifier.is_empty() {
+        return None;
+    }
     let relative = specifier == "."
         || specifier == ".."
         || specifier.starts_with("./")
@@ -205,14 +209,29 @@ fn target(importer: &str, specifier: &str) -> Option<String> {
 /// Compile the patterns of one side of a rule into a set (design D3).
 fn compile(rule: &str, patterns: &[String]) -> Result<GlobSet, PatternError> {
     let mut set = GlobSetBuilder::new();
-    for pattern in patterns {
+    for written in patterns {
         let error = |detail: String| PatternError {
             rule: rule.to_owned(),
-            pattern: pattern.clone(),
+            pattern: written.clone(),
             detail,
         };
+        if written.starts_with('/') {
+            return Err(error(
+                "patterns are relative to the repository root; remove the leading `/`".to_owned(),
+            ));
+        }
+        // `./src/ui/` and `src/ui` mean the same; without this, the first
+        // would silently match nothing.
+        let mut pattern = written.as_str();
+        while let Some(rest) = pattern.strip_prefix("./") {
+            pattern = rest;
+        }
+        let pattern = pattern.trim_end_matches('/');
+        if pattern.is_empty() {
+            return Err(error("the pattern is empty".to_owned()));
+        }
         let has_glob = pattern.contains(['*', '?', '[', '{']);
-        let mut globs = vec![pattern.clone()];
+        let mut globs = vec![pattern.to_owned()];
         if !has_glob {
             // `react` also matches `react/jsx-runtime`.
             globs.push(format!("{pattern}/**"));
@@ -435,6 +454,59 @@ mod tests {
             ),
             [finding(1, "imports @/ui/Button, forbidden by \"no-ui\"")]
         );
+    }
+
+    #[test]
+    fn leading_dot_slash_and_trailing_slash_are_dropped() {
+        assert!(matches("src/domain/", "src/domain/a.ts"));
+        assert!(matches("./src/ui/**", "src/ui/Button"));
+        assert!(matches("././react/", "react/jsx-runtime"));
+    }
+
+    #[test]
+    fn absolute_and_empty_patterns_are_invalid() {
+        for (pattern, detail) in [
+            ("/src/**", "remove the leading `/`"),
+            ("./", "the pattern is empty"),
+            ("", "the pattern is empty"),
+        ] {
+            let err = ArchitectureAnalyzer::new(&[rule("r", &[pattern], &["x"])])
+                .expect_err("invalid pattern");
+            assert!(err.detail.contains(detail), "{pattern:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn index_import_of_a_directory() {
+        assert_eq!(
+            run(
+                &[domain_is_pure()],
+                None,
+                "src/domain/a.ts",
+                "",
+                "import { ui } from \"../ui\";\n"
+            ),
+            [finding(
+                1,
+                "imports src/ui (\"../ui\"), forbidden by \"domain-is-pure\""
+            )]
+        );
+    }
+
+    #[test]
+    fn empty_specifier_has_no_target() {
+        assert_eq!(target("src/a.ts", ""), None);
+        let rules = [rule("r", &["**"], &["**"])];
+        assert_eq!(run(&rules, None, "src/a.ts", "", "import \"\";\n"), []);
+    }
+
+    #[test]
+    fn suffixes_and_prefixes_stay_part_of_the_target() {
+        let raw = target("src/domain/a.ts", "../ui/B?raw").expect("a target");
+        assert_eq!(raw, "src/ui/B?raw");
+        assert!(matches("src/ui/**", &raw));
+        assert!(!matches("src/ui/B", &raw));
+        assert!(!matches("fs", "node:fs"));
     }
 
     #[test]

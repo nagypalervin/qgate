@@ -88,17 +88,23 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
 
 - **Only new imports are reported.** An import the file already had in the
   base revision does not fail the check, so you can add a rule to a
-  codebase that still breaks it. Moving a file within `from` reports
-  nothing; moving it into `from` reports its forbidden imports.
+  codebase that still breaks it. A move that git detects as a rename is
+  checked against the file's old path: moving a file within `from`
+  reports nothing, moving it into `from` reports its forbidden imports. A
+  file renamed from `.js` to `.ts` keeps the imports it already had.
 - **Patterns** are globs relative to the repository root: `*` and `?` stay
   within one directory, `**` spans directories. A pattern without glob
   characters also matches everything below it (`react` matches
   `react/jsx-runtime`, not `react-dom`), and `dir/**` also matches `dir`.
+  A leading `./` and a trailing `/` are ignored; a leading `/` is an
+  error.
 - **`from`** matches the importing file's path. **`to`** matches the import
   target: a relative import (`./`, `../`) resolved to a path from the root,
   without extension (`src/ui/Button`); anything else as written
   (`react`, `@/ui/Button`). So prefer directory patterns, and list path
-  aliases too: `to = ["src/ui/**", "@/ui/**"]`.
+  aliases too: `to = ["src/ui/**", "@/ui/**"]`. Suffixes and prefixes
+  stay part of the target: `"../ui/B?raw"` is `src/ui/B?raw` (matched by
+  `src/ui/**`, not by `src/ui/B`), and `node:fs` is not `fs`.
 - **Every import counts**, `import type` and `import("...")` in a type
   included; dynamic imports and `require` count with a string literal.
 - **The file is read from the revision being checked** (`--head`, by default

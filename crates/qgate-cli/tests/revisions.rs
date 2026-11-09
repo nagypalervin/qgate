@@ -878,3 +878,32 @@ fn syntax_error_in_a_file_with_a_forbidden_import() {
     assert!(text.contains("[input/unparsable]"), "{text}");
     assert!(!text.contains("architecture/"), "{text}");
 }
+
+#[test]
+fn renamed_from_javascript_keeps_its_old_imports() {
+    let repo = Repo::new();
+    repo.write("qgate.toml", RULE);
+    repo.write("src/domain/order.js", ORDER_WITH_BUTTON);
+    repo.commit("base");
+    repo.remove("src/domain/order.js");
+    // A JS-to-TS migration that also adds one forbidden import.
+    repo.write(
+        "src/domain/order.ts",
+        format!("{ORDER_WITH_BUTTON}import {{ Modal }} from \"../ui/Modal\";\n"),
+    );
+    repo.commit("migrate to TypeScript");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(
+        stdout(&out),
+        "error   src/domain/order.ts:5  imports src/ui/Modal (\"../ui/Modal\"), forbidden by \
+         \"domain-is-pure\"  [architecture/forbidden-import]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn absolute_pattern_is_invalid() {
+    let repo = repo_with_config(&RULE.replace("src/domain/**", "/src/domain/**"));
+    assert_invalid(&repo, &["domain-is-pure", "/src/domain/**", "leading `/`"]);
+}

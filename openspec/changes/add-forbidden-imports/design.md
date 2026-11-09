@@ -246,9 +246,9 @@ None. Without a `qgate.toml`, behaviour is unchanged.
 - **PR 1, imports:**
   - Comments between call arguments are skipped when checking for "exactly
     one string literal", so `require(/* why */ "x")` counts.
-  - An empty specifier (`import ""`) is recorded as written. It matches
-    no pattern, so recording it costs nothing and keeps the rule simple:
-    every import is recorded as written.
+  - An empty specifier (`import ""`) is recorded as written by the
+    adapter. The analyzer gives it no target (corrected at the PR 3
+    review: `to = ["**"]` used to match it).
   - Imports are recorded in `Walker::enter` before any other handling, so
     a dynamic import inside a bound call or a type wrapper is still found.
 - **PR 1, review round 1:**
@@ -290,10 +290,27 @@ None. Without a `qgate.toml`, behaviour is unchanged.
   there.
 - **PR 3, targets:** a relative specifier that resolves to the repository
   root itself (`import ".."` from `src/a.ts`) has no target, like one that
-  leaves the root. Backslashes in a path are turned into `/` before
-  matching, so a path is always matched in git's form.
+  leaves the root. Paths are matched as git writes them (`/`-separated);
+  no separator conversion is needed, because only revision mode runs the
+  analyzer.
 - **PR 3, tests bite (task 3.4):** removing the base subtraction (3
   failing tests), using the head path for the base version (2), the
   `/**` directory match (1), the glob-less prefix match (1), `..`
   resolution (9), import statements in the adapter (9), and
-  `literal_separator` (1) were each caught.
+  `literal_separator` (1) were each caught. The task's "type-only import
+  form" has no separate code path: `import type` is an `import_statement`
+  like any other, so breaking import statements covers it.
+- **PR 3, review round 1 (two questions answered by the human):**
+  - Patterns: a leading `./` and a trailing `/` are dropped (`src/domain/`
+    and `./src/ui/**` used to match nothing, silently switching a rule
+    off); a pattern starting with `/` is an invalid pattern (exit 2). The
+    spec says so, with a scenario.
+  - A file renamed from JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) to
+    TypeScript is checked against the imports of its JavaScript version,
+    parsed with the TSX grammar; complexity still sees its functions as
+    new. A JS version the grammar cannot read counts as added. Before, a
+    pure JS-to-TS rename reported every existing forbidden import.
+  - `FileChange::old_path` is documented as renames only: `qgate-git`
+    passes `-M`, so copies come in as added files.
+  - The README says a move counts only when git detects the rename, and
+    that query suffixes and `node:` prefixes are matched as written.

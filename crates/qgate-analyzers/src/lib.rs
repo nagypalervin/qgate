@@ -48,8 +48,8 @@ use qgate_lang::FileModel;
 pub struct FileChange {
     /// Path of the file after the change, as findings should report it.
     pub path: PathBuf,
-    /// Path of the file before the change, if it was renamed or copied;
-    /// `None` when the path did not change or the file is new.
+    /// Path of the file before the change, if it was renamed; `None` when
+    /// the path did not change or the file is new.
     pub old_path: Option<PathBuf>,
     /// The file at the base revision.
     pub before: FileModel,
