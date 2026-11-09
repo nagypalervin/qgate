@@ -1,0 +1,16 @@
+[package]
+name = "qgate-analyzers"
+description = "Analyzers for qgate: architecture, complexity, duplication, tests."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+qgate-core.workspace = true
+qgate-lang.workspace = true
+
+[lints]
+workspace = true

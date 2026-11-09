@@ -1,0 +1,20 @@
+[package]
+name = "qgate-cli"
+description = "Detects where your codebase starts to break under fast, AI-assisted development."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "qgate"
+path = "src/main.rs"
+
+[dependencies]
+qgate-core.workspace = true
+qgate-report.workspace = true
+
+[lints]
+workspace = true

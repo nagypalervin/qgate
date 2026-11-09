@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/qgate-core",
+    "crates/qgate-lang",
+    "crates/qgate-analyzers",
+    "crates/qgate-report",
+    "crates/qgate-cli",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nagypalervin/qgate"
+authors = ["Ervin Nagypál"]
+
+[workspace.dependencies]
+qgate-core = { path = "crates/qgate-core", version = "0.0.1" }
+qgate-lang = { path = "crates/qgate-lang", version = "0.0.1" }
+qgate-analyzers = { path = "crates/qgate-analyzers", version = "0.0.1" }
+qgate-report = { path = "crates/qgate-report", version = "0.0.1" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
