@@ -6,7 +6,26 @@ describe("module level", () => {
       run();
     }
   });
+  // A bound call in an anonymous callback still hides the binding.
+  it("acts", async () => {
+    const res = await act(async () => {
+      if (b) {
+        run();
+      }
+    });
+  });
 });
+
+// So does a bound call in a static block.
+class Registry {
+  static {
+    const handler = wrap(() => {
+      if (c) {
+        run();
+      }
+    });
+  }
+}
 
 // A call without a binding: nothing names the callback.
 app.get("/", (req: Request, res: Response) => {

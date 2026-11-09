@@ -122,14 +122,25 @@ struct Bound {
     unit: Option<usize>,
 }
 
+/// What collects the decision points of the code inside a node.
+#[derive(Clone, Copy)]
+enum Scope {
+    /// The unit `functions[i]`.
+    Unit(usize),
+    /// A class body: its non-function code (field initializers) is not
+    /// measured, but a call bound to a field passes its name through.
+    ClassBody,
+    /// An anonymous function with no unit to count towards, or a static
+    /// block: not measured, and calls in it hide their binding as before.
+    Opaque,
+}
+
 struct Walker<'s> {
     source: &'s [u8],
     /// Names of the named ancestors, joined with `.` for qualified names.
     segments: Vec<String>,
-    /// Innermost scope last. `Some(i)` collects decision points into
-    /// `functions[i]`; `None` is a class body, whose non-function code
-    /// (field initializers, static blocks) is not measured.
-    scopes: Vec<Option<usize>>,
+    /// Innermost scope last; empty at module level.
+    scopes: Vec<Scope>,
     /// Units in source order (by start position).
     functions: Vec<Function>,
     /// Qualified names already given to a unit.
@@ -189,7 +200,7 @@ impl<'s> Walker<'s> {
                 self.segments.push(bound.segment.clone());
                 frame.segment = true;
                 if let (true, Some(unit)) = (FUNCTION_KINDS.contains(&kind), bound.unit) {
-                    self.scopes.push(Some(unit));
+                    self.scopes.push(Scope::Unit(unit));
                     frame.scope = true;
                 }
                 return frame;
@@ -197,8 +208,8 @@ impl<'s> Walker<'s> {
         }
 
         if FUNCTION_KINDS.contains(&kind) {
-            // Anonymous functions open nothing: their decision points go to
-            // the enclosing unit.
+            // Anonymous functions open no unit: their decision points go to
+            // the enclosing unit. Without one, they are opaque.
             if let Some((name, line)) = self.name_of(node) {
                 let segment = self.unique_segment(&name);
                 self.segments.push(segment);
@@ -209,8 +220,11 @@ impl<'s> Walker<'s> {
                     line,
                     cyclomatic: 1,
                 });
-                self.scopes.push(Some(self.functions.len() - 1));
+                self.scopes.push(Scope::Unit(self.functions.len() - 1));
                 frame.segment = true;
+                frame.scope = true;
+            } else if !self.collecting() {
+                self.scopes.push(Scope::Opaque);
                 frame.scope = true;
             }
         } else if CONTAINER_KINDS.contains(&kind) {
@@ -219,12 +233,18 @@ impl<'s> Walker<'s> {
                 frame.segment = true;
             }
         } else if kind == "class_body" {
-            self.scopes.push(None);
+            self.scopes.push(Scope::ClassBody);
             frame.scope = true;
-        } else if CALL_KINDS.contains(&kind) && !self.collecting() {
+        } else if kind == "class_static_block" {
+            self.scopes.push(Scope::Opaque);
+            frame.scope = true;
+        } else if CALL_KINDS.contains(&kind)
+            && matches!(self.scopes.last(), None | Some(Scope::ClassBody))
+        {
+            // Module level or a class field initializer only.
             frame.bound = self.enter_bound_call(node);
         } else if is_decision_point(node) {
-            if let Some(Some(index)) = self.scopes.last() {
+            if let Some(Scope::Unit(index)) = self.scopes.last() {
                 self.functions[*index].cyclomatic += 1;
             }
         }
@@ -233,7 +253,7 @@ impl<'s> Walker<'s> {
 
     /// Whether a unit collects the decision points at the current position.
     fn collecting(&self) -> bool {
-        matches!(self.scopes.last(), Some(Some(_)))
+        matches!(self.scopes.last(), Some(Scope::Unit(_)))
     }
 
     /// Start a bound call if `node` is bound to a name. The unit of the
@@ -244,8 +264,15 @@ impl<'s> Walker<'s> {
         let Some((name, line)) = self.binding_name(node) else {
             return false;
         };
-        let segment = self.unique_segment(&name);
-        let unit = passes_a_function(node).then(|| {
+        // Like a container, a call without a unit only adds a segment; a
+        // suffix is needed only for a unit whose name is taken.
+        let passes = passes_a_function(node);
+        let segment = if passes {
+            self.unique_segment(&name)
+        } else {
+            name
+        };
+        let unit = passes.then(|| {
             let mut parts = self.segments.clone();
             parts.push(segment.clone());
             let qualified = parts.join(".");
@@ -667,6 +694,12 @@ mod tests {
                 ("A.onScroll", 67, 2),
                 ("api.load", 75, 2),
                 // `plain = compute(a ?? b)` passes no function: no unit
+                ("Dup.h", 88, 2),
+                // a duplicate gets a suffix; `n ?? 1` does not count
+                ("Dup.h#2", 93, 1),
+                ("Shadow.create", 99, 1),
+                // no unit for the call, so no suffix for its segment
+                ("Shadow.create.run", 100, 1),
             ])
         );
         assert_eq!(

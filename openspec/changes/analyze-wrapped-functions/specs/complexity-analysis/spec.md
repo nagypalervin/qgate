@@ -37,12 +37,12 @@ named ancestor, except for functions that a call passes to a binding (see
 
 ### Requirement: Calls at module level do not hide the binding
 
-Where no enclosing function unit collects decision points (at module level
-or in a class field initializer), a call between a function, object literal
-or class and its binding SHALL NOT hide the binding. The value passes
-through when it is, possibly behind type wrappers, an argument of a call or
-`new` expression, the function of a call, or the operand of `await`, and
-that expression in turn passes through or is the bound value.
+At module level and in class field initializers, a call between a
+function, object literal or class and its binding SHALL NOT hide the
+binding; elsewhere it still does. A value passes through when it is,
+possibly behind type wrappers, an argument of a call or `new`, the
+function of a call, or the operand of `await`, and that expression in turn
+passes through or is the bound value.
 
 #### Scenario: Nested and member calls
 
@@ -53,6 +53,11 @@ that expression in turn passes through or is the bound value.
 
 - **WHEN** the file contains `export const Comp = connect(map)((props) => { if (a) {} });`, `const p = new Promise((resolve) => { if (b) {} });`, `const data = await retry(async () => { if (c) {} });` and `const config = (() => { if (d) {} return 1; })();`
 - **THEN** the units are `Comp`, `p`, `data` and `config`, each with complexity 2
+
+#### Scenario: Anonymous callbacks and static blocks
+
+- **WHEN** the file contains `describe("x", () => { it("y", async () => { const res = await act(async () => { if (a) {} }); }); });` and `class R { static { const h = wrap(() => { if (b) {} }); } }`
+- **THEN** no function unit is found
 
 #### Scenario: Default export
 

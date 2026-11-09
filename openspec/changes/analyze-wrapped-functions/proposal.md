@@ -13,10 +13,11 @@ configuration.
 
 ## What Changes
 
-- **One new naming rule:** where code is not measured today because no
-  enclosing function unit collects its decision points (module level, or a
-  class field initializer), a call between a value and its binding does
-  not hide the binding. Type wrappers already behave this way: `as`,
+- **One new naming rule:** at module level and in class field
+  initializers, where no enclosing function unit collects decision points,
+  a call between a value and its binding does not hide the binding.
+  Anonymous callbacks without a named ancestor (`describe`/`it` bodies)
+  and static blocks keep today's behaviour. Type wrappers already behave this way: `as`,
   `satisfies`, parentheses and `!`. The binding is a variable, class field,
   object property or default export, as today.
 - **Pass-through positions:** the name passes through:
@@ -41,7 +42,8 @@ configuration.
   `defineStore("cart", { actions: { load() {} } })` bound to `useCart`
   gives `useCart.actions.load`. Before this change it gave `actions.load`.
   This mirrors `const api = { load() {} }`, which gives `api.load`.
-- **Inside function units nothing changes.** The callback of a
+- **Inside function units nothing changes**, except in their class field
+  initializers, which collect nothing today. The callback of a
   `useCallback`, `.map` or `.reduce` still counts towards the enclosing
   function, and no existing complexity value changes.
 
@@ -58,6 +60,10 @@ configuration.
 - **Objects and classes get the binding as prefix** (option b), so a file
   with two `defineStore` calls gives two distinct names instead of
   `actions.load` and `actions.load#2`.
+- **Not inside anonymous callbacks or static blocks** (asked at PR review,
+  human chose the spec's wording). Applying the rule in `describe`/`it`
+  bodies would name units after test-local variables (`res`, `res#2`),
+  whose suffixes shift when a test is added: false findings.
 
 ### Out of scope
 
@@ -100,7 +106,14 @@ None.
   different names for methods of objects in bound calls; no interface
   changes.
 - **Users:** more findings in code that uses wrappers at module level,
-  because more functions are measured. The renamed methods cause no false
-  findings: both revisions are analyzed by the same qgate version, and no
-  baseline is stored.
+  because more functions are measured. Some existing units are renamed:
+  - methods of objects and classes in bound calls get the prefix
+    (`actions.load` becomes `useCart.actions.load`);
+  - a named function expression in a bound call takes the binding's name
+    (`const r = call(function onDone() {})` was `onDone`, is now `r`;
+    `const q = { load: wrap(function own() {}) }` was `q.own`, is now
+    `q.load`).
+
+  The renames cause no false findings: both revisions are analyzed by the
+  same qgate version, and no baseline is stored.
 - **Dependencies:** none.

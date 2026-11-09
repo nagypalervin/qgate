@@ -165,6 +165,12 @@ that passes through. In `wrap({ m() {} }, () => {...})` that would push
   including plain ones like `const x = foo(a, b)`. → It visits only
   pass-through edges, never function bodies, so its total work is linear
   in the size of the argument lists.
+- **[A unit can count only part of a chain]** In
+  `const p = fetch(u).then(a).catch(b)` only `b` passes through: `a` sits
+  in the object of a member call. So the unit `p` exists but counts `b`
+  alone, and its complexity is lower than the chain's. → Accepted with the
+  pass-through forms; `then` chains are a candidate for the same follow-up
+  as member calls.
 - **[Fewer forms than users write]** A wrapper reached through a member
   (`wrap(fn).then(...)`), an array (`compose([f, g])`) or an assignment
   (`module.exports = ...`) is still not measured. → Named in Out of scope;
@@ -196,3 +202,17 @@ rule on both revisions.
     (`make.h`). The requirement applies there, because a class field
     initializer collects nothing. So task 1.2's "already passes" held for
     `C` and `outer` only.
+- **Review round 1:**
+  - The code applied the rule wherever no unit collects, which included
+    `describe`/`it` bodies and static blocks; the spec said "module level
+    or a class field initializer". The human chose the spec. `scopes` is
+    now an enum: `Unit(i)`, `ClassBody`, and `Opaque` for an anonymous
+    function without a unit and for a static block. A bound call is only
+    recognized at module level or directly in a class body.
+  - A bound call without a unit pushes its bare name, like a container;
+    only a unit's segment is made unique. Before, `create = wrap({ run() {} })`
+    next to `static create() {}` gave `A.create#2.run`.
+  - Fixture cases added: bound calls in `describe`/`it` and in a static
+    block (`module_level.ts`), duplicate suffixes for bound-call units,
+    other arguments in a class field, and the segment without a suffix
+    (`bound_call_units.ts`).

@@ -81,3 +81,21 @@ const api = {
 
 // A call with no function, object or class: no unit.
 export const plain = compute(a ?? b);
+
+// A bound-call unit takes part in duplicate suffixes, and the other
+// arguments of a call in a class field do not count either.
+class Dup {
+  static h = wrap(() => {
+    if (a) {
+      run();
+    }
+  });
+  h = wrap(() => {}, n ?? 1);
+}
+
+// Without a function, the call only adds its name: no suffix, as for
+// `create = { run() {} }`.
+class Shadow {
+  static create() {}
+  create = wrap({ run() {} });
+}
