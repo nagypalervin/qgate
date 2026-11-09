@@ -501,13 +501,19 @@ fn unknown_base_revision() {
 #[test]
 fn unknown_head_or_option_like_base_gets_no_shallow_clone_hint() {
     let repo = feature_repo();
-    for args in [
-        ["--base", "main", "--head", "no-such"].as_slice(),
-        &["--base=-x"],
+    for (args, revision) in [
+        (
+            ["--base", "main", "--head", "no-such"].as_slice(),
+            "no-such",
+        ),
+        (&["--base=-x"], "-x"),
     ] {
         let out = repo.qgate(args);
         let err = stderr(&out);
-        assert!(err.contains("unknown revision"), "{err}");
+        assert!(
+            err.contains(&format!("unknown revision `{revision}`")),
+            "{err}"
+        );
         assert!(!err.contains("fetch-depth"), "{args:?}: {err}");
         assert_eq!(out.status.code(), Some(2));
     }

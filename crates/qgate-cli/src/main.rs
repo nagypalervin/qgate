@@ -159,16 +159,14 @@ fn check(args: &ArgMatches) -> Result<String, String> {
 /// bytes: by path as a byte string (the order git uses), then line (no line
 /// first), then rule id.
 fn sort(findings: &mut [Finding]) {
-    findings.sort_by(|a, b| {
-        let key = |f: &Finding| {
-            (
-                f.location.path.as_os_str().as_encoded_bytes().to_vec(),
-                f.location.line,
-                f.rule.clone(),
-            )
-        };
-        key(a).cmp(&key(b))
-    });
+    fn key(f: &Finding) -> (&[u8], Option<u32>, &str) {
+        (
+            f.location.path.as_os_str().as_encoded_bytes(),
+            f.location.line,
+            &f.rule,
+        )
+    }
+    findings.sort_by(|a, b| key(a).cmp(&key(b)));
 }
 
 /// Run `qgate check --base <base> --head <head>` in the repository that
