@@ -30,7 +30,8 @@ and/or a branch. Read, in this order:
    format, algorithm, behaviour the spec did not specify) is recorded in the
    change's `design.md` or proposal. Cross-cutting decisions need an ADR.
 5. **Architecture:** dependency direction `cli -> report, analyzers -> lang -> core`
-   holds; `core` has no I/O; libraries do not print or exit.
+   and `cli -> git` holds (`core` and `git` depend on nothing in the
+   workspace); `core` has no I/O; libraries do not print or exit.
 6. **Rules from CLAUDE.md:** no `unsafe`, public items documented, new
    dependencies justified, deltas rather than absolute scores, rule ids stable.
 7. **Size:** flag the PR if it mixes unrelated concerns or is too large to

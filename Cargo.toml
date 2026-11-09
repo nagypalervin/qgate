@@ -5,6 +5,7 @@ members = [
     "crates/qgate-lang",
     "crates/qgate-analyzers",
     "crates/qgate-report",
+    "crates/qgate-git",
     "crates/qgate-cli",
 ]
 
@@ -21,6 +22,7 @@ qgate-core = { path = "crates/qgate-core", version = "0.0.1" }
 qgate-lang = { path = "crates/qgate-lang", version = "0.0.1" }
 qgate-analyzers = { path = "crates/qgate-analyzers", version = "0.0.1" }
 qgate-report = { path = "crates/qgate-report", version = "0.0.1" }
+qgate-git = { path = "crates/qgate-git", version = "0.0.1" }
 
 # External
 clap = { version = "4.6", default-features = false, features = ["std", "help", "usage", "error-context"] }
