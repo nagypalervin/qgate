@@ -292,3 +292,8 @@ None. Without a `qgate.toml`, behaviour is unchanged.
   root itself (`import ".."` from `src/a.ts`) has no target, like one that
   leaves the root. Backslashes in a path are turned into `/` before
   matching, so a path is always matched in git's form.
+- **PR 3, tests bite (task 3.4):** removing the base subtraction (3
+  failing tests), using the head path for the base version (2), the
+  `/**` directory match (1), the glob-less prefix match (1), `..`
+  resolution (9), import statements in the adapter (9), and
+  `literal_separator` (1) were each caught.
