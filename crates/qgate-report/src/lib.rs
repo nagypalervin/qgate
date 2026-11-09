@@ -1,7 +1,7 @@
 //! Reporters turn findings into output.
 //!
-//! Only plain-text terminal output exists so far. JSON, SARIF and Markdown
-//! (for pull request comments) follow in M3.
+//! Only plain-text terminal output exists so far. JSON follows in M3,
+//! Markdown (for pull request comments) and SARIF in M4.
 
 use std::fmt::Write as _;
 

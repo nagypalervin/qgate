@@ -14,7 +14,7 @@
 //!
 //! Planned:
 //!
-//! - `tests`: changed code without changed tests, coverage drop (M3)
+//! - `tests`: changed code without changed tests, coverage drop (M5)
 //!
 //! ```
 //! use std::path::PathBuf;
