@@ -371,21 +371,25 @@ fn file_change(
     };
     let before = match (&file.before, old_language) {
         // Renamed from JavaScript (a JS-to-TS migration): its functions are
-        // new, but the imports it already had are not. If the JavaScript
-        // cannot be read, the head's own imports stand in, at the head's
-        // path, so no import of the file counts as new wherever it moved;
-        // complexity is as for any added file.
+        // new, but the imports and the code it already had are not. If the
+        // JavaScript cannot be read, the head's own imports and tokens
+        // stand in, at the head's path, so neither an import nor a copy of
+        // the file counts as new wherever it moved; complexity is as for
+        // any added file.
         (Some(id), None) if file.old_path.as_deref().is_some_and(is_javascript) => {
             let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
-            let imports = if let Ok(model) = parse_blob(Language::Tsx, bytes)? {
-                model.imports
+            // The code it already had is not new either: its tokens count
+            // as the base version for duplication.
+            let (imports, tokens) = if let Ok(model) = parse_blob(Language::Tsx, bytes)? {
+                (model.imports, model.tokens)
             } else {
                 old_path = None;
-                after.imports.clone()
+                (after.imports.clone(), after.tokens.clone())
             };
             FileModel {
                 functions: Vec::new(),
                 imports,
+                tokens,
             }
         }
         (Some(id), Some(old_language)) => {

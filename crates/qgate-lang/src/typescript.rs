@@ -12,7 +12,7 @@ use std::collections::HashSet;
 
 use tree_sitter::{Node, Parser};
 
-use crate::{FileModel, Function, Import, Language, ParseError};
+use crate::{FileModel, Function, Import, Language, ParseError, Token};
 
 /// Parse TypeScript or TSX source into a [`FileModel`].
 pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, ParseError> {
@@ -38,8 +38,12 @@ pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, Parse
 
     let mut walker = Walker::new(source.as_bytes());
     walker.walk(tree.root_node());
-    let (functions, imports) = walker.finish();
-    Ok(FileModel { functions, imports })
+    let (functions, imports, tokens) = walker.finish();
+    Ok(FileModel {
+        functions,
+        imports,
+        tokens,
+    })
 }
 
 /// Nodes that define a function unit, if they get a name.
@@ -104,11 +108,15 @@ const DECISION_KINDS: &[&str] = &[
 ];
 
 /// What entering a node pushed, so leaving it can pop the same.
+// Each flag is an independent undo step for `leave`, one per stack, not a
+// state; an enum or state machine would not fit.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Default)]
 struct Frame {
     segment: bool,
     scope: bool,
     bound: bool,
+    muted: bool,
 }
 
 /// A call, `new` or `await` bound to a name at module level or directly in
@@ -152,6 +160,14 @@ struct Walker<'s> {
     bound: Vec<Bound>,
     /// Imports in source order.
     imports: Vec<Import>,
+    /// Normalized tokens in source order.
+    tokens: Vec<Token>,
+    /// Whether the walk is inside a subtree that produces no tokens; the
+    /// frame of the node that opened it closes it.
+    muted: bool,
+    /// Whether the last token was a text part of a literal, so the next
+    /// one continues the same literal.
+    in_text_run: bool,
 }
 
 impl<'s> Walker<'s> {
@@ -164,6 +180,9 @@ impl<'s> Walker<'s> {
             taken: HashSet::new(),
             bound: Vec::new(),
             imports: Vec::new(),
+            tokens: Vec::new(),
+            muted: false,
+            in_text_run: false,
         }
     }
 
@@ -172,14 +191,18 @@ impl<'s> Walker<'s> {
     fn walk(&mut self, root: Node<'_>) {
         let mut cursor = root.walk();
         let mut frames = Vec::new();
+        // The ancestors of the current node, so no node has to ask
+        // tree-sitter for its parent.
+        let mut ancestors: Vec<Node<'_>> = Vec::new();
         loop {
             let node = cursor.node();
-            frames.push(self.enter(node));
+            frames.push(self.enter(node, ancestors.last().copied()));
             if TYPE_KINDS.contains(&node.kind()) {
                 // Not entered, but `import("./x").T` in a type still
                 // imports a module.
                 self.record_imports_below(node);
             } else if cursor.goto_first_child() {
+                ancestors.push(node);
                 continue;
             }
             loop {
@@ -192,14 +215,16 @@ impl<'s> Walker<'s> {
                 if !cursor.goto_parent() {
                     return;
                 }
+                ancestors.pop();
             }
         }
     }
 
-    fn enter(&mut self, node: Node<'_>) -> Frame {
+    fn enter(&mut self, node: Node<'_>, parent: Option<Node<'_>>) -> Frame {
         let kind = node.kind();
         let mut frame = Frame::default();
         self.record_import(node);
+        self.record_token(node, parent, &mut frame);
 
         // A value passed through a bound call takes the binding's name.
         if FUNCTION_KINDS.contains(&kind) || CONTAINER_KINDS.contains(&kind) {
@@ -331,6 +356,9 @@ impl<'s> Walker<'s> {
         if frame.bound {
             self.bound.pop();
         }
+        if frame.muted {
+            self.muted = false;
+        }
     }
 
     /// The name a function or container gets, and the 1-based line it
@@ -431,8 +459,57 @@ impl<'s> Walker<'s> {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
     }
 
-    fn finish(self) -> (Vec<Function>, Vec<Import>) {
-        (self.functions, self.imports)
+    fn finish(self) -> (Vec<Function>, Vec<Import>, Vec<Token>) {
+        (self.functions, self.imports, self.tokens)
+    }
+
+    /// Record the normalized token `node` is, if any (design D1 of
+    /// `add-duplicate-detection`), and mute the subtrees that produce none.
+    fn record_token(&mut self, node: Node<'_>, parent: Option<Node<'_>>, frame: &mut Frame) {
+        if self.muted {
+            return;
+        }
+        if produces_no_tokens(node, parent) {
+            self.muted = true;
+            frame.muted = true;
+            return;
+        }
+        let kind = node.kind();
+        // `is_named`: the keywords of `predefined_type` are also called
+        // `string` and `number`. They only occur in type positions, which
+        // are muted or never entered, so this is a guard, not a known case.
+        if node.is_named() && LITERAL_KINDS.contains(&kind) {
+            // One `$lit` per literal, without entering it.
+            self.push_token("$lit".to_owned(), node, false);
+            if node.child_count() > 0 {
+                self.muted = true;
+                frame.muted = true;
+            }
+        } else if node.is_named() && TEXT_PART_KINDS.contains(&kind) {
+            // A run of text parts is one literal: `\n` in a template or
+            // `&amp;` in JSX text does not add tokens.
+            if !self.in_text_run {
+                self.push_token("$lit".to_owned(), node, true);
+            }
+        } else if node.child_count() == 0 && !SKIPPED_LEAF_KINDS.contains(&kind) {
+            let text =
+                if IDENTIFIER_KINDS.contains(&kind) && !keeps_its_name(node, parent, self.source) {
+                    "$id".to_owned()
+                } else {
+                    self.text(node)
+                };
+            if !text.is_empty() {
+                self.push_token(text, node, false);
+            }
+        }
+    }
+
+    fn push_token(&mut self, text: String, node: Node<'_>, text_part: bool) {
+        self.tokens.push(Token {
+            text,
+            line: line_of(node),
+        });
+        self.in_text_run = text_part;
     }
 
     /// Record the import `node` makes, if it is one (design D4 of
@@ -515,6 +592,109 @@ fn passes_a_function(call: Node<'_>) -> bool {
         }
     }
     false
+}
+
+/// Identifier leaves, which become `$id` unless [`keeps_its_name`]. Member
+/// and property names (`property_identifier`, `private_property_identifier`)
+/// are not identifiers here and keep their text. A `type_identifier` the
+/// walk reaches names a class (`class K`), since type positions are not
+/// entered.
+const IDENTIFIER_KINDS: &[&str] = &[
+    "identifier",
+    "type_identifier",
+    "shorthand_property_identifier",
+    "shorthand_property_identifier_pattern",
+    "statement_identifier",
+];
+
+/// Literals that become one `$lit` each, without entering them.
+const LITERAL_KINDS: &[&str] = &["string", "regex", "number"];
+
+/// Text parts of a template string or of JSX text. A run of them is one
+/// literal; `${`, `}` and the code between stay.
+const TEXT_PART_KINDS: &[&str] = &[
+    "string_fragment",
+    "escape_sequence",
+    "jsx_text",
+    "html_character_reference",
+];
+
+/// Leaves that are layout, not code: comments, the shebang line and
+/// semicolons, which automatic semicolon insertion makes optional.
+const SKIPPED_LEAF_KINDS: &[&str] = &["comment", "hash_bang_line", ";"];
+
+/// Constructs that only exist for the type checker; they and everything
+/// below them produce no tokens.
+const TYPE_ONLY_KINDS: &[&str] = &[
+    "import_statement",
+    "import_alias",
+    "implements_clause",
+    "function_signature",
+    // Class method and constructor overloads; interface members are inside
+    // `TYPE_KINDS` and never entered.
+    "method_signature",
+    "abstract_method_signature",
+    "index_signature",
+    "ambient_declaration",
+];
+
+/// Whether `node` and everything below it produce no tokens: imports and
+/// `export ... from`, type-only declarations and exports, and the
+/// TypeScript-only parts of expressions and declarations (`as T`,
+/// `satisfies T`, `x!`, `let x!`, `o?`, a `this` parameter). Other
+/// type-level subtrees (`TYPE_KINDS`) are never entered by the walk.
+fn produces_no_tokens(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
+    let kind = node.kind();
+    if TYPE_ONLY_KINDS.contains(&kind) {
+        return true;
+    }
+    match kind {
+        "export_statement" => {
+            node.child_by_field_name("source").is_some()
+                || has_child_kind(node, &["type", "namespace"])
+                || node.child_by_field_name("declaration").is_some_and(|d| {
+                    TYPE_KINDS.contains(&d.kind()) || TYPE_ONLY_KINDS.contains(&d.kind())
+                })
+        }
+        "export_specifier" => has_child_kind(node, &["type"]),
+        "public_field_definition" => has_child_kind(node, &["declare", "abstract"]),
+        "required_parameter" => node
+            .child_by_field_name("pattern")
+            .is_some_and(|p| p.kind() == "this"),
+        _ => parent.is_some_and(|parent| match parent.kind() {
+            "as_expression" | "satisfies_expression" => parent
+                .named_child(0)
+                .is_some_and(|operand| operand.id() != node.id()),
+            "non_null_expression" | "variable_declarator" | "public_field_definition" => {
+                kind == "!" || (kind == "?" && parent.kind() == "public_field_definition")
+            }
+            "optional_parameter" | "method_definition" => kind == "?",
+            _ => false,
+        }),
+    }
+}
+
+/// Whether one of `node`'s direct children has one of `kinds`.
+fn has_child_kind(node: Node<'_>, kinds: &[&str]) -> bool {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .any(|c| kinds.contains(&c.kind()))
+}
+
+/// Whether an identifier keeps its text because it is not a variable: a
+/// lowercase JSX element name (`div`) or part of a namespaced JSX name
+/// (`xlink:href`).
+fn keeps_its_name(node: Node<'_>, parent: Option<Node<'_>>, source: &[u8]) -> bool {
+    let Some(parent) = parent else {
+        return false;
+    };
+    match parent.kind() {
+        "jsx_namespace_name" => true,
+        "jsx_opening_element" | "jsx_closing_element" | "jsx_self_closing_element" => node
+            .utf8_text(source)
+            .is_ok_and(|name| name.starts_with(|c: char| c.is_ascii_lowercase())),
+        _ => false,
+    }
 }
 
 /// The string literal naming the module that `node` imports, if `node` is
@@ -934,6 +1114,260 @@ mod tests {
                 specifier: "react".to_owned(),
                 line: 1,
             }]
+        );
+    }
+
+    /// The normalized token texts of `source`.
+    fn token_texts(source: &str) -> Vec<String> {
+        parse(Language::TypeScript, source)
+            .expect("parses")
+            .tokens
+            .into_iter()
+            .map(|t| t.text)
+            .collect()
+    }
+
+    #[test]
+    fn tokens_of_a_fixture_with_lines() {
+        let model = parse(
+            Language::TypeScript,
+            include_str!("../fixtures/typescript/tokens.ts"),
+        )
+        .expect("fixture parses");
+        let actual: Vec<(&str, u32)> = model
+            .tokens
+            .iter()
+            .map(|t| (t.text.as_str(), t.line))
+            .collect();
+        // Imports, `export ... from`, the interface, the type alias and
+        // the annotations produce nothing; the comment neither.
+        assert_eq!(
+            actual,
+            [
+                ("export", 10),
+                ("function", 10),
+                ("$id", 10),
+                ("(", 10),
+                ("$id", 10),
+                (")", 10),
+                ("{", 10),
+                ("const", 12),
+                ("$id", 12),
+                ("=", 12),
+                ("$id", 12),
+                (".", 12),
+                ("getFullYear", 12),
+                ("(", 12),
+                (")", 12),
+                ("return", 13),
+                ("`", 13),
+                ("${", 13),
+                ("$id", 13),
+                ("}", 13),
+                ("$lit", 13),
+                ("${", 13),
+                ("$lit", 13),
+                ("}", 13),
+                ("`", 13),
+                ("+", 13),
+                ("$lit", 13),
+                ("}", 14),
+            ]
+        );
+    }
+
+    #[test]
+    fn renamed_copy_has_the_same_tokens() {
+        assert_eq!(
+            token_texts("function fmt(d: Date) { const y = d.getFullYear(); return y + \"-\"; }"),
+            token_texts(
+                "function formatOrderDate(when: Date) { const year = when.getFullYear(); return year + \"/\"; }"
+            )
+        );
+    }
+
+    #[test]
+    fn member_names_and_keys_are_kept() {
+        assert_ne!(
+            token_texts("const y = d.getFullYear();"),
+            token_texts("const y = d.getUTCFullYear();")
+        );
+        assert_eq!(
+            token_texts("const o = { size: a, #b: c }; o?.size;"),
+            [
+                "const", "$id", "=", "{", "size", ":", "$id", ",", "#b", ":", "$id", "}", "$id",
+                "?.", "size"
+            ]
+        );
+    }
+
+    #[test]
+    fn literals_become_one_placeholder() {
+        assert_eq!(
+            token_texts("f(\"a\", 'b', 1.5, /x+/g, true, null);"),
+            [
+                "$id", "(", "$lit", ",", "$lit", ",", "$lit", ",", "$lit", ",", "true", ",",
+                "null", ")"
+            ]
+        );
+    }
+
+    #[test]
+    fn type_level_code_produces_no_tokens() {
+        // `as T`, `satisfies T`, `implements I`, `!` and `?` are TypeScript
+        // only; the expressions they wrap stay.
+        assert_eq!(
+            token_texts(
+                "const a = b as Foo<T>; const c = d satisfies Bar; class K implements I {}\n\
+                 let e = f!; let g!: number; function h(this: W, o?: number) { return o; }"
+            ),
+            [
+                "const", "$id", "=", "$id", "const", "$id", "=", "$id", "class", "$id", "{", "}",
+                "let", "$id", "=", "$id", "let", "$id", "function", "$id", "(", ",", "$id", ")",
+                "{", "return", "$id", "}"
+            ]
+        );
+        let types_only = "import type { T } from \"./t\";\n\
+                          export type { U } from \"./u\";\n\
+                          type V = T | U;\n";
+        assert_eq!(token_texts(types_only), Vec::<String>::new());
+    }
+
+    #[test]
+    fn declarations_produce_no_tokens() {
+        // What a `.d.ts` file or an overload set is made of.
+        let declarations = "export interface A { a: string }\n\
+             export type B = 1;\n\
+             export default interface F {}\n\
+             export type { T, U };\n\
+             export as namespace Lib;\n\
+             import X = N.Y;\n\
+             function f(a: string): void;\n\
+             declare const x: number;\n\
+             export declare function g(a, b): P;\n\
+             declare module \"m\" { export const y: number; }\n\
+             abstract class C { abstract m(a: string): void; declare q: number; [k: string]: X; }\n";
+        assert_eq!(
+            token_texts(declarations),
+            ["abstract", "class", "$id", "{", "}"]
+        );
+        // A type-only specifier goes; the value one stays.
+        assert_eq!(
+            token_texts("export { type W, v };"),
+            ["export", "{", ",", "$id", "}"]
+        );
+    }
+
+    #[test]
+    fn class_overloads_and_typescript_markers_produce_no_tokens() {
+        assert_eq!(
+            token_texts(
+                "class A {\n\
+                   constructor(o?: O);\n\
+                   constructor(o?: O) {}\n\
+                   m(a: string): void;\n\
+                   m(a: number): void;\n\
+                   m(a: any) { return a; }\n\
+                   n?() {}\n\
+                   c!: number;\n\
+                   static b?: number;\n\
+                 }\n\
+                 abstract class B { abstract q: number; }"
+            ),
+            [
+                "class",
+                "$id",
+                "{",
+                "constructor",
+                "(",
+                "$id",
+                ")",
+                "{",
+                "}",
+                "m",
+                "(",
+                "$id",
+                ")",
+                "{",
+                "return",
+                "$id",
+                "}",
+                "n",
+                "(",
+                ")",
+                "{",
+                "}",
+                "c",
+                "static",
+                "b",
+                "}",
+                "abstract",
+                "class",
+                "$id",
+                "{",
+                "}"
+            ]
+        );
+    }
+
+    #[test]
+    fn shebang_is_not_a_token() {
+        assert_eq!(
+            token_texts("#!/usr/bin/env node\nrun();\n"),
+            ["$id", "(", ")"]
+        );
+    }
+
+    #[test]
+    fn a_literal_is_one_token_whatever_its_content() {
+        assert_eq!(
+            token_texts("const s = `\\n\\t${a}x\\u0041`;"),
+            token_texts("const s = `ab${a}c`;")
+        );
+        let tsx = |source: &str| -> Vec<String> {
+            parse(Language::Tsx, source)
+                .expect("parses")
+                .tokens
+                .into_iter()
+                .map(|t| t.text)
+                .collect()
+        };
+        assert_eq!(
+            tsx("const q = <p>hi &amp; bye</p>;"),
+            ["const", "$id", "=", "<", "p", ">", "$lit", "</", "p", ">"]
+        );
+    }
+
+    #[test]
+    fn jsx_names() {
+        let tokens = parse(
+            Language::Tsx,
+            "const q = <div xlink:href=\"a\" onClick={go}><Button /></div>;",
+        )
+        .expect("parses")
+        .tokens
+        .into_iter()
+        .map(|t| t.text)
+        .collect::<Vec<_>>();
+        // Lowercase element names and attribute names keep their text;
+        // a component is a variable.
+        assert_eq!(
+            tokens,
+            [
+                "const", "$id", "=", "<", "div", "xlink", ":", "href", "=", "$lit", "onClick", "=",
+                "{", "$id", "}", ">", "<", "$id", "/>", "</", "div", ">"
+            ]
+        );
+    }
+
+    #[test]
+    fn shorthand_properties_patterns_and_labels_are_identifiers() {
+        assert_eq!(
+            token_texts("const { a, b: c } = o; f({ a }); outer: for (;;) { break outer; }"),
+            [
+                "const", "{", "$id", ",", "b", ":", "$id", "}", "=", "$id", "$id", "(", "{", "$id",
+                "}", ")", "$id", ":", "for", "(", ")", "{", "break", "$id", "}"
+            ]
         );
     }
 
