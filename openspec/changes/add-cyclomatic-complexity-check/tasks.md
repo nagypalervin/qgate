@@ -9,7 +9,7 @@ and `cargo test --workspace` passing.
 
 ## 1. TypeScript adapter (`qgate-lang`), PR 1
 
-- [ ] 1.1 Add `Language::Tsx` (design D5): `tsx` maps to it, `ts`/`mts`/`cts` stay `TypeScript`; update `recognizes_typescript` and verify the lang tests pass
+- [x] 1.1 Add `Language::Tsx` (design D5): `tsx` maps to it, `ts`/`mts`/`cts` stay `TypeScript`; update `recognizes_typescript` and verify the lang tests pass
 - [ ] 1.2 Add `tree-sitter` 0.26 and `tree-sitter-typescript` 0.23 to `qgate-lang` (design D6, reason in the commit message); verify `cargo build -p qgate-lang` and `cargo tree -p qgate-lang` show only the expected crates
 - [ ] 1.3 Define the public model and errors: `FileModel`, `Function { name, line, cyclomatic }`, `ParseError`, and `parse(Language, &str)`, all documented; verify clippy with `missing_docs` passes
 - [ ] 1.4 Write the decision-point fixtures (loops, switch, catch/finally, conditional expression, `&&`/`||`/`??`, logical assignment, `?.`, default values, type-level syntax) with failing tests that assert the expected complexity per spec "Decision points" and "Type-level syntax is not counted"

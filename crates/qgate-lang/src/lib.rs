@@ -9,8 +9,11 @@
 /// A language qgate knows how to analyze.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
-    /// TypeScript and TSX.
+    /// TypeScript (`.ts`, `.mts`, `.cts`).
     TypeScript,
+    /// TypeScript with JSX (`.tsx`). It needs its own grammar: in TSX,
+    /// `<T>x` is a JSX element, in plain TypeScript it is a type assertion.
+    Tsx,
 }
 
 impl Language {
@@ -18,7 +21,8 @@ impl Language {
     #[must_use]
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext {
-            "ts" | "tsx" | "mts" | "cts" => Some(Self::TypeScript),
+            "ts" | "mts" | "cts" => Some(Self::TypeScript),
+            "tsx" => Some(Self::Tsx),
             _ => None,
         }
     }
@@ -30,8 +34,14 @@ mod tests {
 
     #[test]
     fn recognizes_typescript() {
-        assert_eq!(Language::from_extension("ts"), Some(Language::TypeScript));
-        assert_eq!(Language::from_extension("tsx"), Some(Language::TypeScript));
+        for ext in ["ts", "mts", "cts"] {
+            assert_eq!(Language::from_extension(ext), Some(Language::TypeScript));
+        }
+    }
+
+    #[test]
+    fn recognizes_tsx() {
+        assert_eq!(Language::from_extension("tsx"), Some(Language::Tsx));
     }
 
     #[test]
