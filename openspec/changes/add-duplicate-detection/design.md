@@ -197,3 +197,31 @@ finding, which does not fail a run by default.
   - `Frame` has four flags now; clippy's `struct_excessive_bools` is
     allowed with a comment, because each flag is an independent undo step
     for one stack, not a state.
+- **PR 1, review round 1:**
+  - Type-level code leaked tokens. Muted now:
+    - `export interface/type`, `export type {}` and `export as namespace`;
+    - type-only specifiers, `import X = N.Y`;
+    - overload, abstract and index signatures, `declare` declarations and
+      fields;
+    - the `as`/`satisfies` keyword with its type, `x!`, `let x!`, optional
+      `?`, and a `this` parameter.
+
+    Without this, declaration files and overload sets, identical after
+    normalization, would be reported as duplicates. The spec has a
+    separate requirement, "Code without tokens", with a scenario for
+    declaration files.
+  - A literal is one `$lit` whatever its content. Anonymous keyword leaves
+    named `string`/`number` (in `predefined_type`) are no longer taken for
+    literals, and a run of text parts (`\n` escapes, `&amp;` in JSX text)
+    is one token.
+  - Semicolons are dropped with comments and the shebang line: automatic
+    semicolon insertion makes them layout, so `a = 1` and `a = 1;` match.
+  - Lowercase JSX element names (`div`) and namespaced JSX names
+    (`xlink:href`) keep their text, like attribute names; components
+    (`Button`) are variables. The spec lists the kept names.
+  - The walk passes each node's parent along, instead of calling
+    `Node::parent()`, which walks down from the root.
+  - The leftover comma of a muted `this` parameter (`( , $id )`) is
+    accepted: it is the same in every copy.
+  - Task 3.2 now includes the JS-to-TS rename, also with unreadable
+    JavaScript, and the spec states that rule.

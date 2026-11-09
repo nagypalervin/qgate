@@ -10,12 +10,12 @@ variables, and names an existing copy so the change can reuse it instead.
 
 ### Requirement: Normalized tokens
 
-The system SHALL compare code as normalized tokens. Comments and layout
-SHALL be ignored; identifiers SHALL become one placeholder and literals
-another, except member names after `.` or `?.` and object property keys,
-which SHALL be kept, as SHALL keywords, operators and punctuation. Import
-declarations, `export ... from` declarations and type-level code SHALL
-produce no tokens.
+The system SHALL compare code as normalized tokens. Comments, semicolons
+and layout SHALL be ignored. Identifiers SHALL become one placeholder and
+each literal another, one per literal whatever its content. Names that are
+not variables SHALL be kept: member names after `.` or `?.`, object keys,
+class and enum member names, JSX attribute names and lowercase JSX element
+names, as SHALL keywords, operators and punctuation.
 
 #### Scenario: Renamed copy
 
@@ -28,10 +28,23 @@ produce no tokens.
 - **GIVEN** two functions that differ only in calling `.getFullYear()` and `.getUTCFullYear()`
 - **THEN** their normalized tokens differ
 
+### Requirement: Code without tokens
+
+Import declarations, `export ... from` declarations and type-level code
+SHALL produce no tokens. Type-level code includes type annotations, type
+and interface declarations, overload and abstract signatures, index
+signatures, `declare` declarations, type-only exports, and the `as T`,
+`satisfies T`, `x!`, optional `?` and `this` parameter syntax.
+
 #### Scenario: Imports and types are not compared
 
 - **GIVEN** two files that share only a long list of `import` declarations and an identical `interface`
 - **THEN** no tokens are compared for them and no duplicate is found
+
+#### Scenario: Declaration files
+
+- **GIVEN** two declaration files, each with dozens of `export interface` and `export declare function` declarations
+- **THEN** they produce no tokens and no duplicate is found
 
 ### Requirement: Compared files
 
@@ -70,7 +83,8 @@ A duplicate block SHALL be reported only if the change increased its
 number of occurrences: it occurs at least twice in the head revision, and
 the changed files contain more occurrences after the change than before.
 Only occurrences the change added SHALL be reported. When every occurrence
-is new, the first by path and position SHALL count as the original.
+is new, the first by path and position SHALL count as the original. A file
+renamed from JavaScript counts its JavaScript version as before.
 
 #### Scenario: Existing duplication
 
@@ -81,6 +95,12 @@ is new, the first by path and position SHALL count as the original.
 #### Scenario: Moved code
 
 - **GIVEN** the change moves a 60-token block from `src/a.ts` into `src/b.ts`, and no other copy exists
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** no `duplication/duplicate-block` finding is reported
+
+#### Scenario: Renamed from JavaScript
+
+- **GIVEN** `src/util.js` shares a 60-token block with `src/a.ts`, and the change renames `src/util.js` to `src/util.ts` without other edits
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** no `duplication/duplicate-block` finding is reported
 
