@@ -39,7 +39,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-CI runs the same checks with warnings as errors.
+CI runs the same checks with warnings as errors. The pre-commit hook in
+`.githooks/` runs them too once enabled (`git config core.hooksPath
+.githooks`, see README "Building"); do not bypass it with `--no-verify`.
 
 ## Conventions
 

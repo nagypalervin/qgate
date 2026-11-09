@@ -165,6 +165,15 @@ cargo test --workspace
 cargo run -p qgate-cli -- --version
 ```
 
+To run the CI checks (format, clippy, tests) before every commit, enable
+the repository's hook once per clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+`git commit --no-verify` skips it for a work-in-progress commit.
+
 ## About
 
 A personal open source project by [Ervin Nagypál](https://nagypalervin.hu/),

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Run the checks from CLAUDE.md before every commit, so a commit cannot
+# follow a failed step. Enable once per clone:
+#
+#     git config core.hooksPath .githooks
+#
+# Skip for a work-in-progress commit with `git commit --no-verify`.
+# The checks see the working tree, not only what is staged.
+set -eu
+
+echo "pre-commit: cargo fmt --check" >&2
+cargo fmt --all -- --check
+
+echo "pre-commit: cargo clippy" >&2
+cargo clippy --quiet --workspace --all-targets -- -D warnings
+
+echo "pre-commit: cargo test" >&2
+cargo test --quiet --workspace
