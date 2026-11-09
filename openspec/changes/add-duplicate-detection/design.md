@@ -86,8 +86,9 @@ skips comments. Normalization:
     its stderr.
   - Git's stderr is drained on a thread while git runs, keeping the last
     8 KiB.
-  - Dropping the reader closes stdin and stdout, waits for the process
-    and joins the drain.
+  - Dropping the reader closes stdin and stdout and waits for the
+    process. The drain is not joined: a process git started may still
+    hold stderr open, and the thread ends on its own.
 
 The git crate stays language-free: the CLI picks the supported paths.
 
@@ -289,3 +290,13 @@ finding, which does not fail a run by default.
   - A header that is not UTF-8 is a protocol error, not an I/O error;
     stderr is decoded lossily like `stderr_of`; `exchange` takes the open
     pipes, so the duplicate "closed" guard is gone.
+- **PR 2, review round 3:**
+  - `Drop` no longer joins the stderr drain: a process git started (a
+    lazy fetch, an ssh helper) can inherit stderr and keep it open, which
+    made every drop wait for that process. `fail` still joins it, after
+    git has exited, because it needs the text.
+  - The drain retries on `Interrupted`; a thread that cannot be started
+    is a `GitError`, not a panic.
+  - Object sizes are parsed as `u64`, so a blob too large for `usize`
+    is skipped like any oversized one; a test reads a blob of exactly
+    the limit.

@@ -193,27 +193,32 @@ impl BlobReader {
         }
         let (kind, size) = match fields[..] {
             [_, "missing"] => return Ok(Err(format!("`{}` names no object", id.as_str()))),
-            [_, kind, size] => match size.parse::<usize>() {
+            // `u64`, so a blob too large for `usize` is skipped like any
+            // other oversized one.
+            [_, kind, size] => match size.parse::<u64>() {
                 Ok(size) => (kind, size),
                 Err(_) => return Err(Broken::Protocol(format!("bad size in `{header}`"))),
             },
             _ => return Err(Broken::Protocol(format!("unexpected answer `{header}`"))),
         };
-        if kind != "blob" || size > MAX_BLOB_SIZE {
-            // Skip the object and its newline without keeping it, so the
-            // next answer starts cleanly.
-            let skip = u64::try_from(size).unwrap_or(u64::MAX).saturating_add(1);
-            let skipped = std::io::copy(&mut stdout.by_ref().take(skip), &mut std::io::sink())
-                .map_err(Broken::Io)?;
-            if skipped < skip {
-                return Err(Broken::Io(ErrorKind::UnexpectedEof.into()));
+        let size = match usize::try_from(size) {
+            Ok(size) if kind == "blob" && size <= MAX_BLOB_SIZE => size,
+            _ => {
+                // Skip the object and its newline without keeping it, so
+                // the next answer starts cleanly.
+                let skip = size.saturating_add(1);
+                let skipped = std::io::copy(&mut stdout.by_ref().take(skip), &mut std::io::sink())
+                    .map_err(Broken::Io)?;
+                if skipped < skip {
+                    return Err(Broken::Io(ErrorKind::UnexpectedEof.into()));
+                }
+                return Ok(Err(if kind == "blob" {
+                    format!("`{}` is larger than {MAX_BLOB_SIZE} bytes", id.as_str())
+                } else {
+                    format!("`{}` is a {kind}, not a blob", id.as_str())
+                }));
             }
-            return Ok(Err(if kind == "blob" {
-                format!("`{}` is larger than {MAX_BLOB_SIZE} bytes", id.as_str())
-            } else {
-                format!("`{}` is a {kind}, not a blob", id.as_str())
-            }));
-        }
+        };
         let mut contents = vec![0; size + 1];
         stdout.read_exact(&mut contents).map_err(Broken::Io)?;
         // Each object ends with a newline that is not part of it.
@@ -280,31 +285,36 @@ impl BlobReader {
 impl Drop for BlobReader {
     fn drop(&mut self) {
         self.close();
-        // Wait so no zombie process remains; the stderr drain then ends.
+        // Wait so no zombie process remains. The stderr drain is not
+        // joined: a process git started may still hold stderr open, and
+        // the thread ends on its own once nobody does.
         let _ = self.child.wait();
-        if let Some(drain) = self.stderr.take() {
-            let _ = drain.join();
-        }
     }
 }
 
 /// Read `stderr` to its end on its own thread, keeping the last
 /// [`STDERR_KEPT`] bytes.
-fn drain_stderr(mut stderr: ChildStderr) -> JoinHandle<Vec<u8>> {
-    std::thread::spawn(move || {
-        let mut kept = Vec::new();
-        let mut chunk = [0; 4096];
-        while let Ok(n) = stderr.read(&mut chunk) {
-            if n == 0 {
-                break;
+fn drain_stderr(mut stderr: ChildStderr) -> std::io::Result<JoinHandle<Vec<u8>>> {
+    std::thread::Builder::new()
+        .name("git-stderr".to_owned())
+        .spawn(move || {
+            let mut kept = Vec::new();
+            let mut chunk = [0; 4096];
+            loop {
+                match stderr.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        kept.extend_from_slice(&chunk[..n]);
+                        if kept.len() > STDERR_KEPT {
+                            kept.drain(..kept.len() - STDERR_KEPT);
+                        }
+                    }
+                    Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                    Err(_) => break,
+                }
             }
-            kept.extend_from_slice(&chunk[..n]);
-            if kept.len() > STDERR_KEPT {
-                kept.drain(..kept.len() - STDERR_KEPT);
-            }
-        }
-        kept
-    })
+            kept
+        })
 }
 
 /// Why a git operation failed.
@@ -576,7 +586,14 @@ impl Repository {
             .spawn()
             .map_err(|e| spawn_error(&self.dir, &BATCH_ARGS, &e))?;
         let stdin = child.stdin.take();
-        let stderr = child.stderr.take().map(drain_stderr);
+        let stderr = match child.stderr.take().map(drain_stderr).transpose() {
+            Ok(stderr) => stderr,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(spawn_error(&self.dir, &BATCH_ARGS, &e));
+            }
+        };
         let stdout = child.stdout.take().map(BufReader::new);
         if stdout.is_some() {
             Ok(BlobReader {
@@ -1378,10 +1395,19 @@ mod tests {
     fn a_blob_above_the_limit_is_skipped_and_the_reader_goes_on() {
         let repo = TestRepo::new();
         repo.write("huge.bin", vec![b'x'; MAX_BLOB_SIZE + 1]);
+        repo.write("limit.bin", vec![b'y'; MAX_BLOB_SIZE]);
         repo.write("a.ts", "a");
         repo.commit("base");
         let found = Repository::discover(&repo.dir).expect("a repository");
         let mut reader = found.blob_reader().expect("reader");
+        // Exactly at the limit is still read.
+        assert_eq!(
+            reader
+                .read(&blob(&repo, "HEAD", "limit.bin"))
+                .expect("read")
+                .len(),
+            MAX_BLOB_SIZE
+        );
         match reader.read(&blob(&repo, "HEAD", "huge.bin")) {
             Err(GitError::UnexpectedOutput { detail, .. }) => {
                 assert!(detail.contains("larger than"), "{detail}");
