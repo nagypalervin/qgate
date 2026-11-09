@@ -203,3 +203,22 @@ None. The option is new and the default is unchanged.
 
 - Should a later version warn when the working tree's `qgate.toml` differs
   from `HEAD`'s? It can be added without changing this design (Risks).
+
+## Implementation Notes
+
+- **The snapshot is its own module**, `crates/qgate-git/src/worktree.rs`,
+  as `lib.rs` already has 1,600 lines. It adds an `impl Repository` block
+  and reuses the crate's private helpers (`resolve`, `git_command`).
+- **`add.ignoreErrors=false`** joins `core.hooksPath=/dev/null` on every
+  snapshot command. Otherwise a user's `add.ignoreErrors=true` would turn
+  an unreadable file into a file silently missing from the check, against
+  the spec's "Unreadable file in the working tree".
+- **The fixed date is `@0 +0000`**, git's raw format for the epoch, so no
+  date parsing depends on the locale.
+- **A stale private index is removed before use.** A killed run can leave
+  `qgate-index-<pid>-<n>` and its `.lock`, and a later process can get the
+  same pid. A leftover `.lock` would otherwise make `git add` fail.
+- **The hook test writes its markers to an absolute path.** Git does not
+  export `GIT_DIR` to hooks of a plain `.git` repository. The test also
+  shows that a plain `git add` does run `post-index-change` there, so the
+  test would see the hook if the snapshot ran it.

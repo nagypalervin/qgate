@@ -13,7 +13,7 @@ Commit messages and PR bodies are written to files first.
 
 ## 1. Working tree snapshot in qgate-git (PR 1)
 
-- [ ] 1.1 Write failing tests in `crates/qgate-git/src/lib.rs`, using `TestRepo`, for design D1 and D2:
+- [x] 1.1 Write failing tests in `crates/qgate-git/src/lib.rs`, using `TestRepo`, for design D1 and D2:
   - **Content:** `worktree_snapshot` followed by `changes(base, snapshot)` reports:
     - an unstaged edit;
     - a staged-then-edited file, with its disk contents;
@@ -33,7 +33,7 @@ Commit messages and PR bodies are written to files first.
     - with `commit.gpgSign=true` and no identity configured, the snapshot still succeeds.
 
   Verify the tests fail.
-- [ ] 1.2 Implement `Repository::worktree_snapshot`, the private index guard and `GitError::WorkTree` (D1, D2, D5), without new dependencies; verify the 1.1 tests pass and every existing `qgate-git` test passes unchanged
+- [x] 1.2 Implement `Repository::worktree_snapshot`, the private index guard and `GitError::WorkTree` (D1, D2, D5), without new dependencies; verify the 1.1 tests pass and every existing `qgate-git` test passes unchanged
 - [ ] 1.3 Check that the tests bite. Break each of these, one at a time, and confirm a test fails for each:
   - the index copy (start from `read-tree` only);
   - `-A` (use plain `add -u`);

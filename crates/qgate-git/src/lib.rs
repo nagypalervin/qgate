@@ -363,6 +363,12 @@ pub enum GitError {
         /// The revision as the caller gave it.
         revision: String,
     },
+    /// Git could not read the working tree into a snapshot, for example
+    /// because a file that is not ignored cannot be read.
+    WorkTree {
+        /// What went wrong, with git's own message.
+        detail: String,
+    },
     /// Any other failure of a git command.
     Command {
         /// The arguments passed to `git`.
@@ -393,6 +399,7 @@ impl fmt::Display for GitError {
                     args.join(" ")
                 )
             }
+            Self::WorkTree { detail } => write!(f, "cannot read the working tree: {detail}"),
             Self::Command {
                 args,
                 status,
@@ -851,6 +858,8 @@ fn command_error(args: &[&str], out: &Output) -> GitError {
         stderr: stderr_of(out),
     }
 }
+
+mod worktree;
 
 #[cfg(test)]
 mod test_support;
