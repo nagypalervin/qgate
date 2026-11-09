@@ -908,33 +908,62 @@ fn absolute_pattern_is_invalid() {
     assert_invalid(&repo, &["domain-is-pure", "/src/domain/**", "leading `/`"]);
 }
 
-#[test]
-fn renamed_from_unreadable_javascript_reports_no_import() {
+/// `contents` with a Latin-1 comment, so it is not valid UTF-8.
+fn latin1(contents: &str) -> Vec<u8> {
+    let mut bytes = contents.as_bytes().to_vec();
+    bytes.extend_from_slice(b"// caf\xe9\n");
+    bytes
+}
+
+/// Rename the unreadable JavaScript `old` to `new` with `contents` (plus
+/// a comment), under the forbid rule, and run `qgate check --base HEAD~1`.
+fn rename_unreadable_javascript(old: &str, new: &str, contents: &str) -> Output {
     let repo = Repo::new();
     repo.write("qgate.toml", RULE);
-    // Latin-1, not UTF-8.
-    let mut latin1 = ORDER_WITH_BUTTON.as_bytes().to_vec();
-    latin1.extend_from_slice(b"// caf\xe9\n");
-    repo.write("src/domain/order.js", latin1);
+    repo.write(old, latin1(contents));
     repo.commit("base");
-    repo.remove("src/domain/order.js");
-    repo.write(
-        "src/domain/order.ts",
-        format!("{ORDER_WITH_BUTTON}// cafe\n"),
-    );
+    repo.remove(old);
+    repo.write(new, format!("{contents}// cafe\n"));
     repo.commit("migrate to TypeScript");
-    let out = repo.qgate(&["--base", "HEAD~1"]);
+    repo.qgate(&["--base", "HEAD~1"])
+}
+
+#[test]
+fn renamed_from_unreadable_javascript_reports_no_import() {
+    // Functions are new as for any added file; no import counts as new.
+    let contents = format!("{ORDER_WITH_BUTTON}{}", function("big", 11));
+    let out = rename_unreadable_javascript("src/domain/order.js", "src/domain/order.ts", &contents);
+    assert_eq!(
+        stdout(&out),
+        "warning src/domain/order.ts:5  big: new function, cyclomatic complexity 12  \
+         [complexity/cyclomatic-new]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn unreadable_javascript_moved_to_another_directory_reports_no_import() {
+    let out = rename_unreadable_javascript(
+        "src/domain/order.js",
+        "src/domain/sales/order.ts",
+        &ORDER_WITH_BUTTON.replace("../ui/Button", "../../ui/Button"),
+    );
     assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
-    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn unreadable_javascript_moved_into_the_domain_reports_no_import() {
+    let out =
+        rename_unreadable_javascript("src/app/order.js", "src/domain/order.ts", ORDER_WITH_BUTTON);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
 }
 
 #[test]
 fn renamed_from_unreadable_javascript_without_configuration_is_unchanged() {
     // As before qgate.toml existed: the functions are analyzed as new.
     let repo = Repo::new();
-    let mut latin1 = function("big", 24).into_bytes();
-    latin1.extend_from_slice(b"// caf\xe9\n");
-    repo.write("src/util.js", latin1);
+    repo.write("src/util.js", latin1(&function("big", 24)));
     repo.commit("base");
     repo.remove("src/util.js");
     repo.write("src/util.ts", function("big", 24) + "// cafe\n");
@@ -954,11 +983,20 @@ fn renamed_from_unreadable_javascript_without_configuration_is_unchanged() {
 fn renamed_from_another_unsupported_extension_is_added() {
     let repo = Repo::new();
     repo.write("qgate.toml", RULE);
-    repo.write("src/domain/order.coffee", ORDER_WITH_BUTTON);
+    let contents = format!("{ORDER_WITH_BUTTON}{}", function("big", 11));
+    repo.write("src/domain/order.coffee", &contents);
     repo.commit("base");
     repo.git(&["mv", "src/domain/order.coffee", "src/domain/order.ts"]);
     repo.commit("rename");
-    // No earlier version: the import counts as new.
+    // No earlier version: the import and the function are new.
     let out = repo.qgate(&["--base", "HEAD~1"]);
-    assert_eq!(stdout(&out), BUTTON_FINDING, "{}", stderr(&out));
+    assert_eq!(
+        stdout(&out),
+        format!(
+            "{BUTTON_FINDING}warning src/domain/order.ts:5  big: new function, cyclomatic \
+             complexity 12  [complexity/cyclomatic-new]\n"
+        ),
+        "{}",
+        stderr(&out)
+    );
 }

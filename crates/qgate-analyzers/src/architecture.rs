@@ -250,6 +250,10 @@ fn normalize(pattern: &str) -> Result<String, &'static str> {
     if rest.starts_with('/') {
         return Err("patterns are relative to the repository root; remove the leading `/`");
     }
+    // Braces and escapes keep their glob meaning: no further rewriting.
+    if rest.contains(['{', '\\']) {
+        return Ok(rest.to_owned());
+    }
     let mut segments = Vec::new();
     for segment in rest.split('/') {
         match segment {
@@ -489,6 +493,17 @@ mod tests {
                 "imports src/ui/Button (\"../ui/Button\"), forbidden by \"domain-is-pure\""
             )]
         );
+    }
+
+    #[test]
+    fn braces_and_escapes_keep_their_glob_meaning() {
+        assert!(matches("src/{ui,infra}/**", "src/infra"));
+        assert!(matches("src/{ui,infra}/**", "src/ui/Button"));
+        assert!(!matches("src/{ui,infra}/**", "src/app/x"));
+        assert!(matches("src/\\*", "src/*"));
+        assert!(!matches("src/\\*", "src/x"));
+        // Not rewritten inside braces.
+        assert_eq!(normalize("src/{a//b,c}").as_deref(), Ok("src/{a//b,c}"));
     }
 
     #[test]

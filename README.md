@@ -92,7 +92,8 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
   checked against the file's old path: moving a file within `from`
   reports nothing, moving it into `from` reports its forbidden imports. A
   file renamed from `.js` to `.ts` keeps the imports it already had (if the
-  old JavaScript cannot be read, none of its imports counts as new).
+  old JavaScript cannot be read, none of its imports counts as new,
+  wherever the file moved).
 - **Patterns** are globs relative to the repository root: `*` and `?` stay
   within one directory, `**` spans directories. A pattern without glob
   characters also matches everything below it (`react` matches
@@ -101,7 +102,8 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
   (`./src//ui/` is `src/ui`); a pattern that starts with `/` (after any
   `./`) or has a `..` segment is an error. A trailing `/` does not make a
   glob match below it: write `**/ui/**`, not `**/ui/`. Braces (`{a,b}`)
-  and `\` escapes are glob syntax.
+  and `\` escapes are glob syntax; a pattern using them is not rewritten
+  beyond a leading `./`.
 - **`from`** matches the importing file's path. **`to`** matches the import
   target: a relative import (`./`, `../`) resolved to a path from the root,
   without extension (`src/ui/Button`); anything else as written

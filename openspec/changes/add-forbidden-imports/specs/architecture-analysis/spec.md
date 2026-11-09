@@ -104,8 +104,8 @@ in `/**` SHALL also match the directory itself.
 
 Once leading `./` are removed, a pattern that starts with `/` or has a
 `..` segment SHALL be invalid. Empty and `.` segments and a trailing `/`
-SHALL be ignored. Braces and `\` escapes are glob syntax and SHALL NOT be
-normalized.
+SHALL be ignored, except in a pattern with braces or a `\` escape, which
+keeps its glob meaning and is not rewritten further.
 
 #### Scenario: Equivalent spellings
 
@@ -127,8 +127,8 @@ violation of the head version of a changed file only if the base version
 of that file did not have the same violation under the same rules. For a
 renamed file the base version is checked at its old path; for a file
 renamed from JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) only the imports
-of that version count, and none if it cannot be read. An added file has
-no base version.
+of that version count; if it cannot be read, no import of the file is new,
+wherever it moved. An added file has no base version.
 
 #### Scenario: Existing violation
 

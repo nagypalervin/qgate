@@ -364,6 +364,7 @@ fn file_change(
 
     // An added file, or one renamed from a language qgate does not read,
     // has no earlier version of its code: every function in it is new.
+    let mut old_path = file.old_path.as_ref().map(PathBuf::from);
     let old_language = match &file.old_path {
         Some(old) => language_of(old),
         None => Some(language),
@@ -371,13 +372,16 @@ fn file_change(
     let before = match (&file.before, old_language) {
         // Renamed from JavaScript (a JS-to-TS migration): its functions are
         // new, but the imports it already had are not. If the JavaScript
-        // cannot be read, the head's own imports stand in, so the rename
-        // reports no import as new; complexity is as for any added file.
+        // cannot be read, the head's own imports stand in, at the head's
+        // path, so no import of the file counts as new wherever it moved;
+        // complexity is as for any added file.
         (Some(id), None) if file.old_path.as_deref().is_some_and(is_javascript) => {
             let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
-            let imports = match parse_blob(Language::Tsx, bytes)? {
-                Ok(model) => model.imports,
-                Err(_) => after.imports.clone(),
+            let imports = if let Ok(model) = parse_blob(Language::Tsx, bytes)? {
+                model.imports
+            } else {
+                old_path = None;
+                after.imports.clone()
             };
             FileModel {
                 functions: Vec::new(),
@@ -406,7 +410,7 @@ fn file_change(
 
     Ok(Ok(FileChange {
         path: PathBuf::from(&file.path),
-        old_path: file.old_path.as_ref().map(PathBuf::from),
+        old_path,
         before,
         after,
     }))

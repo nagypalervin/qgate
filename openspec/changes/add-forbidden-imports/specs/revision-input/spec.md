@@ -9,7 +9,7 @@ the old path, and findings SHALL use the new path. If the old path has no
 supported extension, the file SHALL be treated as added, except that a
 JavaScript version (`.js`, `.jsx`, `.mjs`, `.cjs`) supplies its imports
 for the architecture rules; if that version cannot be read, no import of
-the file counts as new.
+the file counts as new, wherever it moved.
 
 #### Scenario: Renamed and modified
 

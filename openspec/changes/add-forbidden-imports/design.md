@@ -346,3 +346,16 @@ None. Without a `qgate.toml`, behaviour is unchanged.
     first, then a leading `/` or a `..` segment is invalid. Braces and
     `\` escapes are glob syntax and are not normalized. The README notes
     that `**/ui/` does not match below `ui`.
+- **PR 3, review round 4:**
+  - The stand-in imports for an unreadable JavaScript base were resolved
+    against the old path, so a rename that also changed directories
+    reported its existing imports as new. The base is now evaluated at
+    the head path (`old_path` is `None` in that case), so no import of
+    such a file is new, wherever it moved, also into `from`. Both spec
+    deltas say so; e2e tests cover a move within and into the domain.
+  - A pattern with braces or a `\` escape is not rewritten beyond a
+    leading `./` (before, `src/{a//b,c}` was rewritten inside the braces);
+    tests pin `src/{ui,infra}/**` and `src/\*`.
+  - Tests now check both THENs of the rename scenarios (functions new,
+    and the import findings) for `.coffee` and for unreadable JavaScript
+    with a rule.
