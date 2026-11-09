@@ -2,8 +2,32 @@
 
 **Detects where your codebase starts to break under fast, AI-assisted development.**
 
-> Status: early skeleton. Nothing to run yet beyond `qgate --version`.
-> Follow the [roadmap](#roadmap) below.
+> Status: early. `qgate check` compares two versions of one TypeScript
+> file for cyclomatic complexity; git revisions and more analyzers follow
+> the [roadmap](#roadmap) below.
+
+## Try it
+
+```sh
+cargo run -q -p qgate-cli -- check \
+  crates/qgate-cli/tests/fixtures/old/orders.ts \
+  crates/qgate-cli/tests/fixtures/src/orders.ts
+```
+
+```
+error   crates/qgate-cli/tests/fixtures/src/orders.ts:42  OrderService.process: cyclomatic complexity 3 -> 9 (+6)  [complexity/cyclomatic-increase]
+```
+
+`qgate check <before> <after>` accepts `.ts`, `.mts`, `.cts` and `.tsx`
+files and reports, per function:
+
+| Rule | Reported when | Warning | Error |
+|---|---|---|---|
+| `complexity/cyclomatic-increase` | an existing function got more complex | +1 to +4 | +5 or more |
+| `complexity/cyclomatic-new` | a new function is already complex | 11 to 20 | above 20 |
+
+It exits with `0` when the analysis ran (findings do not fail it yet) and
+`2` for invalid input, such as an unsupported file or a syntax error.
 
 ## Why
 
@@ -70,7 +94,8 @@ openspec/               specs and changes (OpenSpec workflow, see CLAUDE.md)
 
 ## Building
 
-Requires Rust 1.85 or newer.
+Requires Rust 1.85 or newer and a C compiler (tree-sitter compiles its
+grammars from C at build time).
 
 ```sh
 cargo build

@@ -36,3 +36,12 @@ jobs:
 
       - name: Smoke test
         run: cargo run -q -p qgate-cli -- --version
+
+      - name: Smoke test qgate check
+        # Explicit bash enables pipefail, so a qgate failure is not hidden by grep.
+        shell: bash
+        run: |
+          cargo run -q -p qgate-cli -- check \
+            crates/qgate-cli/tests/fixtures/old/orders.ts \
+            crates/qgate-cli/tests/fixtures/src/orders.ts \
+            | grep -F '[complexity/cyclomatic-increase]'
