@@ -8,10 +8,10 @@
 //!
 //! - [`complexity`]: per-function cyclomatic complexity increase, and new
 //!   functions that are already complex.
+//! - [`architecture`]: imports a change introduces against a forbid rule.
 //!
 //! Planned:
 //!
-//! - `architecture`: forbidden dependencies between layers (M2)
 //! - `duplication`: near-duplicate blocks introduced by a change (M2)
 //! - `tests`: changed code without changed tests, coverage drop (M3)
 //!
@@ -22,6 +22,7 @@
 //!
 //! let change = FileChange {
 //!     path: PathBuf::from("src/f.ts"),
+//!     old_path: None,
 //!     before: parse(Language::TypeScript, "function f(a) { return a; }")?,
 //!     after: parse(Language::TypeScript, "function f(a) { return a ? 1 : 0; }")?,
 //! };
@@ -30,6 +31,7 @@
 //! # Ok::<(), qgate_lang::ParseError>(())
 //! ```
 
+pub mod architecture;
 pub mod complexity;
 
 use std::path::PathBuf;
@@ -46,6 +48,9 @@ use qgate_lang::FileModel;
 pub struct FileChange {
     /// Path of the file after the change, as findings should report it.
     pub path: PathBuf,
+    /// Path of the file before the change, if it was renamed; `None` when
+    /// the path did not change or the file is new.
+    pub old_path: Option<PathBuf>,
     /// The file at the base revision.
     pub before: FileModel,
     /// The file at the head revision.

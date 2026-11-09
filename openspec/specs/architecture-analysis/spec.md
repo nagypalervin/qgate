@@ -1,6 +1,12 @@
-# Spec Delta
+# architecture-analysis Specification
 
-## ADDED Requirements
+## Purpose
+
+Architecture analysis keeps the boundaries of a codebase from eroding:
+it reports the imports that a change newly introduces across a boundary
+the repository forbids in `qgate.toml`.
+
+## Requirements
 
 ### Requirement: Forbid rules
 
@@ -56,8 +62,9 @@ ignored.
 The target of a specifier that starts with `./` or `../` SHALL be the path
 it names, resolved against the importing file's directory, normalized and
 relative to the repository root; a specifier that leaves the repository
-root SHALL be ignored. Any other specifier SHALL be its own target, as
-written. Extensions and `index` files SHALL NOT be added.
+root SHALL be ignored. An empty specifier SHALL have no target; any other
+specifier SHALL be its own target, as written. Extensions and `index`
+files SHALL NOT be added.
 
 #### Scenario: Relative specifier
 
@@ -99,13 +106,35 @@ in `/**` SHALL also match the directory itself.
 - **GIVEN** `from = ["src/*/model.ts"]`
 - **THEN** `src/order/model.ts` matches and `src/order/sub/model.ts` does not
 
+### Requirement: Pattern spelling
+
+Once leading `./` are removed, a pattern that starts with `/` or has a
+`..` segment SHALL be invalid. Empty and `.` segments and a trailing `/`
+SHALL be ignored, except in a pattern with braces or a `\` escape, which
+keeps its glob meaning and is not rewritten further.
+
+#### Scenario: Equivalent spellings
+
+- **GIVEN** a rule with `from = ["./src//domain/"]` and `to = ["src/ui/**"]`
+- **WHEN** `src/domain/order.ts` adds an import of `"../ui/Button"`
+- **THEN** the import is reported, as with `from = ["src/domain"]`
+
+#### Scenario: Pattern from the file-system root
+
+- **GIVEN** a rule with `to = ["/src/ui/**"]` in `qgate.toml`
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** standard error names the rule and the pattern `/src/ui/**`
+- **AND** the exit code is 2
+
 ### Requirement: Only new violations are reported
 
 A violation is a file, a rule and a target. The system SHALL report a
 violation of the head version of a changed file only if the base version
 of that file did not have the same violation under the same rules. For a
-renamed file the base version is checked at its old path; an added file
-has no base version.
+renamed file the base version is checked at its old path; for a file
+renamed from JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) only the imports
+of that version count; if it cannot be read, no import of the file is new,
+wherever it moved. An added file has no base version.
 
 #### Scenario: Existing violation
 
@@ -124,6 +153,12 @@ has no base version.
 - **GIVEN** `src/app/order.ts`, which imports `"../ui/Button"`, is renamed to `src/domain/order.ts`
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** the import of `src/ui/Button` is reported
+
+#### Scenario: Renamed from JavaScript
+
+- **GIVEN** `src/domain/order.js`, which imports `"../ui/Button"`, is renamed to `src/domain/order.ts`, which also adds an import of `"../ui/Modal"`
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** only the import of `src/ui/Modal` is reported
 
 #### Scenario: Rule added in the same change
 

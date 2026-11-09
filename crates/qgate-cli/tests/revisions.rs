@@ -356,7 +356,7 @@ fn renamed_and_modified() {
 }
 
 #[test]
-fn renamed_from_an_unsupported_extension_is_added() {
+fn renamed_from_javascript_has_no_earlier_functions() {
     let repo = Repo::new();
     let source = function("big", 11);
     repo.write("src/util.js", &source);
@@ -767,4 +767,236 @@ fn global_pathspec_settings_do_not_break_revision_mode() {
             .expect("qgate runs");
         assert_eq!(out.status.code(), Some(0), "{variable}: {}", stderr(&out));
     }
+}
+
+// architecture-analysis, end to end
+
+const ORDER: &str = "import { money } from \"./money\";\n\nexport const total = money(1);\n";
+const ORDER_WITH_BUTTON: &str = "import { money } from \"./money\";\n\n\
+                                 import { Button } from \"../ui/Button\";\n\
+                                 export const total = money(1);\n";
+const BUTTON_FINDING: &str = "error   src/domain/order.ts:3  imports src/ui/Button \
+                              (\"../ui/Button\"), forbidden by \"domain-is-pure\"  \
+                              [architecture/forbidden-import]\n";
+
+#[test]
+fn domain_importing_the_ui() {
+    let repo = Repo::new();
+    repo.write("qgate.toml", RULE);
+    repo.write("src/domain/order.ts", ORDER);
+    repo.commit("base");
+    repo.write("src/domain/order.ts", ORDER_WITH_BUTTON);
+    repo.commit("head");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), BUTTON_FINDING, "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn rules_come_from_the_head_revision() {
+    let repo = Repo::new();
+    repo.write("src/domain/order.ts", ORDER);
+    repo.commit("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("qgate.toml", RULE);
+    repo.write("src/domain/order.ts", ORDER_WITH_BUTTON);
+    repo.commit("rule and import");
+    repo.git(&["checkout", "-q", "main"]);
+    let out = repo.qgate(&["--base", "main", "--head", "feature"]);
+    assert_eq!(stdout(&out), BUTTON_FINDING, "{}", stderr(&out));
+}
+
+#[test]
+fn moved_into_the_domain() {
+    let repo = Repo::new();
+    repo.write("qgate.toml", RULE);
+    repo.write("src/app/order.ts", ORDER_WITH_BUTTON);
+    repo.commit("base");
+    repo.remove("src/app/order.ts");
+    repo.write("src/domain/order.ts", ORDER_WITH_BUTTON);
+    repo.commit("move into the domain");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), BUTTON_FINDING, "{}", stderr(&out));
+}
+
+#[test]
+fn moved_within_the_domain() {
+    let repo = Repo::new();
+    repo.write("qgate.toml", RULE);
+    repo.write("src/domain/order.ts", ORDER_WITH_BUTTON);
+    repo.commit("base");
+    repo.remove("src/domain/order.ts");
+    repo.write(
+        "src/domain/sales/order.ts",
+        ORDER_WITH_BUTTON.replace("../ui/Button", "../../ui/Button"),
+    );
+    repo.commit("move within the domain");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+}
+
+#[test]
+fn rule_added_in_the_same_change() {
+    let repo = Repo::new();
+    repo.write("src/domain/order.ts", "import { A } from \"../ui/A\";\n");
+    repo.commit("base");
+    repo.write("qgate.toml", RULE);
+    repo.write(
+        "src/domain/order.ts",
+        "import { A } from \"../ui/A\";\nimport { B } from \"../ui/B\";\n",
+    );
+    repo.commit("rule and a new import");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(
+        stdout(&out),
+        "error   src/domain/order.ts:2  imports src/ui/B (\"../ui/B\"), forbidden by \
+         \"domain-is-pure\"  [architecture/forbidden-import]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn invalid_pattern() {
+    let repo = repo_with_config(&RULE.replace("src/domain/**", "src/[domain"));
+    assert_invalid(&repo, &["domain-is-pure", "src/[domain"]);
+}
+
+#[test]
+fn syntax_error_in_a_file_with_a_forbidden_import() {
+    let repo = Repo::new();
+    repo.write("qgate.toml", RULE);
+    repo.write("src/domain/a.ts", "export const a = 1;\n");
+    repo.commit("base");
+    repo.write(
+        "src/domain/a.ts",
+        "import { Button } from \"../ui/Button\";\nfunction broken(a: number {\n",
+    );
+    repo.commit("head");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    let text = stdout(&out);
+    assert!(text.contains("[input/unparsable]"), "{text}");
+    assert!(!text.contains("architecture/"), "{text}");
+}
+
+#[test]
+fn renamed_from_javascript_keeps_its_old_imports() {
+    let repo = Repo::new();
+    repo.write("qgate.toml", RULE);
+    repo.write("src/domain/order.js", ORDER_WITH_BUTTON);
+    repo.commit("base");
+    repo.remove("src/domain/order.js");
+    // A JS-to-TS migration that also adds one forbidden import.
+    repo.write(
+        "src/domain/order.ts",
+        format!("{ORDER_WITH_BUTTON}import {{ Modal }} from \"../ui/Modal\";\n"),
+    );
+    repo.commit("migrate to TypeScript");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(
+        stdout(&out),
+        "error   src/domain/order.ts:5  imports src/ui/Modal (\"../ui/Modal\"), forbidden by \
+         \"domain-is-pure\"  [architecture/forbidden-import]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn absolute_pattern_is_invalid() {
+    let repo = repo_with_config(&RULE.replace("src/domain/**", "/src/domain/**"));
+    assert_invalid(&repo, &["domain-is-pure", "/src/domain/**", "leading `/`"]);
+}
+
+/// `contents` with a Latin-1 comment, so it is not valid UTF-8.
+fn latin1(contents: &str) -> Vec<u8> {
+    let mut bytes = contents.as_bytes().to_vec();
+    bytes.extend_from_slice(b"// caf\xe9\n");
+    bytes
+}
+
+/// Rename the unreadable JavaScript `old` to `new` with `contents` (plus
+/// a comment), under the forbid rule, and run `qgate check --base HEAD~1`.
+fn rename_unreadable_javascript(old: &str, new: &str, contents: &str) -> Output {
+    let repo = Repo::new();
+    repo.write("qgate.toml", RULE);
+    repo.write(old, latin1(contents));
+    repo.commit("base");
+    repo.remove(old);
+    repo.write(new, format!("{contents}// cafe\n"));
+    repo.commit("migrate to TypeScript");
+    repo.qgate(&["--base", "HEAD~1"])
+}
+
+#[test]
+fn renamed_from_unreadable_javascript_reports_no_import() {
+    // Functions are new as for any added file; no import counts as new.
+    let contents = format!("{ORDER_WITH_BUTTON}{}", function("big", 11));
+    let out = rename_unreadable_javascript("src/domain/order.js", "src/domain/order.ts", &contents);
+    assert_eq!(
+        stdout(&out),
+        "warning src/domain/order.ts:5  big: new function, cyclomatic complexity 12  \
+         [complexity/cyclomatic-new]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn unreadable_javascript_moved_to_another_directory_reports_no_import() {
+    let out = rename_unreadable_javascript(
+        "src/domain/order.js",
+        "src/domain/sales/order.ts",
+        &ORDER_WITH_BUTTON.replace("../ui/Button", "../../ui/Button"),
+    );
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+}
+
+#[test]
+fn unreadable_javascript_moved_into_the_domain_reports_no_import() {
+    let out =
+        rename_unreadable_javascript("src/app/order.js", "src/domain/order.ts", ORDER_WITH_BUTTON);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+}
+
+#[test]
+fn renamed_from_unreadable_javascript_without_configuration_is_unchanged() {
+    // As before qgate.toml existed: the functions are analyzed as new.
+    let repo = Repo::new();
+    repo.write("src/util.js", latin1(&function("big", 24)));
+    repo.commit("base");
+    repo.remove("src/util.js");
+    repo.write("src/util.ts", function("big", 24) + "// cafe\n");
+    repo.commit("migrate to TypeScript");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(
+        stdout(&out),
+        "error   src/util.ts:1  big: new function, cyclomatic complexity 25  \
+         [complexity/cyclomatic-new]\n",
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn renamed_from_another_unsupported_extension_is_added() {
+    let repo = Repo::new();
+    repo.write("qgate.toml", RULE);
+    let contents = format!("{ORDER_WITH_BUTTON}{}", function("big", 11));
+    repo.write("src/domain/order.coffee", &contents);
+    repo.commit("base");
+    repo.git(&["mv", "src/domain/order.coffee", "src/domain/order.ts"]);
+    repo.commit("rename");
+    // No earlier version: the import and the function are new.
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(
+        stdout(&out),
+        format!(
+            "{BUTTON_FINDING}warning src/domain/order.ts:5  big: new function, cyclomatic \
+             complexity 12  [complexity/cyclomatic-new]\n"
+        ),
+        "{}",
+        stderr(&out)
+    );
 }

@@ -246,9 +246,9 @@ None. Without a `qgate.toml`, behaviour is unchanged.
 - **PR 1, imports:**
   - Comments between call arguments are skipped when checking for "exactly
     one string literal", so `require(/* why */ "x")` counts.
-  - An empty specifier (`import ""`) is recorded as written. It matches
-    no pattern, so recording it costs nothing and keeps the rule simple:
-    every import is recorded as written.
+  - An empty specifier (`import ""`) is recorded as written by the
+    adapter. The analyzer gives it no target (corrected at the PR 3
+    review: `to = ["**"]` used to match it).
   - Imports are recorded in `Walker::enter` before any other handling, so
     a dynamic import inside a bound call or a type wrapper is still found.
 - **PR 1, review round 1:**
@@ -282,3 +282,85 @@ None. Without a `qgate.toml`, behaviour is unchanged.
   - `run` removes `GIT_*_PATHSPECS` from git's environment: git refuses
     `--literal-pathspecs` next to another global pathspec setting, which
     made every revision-mode run fail for users who export one.
+- **PR 3, `globset` version:** `globset` 0.4.20 and later declare Rust
+  1.88. The workspace's MSRV-aware resolver (`resolver = "3"`) therefore
+  locks 0.4.19, which declares no MSRV. The whole workspace was built with
+  Rust 1.85.1 (`cargo +1.85 build --workspace --locked`) to confirm it.
+  Lock additions: `globset` and `bstr`; the regex crates were already
+  there.
+- **PR 3, targets:** a relative specifier that resolves to the repository
+  root itself (`import ".."` from `src/a.ts`) has no target, like one that
+  leaves the root. Paths are matched as git writes them (`/`-separated);
+  no separator conversion is needed, because only revision mode runs the
+  analyzer.
+- **PR 3, tests bite (task 3.4):** removing the base subtraction (3
+  failing tests), using the head path for the base version (2), the
+  `/**` directory match (1), the glob-less prefix match (1), `..`
+  resolution (9), import statements in the adapter (9), and
+  `literal_separator` (1) were each caught. The task's "type-only import
+  form" has no separate code path: `import type` is an `import_statement`
+  like any other, so breaking import statements covers it.
+- **PR 3, review round 1 (two questions answered by the human):**
+  - Patterns: a leading `./` and a trailing `/` are dropped (`src/domain/`
+    and `./src/ui/**` used to match nothing, silently switching a rule
+    off); a pattern starting with `/` is an invalid pattern (exit 2).
+  - A file renamed from JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) to
+    TypeScript is checked against the imports of its JavaScript version,
+    parsed with the TSX grammar; complexity still sees its functions as
+    new. Before, a pure JS-to-TS rename reported every existing forbidden
+    import.
+  - `FileChange::old_path` is documented as renames only: `qgate-git`
+    passes `-M`, so copies come in as added files.
+  - The README says a move counts only when git detects the rename, and
+    that query suffixes and `node:` prefixes are matched as written.
+- **PR 3, review round 2:**
+  - Patterns are normalized segment by segment (`normalize`): leading
+    `./`, empty and `.` segments and a trailing `/` go; a pattern that
+    then starts with `/` or has a `..` segment is invalid. Before,
+    `.//src/domain/**` still matched nothing, because the `/` check ran
+    before `./` was stripped. Spec scenarios: "Equivalent spellings" (now
+    with a WHEN) and "Pattern from the file-system root".
+  - A JavaScript old version that cannot be read (not UTF-8, or syntax
+    the TSX grammar rejects, such as Flow) is `input/unparsable`, through
+    the same path as an unreadable TypeScript base. Before, it silently
+    counted as added and reported every existing import as new. This
+    follows "Unparsable files have no architecture findings" ("either
+    version"); the cost is that such a file gets no complexity findings
+    either, where it used to be analyzed as added.
+  - `revision-input` "Renamed files" gets a MODIFIED delta, so the living
+    specs agree after archiving.
+  - The spec states that an empty specifier has no target. The README
+    lists root-absolute imports (`"/src/ui/Button"`) as not supported:
+    patterns cannot start with `/`.
+- **PR 3, review round 3:**
+  - Round 2 made an unreadable JavaScript old version `input/unparsable`.
+    That changed complexity results and exit codes for repositories
+    without `qgate.toml` (an Error became a Warning), against "Missing
+    configuration". Now the file is analyzed as added, exactly as on
+    `main`, and the head's own imports stand in for the unreadable base
+    imports, so the architecture rules report none of them as new. The
+    `revision-input` delta and the architecture spec say so; e2e tests
+    cover the case with and without `qgate.toml`, and a non-JavaScript
+    rename (`.coffee`) still counts as added.
+  - The pattern wording now matches `normalize`: leading `./` are removed
+    first, then a leading `/` or a `..` segment is invalid. Braces and
+    `\` escapes are glob syntax and are not normalized. The README notes
+    that `**/ui/` does not match below `ui`.
+- **PR 3, review round 4:**
+  - The stand-in imports for an unreadable JavaScript base were resolved
+    against the old path, so a rename that also changed directories
+    reported its existing imports as new. The base is now evaluated at
+    the head path (`old_path` is `None` in that case), so no import of
+    such a file is new, wherever it moved, also into `from`. Both spec
+    deltas say so; e2e tests cover a move within and into the domain.
+  - A pattern with braces or a `\` escape is not rewritten beyond a
+    leading `./` (before, `src/{a//b,c}` was rewritten inside the braces);
+    tests pin `src/{ui,infra}/**` and `src/\*`.
+  - Tests now check both THENs of the rename scenarios (functions new,
+    and the import findings) for `.coffee` and for unreadable JavaScript
+    with a rule.
+- **PR 3, review round 5:** the early return for braces and escapes in
+  `normalize` came before the `..` check, so `../{src/ui,x}/**` was
+  accepted and could never match. `..` is now checked first in every
+  pattern, inside braces too. The "wherever it moved" rule has a
+  scenario in the revision-input delta.

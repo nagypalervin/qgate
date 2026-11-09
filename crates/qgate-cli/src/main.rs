@@ -1,8 +1,9 @@
 //! The `qgate` command.
 //!
 //! Thin by design: it parses arguments, reads files or asks `qgate-git`
-//! for changed files, and picks exit codes; parsing, analysis and rendering
-//! live in the library crates.
+//! for changed files and `qgate.toml`, wires the configuration into the
+//! analyzers, and picks exit codes; parsing, analysis and rendering live in
+//! the library crates.
 //!
 //! Exit codes: `2` when the check could not run (an invalid invocation or
 //! input), else `1` when a finding is at or above the `--fail-on` level,
@@ -16,6 +17,7 @@ use std::process::ExitCode;
 use clap::builder::PossibleValue;
 use clap::error::ErrorKind as ClapErrorKind;
 use clap::{Arg, ArgMatches, Command, ValueEnum, value_parser};
+use qgate_analyzers::architecture::{ArchitectureAnalyzer, ForbidRule};
 use qgate_analyzers::complexity::ComplexityAnalyzer;
 use qgate_analyzers::{Analyzer, FileChange};
 use qgate_config::Config;
@@ -238,6 +240,9 @@ fn check(args: &ArgMatches) -> Result<Vec<Finding>, String> {
     let (before_path, after_path) = (path("before")?, path("after")?);
     let change = FileChange {
         path: after_path.clone(),
+        // Two files are compared as one file; the architecture rules,
+        // which would care about a rename, do not run in this form.
+        old_path: None,
         before: load(before_path)?,
         after: load(after_path)?,
     };
@@ -273,16 +278,23 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
     let files = repo
         .changed_files(base, head)
         .map_err(|e| git_message(&e, base))?;
-    // Checked before any file is analyzed. The architecture analyzer
-    // applies the rules (add-forbidden-imports PR 3).
-    let _config = load_config(&repo, base, head)?;
+    // Checked before any file is analyzed.
+    let architecture = architecture_analyzer(&load_config(&repo, base, head)?)?;
+    let mut analyzers: Vec<&dyn Analyzer> = vec![&ComplexityAnalyzer];
+    if !architecture.is_empty() {
+        analyzers.push(&architecture);
+    }
     let mut findings = Vec::new();
     for file in files {
         let Some(language) = language_of(&file.path) else {
             continue;
         };
         match file_change(&repo, &file, language)? {
-            Ok(change) => findings.extend(ComplexityAnalyzer.analyze(&change)),
+            Ok(change) => {
+                for analyzer in &analyzers {
+                    findings.extend(analyzer.analyze(&change));
+                }
+            }
             Err(not_analyzed) => findings.push(not_analyzed),
         }
     }
@@ -300,6 +312,23 @@ fn load_config(repo: &Repository, base: &str, head: &str) -> Result<Config, Stri
         Some(bytes) => qgate_config::parse(&bytes).map_err(|e| format!("{CONFIG_FILE}: {e}")),
         None => Ok(Config::default()),
     }
+}
+
+/// The architecture analyzer for the configuration's forbid rules. Copies
+/// the plain values into the analyzer's own rule type (ADR 0003); an
+/// invalid pattern is a configuration error.
+fn architecture_analyzer(config: &Config) -> Result<ArchitectureAnalyzer, String> {
+    let rules: Vec<ForbidRule> = config
+        .architecture
+        .forbid
+        .iter()
+        .map(|rule| ForbidRule {
+            name: rule.name.clone(),
+            from: rule.from.clone(),
+            to: rule.to.clone(),
+        })
+        .collect();
+    ArchitectureAnalyzer::new(&rules).map_err(|e| format!("{CONFIG_FILE}: {e}"))
 }
 
 /// Both versions of one changed file as models, or an `input/unparsable`
@@ -335,11 +364,30 @@ fn file_change(
 
     // An added file, or one renamed from a language qgate does not read,
     // has no earlier version of its code: every function in it is new.
+    let mut old_path = file.old_path.as_ref().map(PathBuf::from);
     let old_language = match &file.old_path {
         Some(old) => language_of(old),
         None => Some(language),
     };
     let before = match (&file.before, old_language) {
+        // Renamed from JavaScript (a JS-to-TS migration): its functions are
+        // new, but the imports it already had are not. If the JavaScript
+        // cannot be read, the head's own imports stand in, at the head's
+        // path, so no import of the file counts as new wherever it moved;
+        // complexity is as for any added file.
+        (Some(id), None) if file.old_path.as_deref().is_some_and(is_javascript) => {
+            let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
+            let imports = if let Ok(model) = parse_blob(Language::Tsx, bytes)? {
+                model.imports
+            } else {
+                old_path = None;
+                after.imports.clone()
+            };
+            FileModel {
+                functions: Vec::new(),
+                imports,
+            }
+        }
         (Some(id), Some(old_language)) => {
             let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
             match parse_blob(old_language, bytes)? {
@@ -362,6 +410,7 @@ fn file_change(
 
     Ok(Ok(FileChange {
         path: PathBuf::from(&file.path),
+        old_path,
         before,
         after,
     }))
@@ -384,6 +433,15 @@ fn parse_blob(language: Language, bytes: Vec<u8>) -> Result<Result<FileModel, Un
         Err(ParseError::Syntax { line }) => Ok(Err(Unparsable::Syntax(line))),
         Err(ParseError::Parser { message }) => Err(format!("parser failure: {message}")),
     }
+}
+
+/// Whether a path is a JavaScript file, whose imports qgate reads when it
+/// is renamed to TypeScript (`add-forbidden-imports`, PR 3 review).
+fn is_javascript(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| matches!(ext, "js" | "jsx" | "mjs" | "cjs"))
 }
 
 /// The language of a path, from its extension.
