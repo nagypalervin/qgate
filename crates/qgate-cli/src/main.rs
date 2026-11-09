@@ -363,15 +363,25 @@ fn file_change(
     };
 
     // An added file, or one renamed from a language qgate does not read,
-    // has no earlier version of its code: every function in it is new.
-    let old_language = match &file.old_path {
-        Some(old) => language_of(old),
-        None => Some(language),
+    // has no earlier version of its code: every function in it is new. A
+    // file renamed from JavaScript (a JS-to-TS migration) keeps the imports
+    // of its old version, read with the TSX grammar.
+    let (old_language, imports_only) = match file.old_path.as_deref() {
+        Some(old) => match language_of(old) {
+            Some(old_language) => (Some(old_language), false),
+            None if is_javascript(old) => (Some(Language::Tsx), true),
+            None => (None, false),
+        },
+        None => (Some(language), false),
     };
     let before = match (&file.before, old_language) {
         (Some(id), Some(old_language)) => {
             let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
             match parse_blob(old_language, bytes)? {
+                Ok(model) if imports_only => FileModel {
+                    functions: Vec::new(),
+                    imports: model.imports,
+                },
                 Ok(model) => model,
                 Err(Unparsable::NotUtf8) => {
                     let reason = "the base version is not valid UTF-8".to_owned();
@@ -384,20 +394,6 @@ fn file_change(
                     );
                     return Ok(Err(not_analyzed(reason, None)));
                 }
-            }
-        }
-        // Renamed from JavaScript (a JS-to-TS migration): no earlier version
-        // of its functions, but the imports it already had are not new.
-        (Some(id), None) if file.old_path.as_deref().is_some_and(is_javascript) => {
-            let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
-            match parse_blob(Language::Tsx, bytes)? {
-                Ok(model) => FileModel {
-                    functions: Vec::new(),
-                    imports: model.imports,
-                },
-                // JavaScript the grammar cannot read (Flow, say): treated
-                // as an added file, like any other language.
-                Err(_) => FileModel::default(),
             }
         }
         _ => FileModel::default(),

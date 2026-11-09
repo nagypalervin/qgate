@@ -91,13 +91,15 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
   codebase that still breaks it. A move that git detects as a rename is
   checked against the file's old path: moving a file within `from`
   reports nothing, moving it into `from` reports its forbidden imports. A
-  file renamed from `.js` to `.ts` keeps the imports it already had.
+  file renamed from `.js` to `.ts` keeps the imports it already had (if the
+  old JavaScript cannot be read, the file is reported as
+  `input/unparsable`).
 - **Patterns** are globs relative to the repository root: `*` and `?` stay
   within one directory, `**` spans directories. A pattern without glob
   characters also matches everything below it (`react` matches
   `react/jsx-runtime`, not `react-dom`), and `dir/**` also matches `dir`.
-  A leading `./` and a trailing `/` are ignored; a leading `/` is an
-  error.
+  `./`, `//` and a trailing `/` are ignored (`./src//ui/` is `src/ui`);
+  a pattern starting with `/` or containing `..` is an error.
 - **`from`** matches the importing file's path. **`to`** matches the import
   target: a relative import (`./`, `../`) resolved to a path from the root,
   without extension (`src/ui/Button`); anything else as written
@@ -111,7 +113,9 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
   `HEAD`), not from the working tree. A missing `qgate.toml` means no
   rules; an invalid one (unknown keys included) fails with exit code `2`.
   The two-file form ignores it.
-- **Not yet supported:** tsconfig `paths`, and files the TypeScript grammar
+- **Not yet supported:** tsconfig `paths`, root-absolute imports
+  (`import "/src/ui/Button"`, which no pattern can name), and files the
+  TypeScript grammar
   cannot parse yet (`export type * from`, `import("./x").Foo<T>`), which
   are reported as `input/unparsable` instead.
 

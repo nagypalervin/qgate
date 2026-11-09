@@ -356,7 +356,7 @@ fn renamed_and_modified() {
 }
 
 #[test]
-fn renamed_from_an_unsupported_extension_is_added() {
+fn renamed_from_javascript_has_no_earlier_functions() {
     let repo = Repo::new();
     let source = function("big", 11);
     repo.write("src/util.js", &source);
@@ -906,4 +906,30 @@ fn renamed_from_javascript_keeps_its_old_imports() {
 fn absolute_pattern_is_invalid() {
     let repo = repo_with_config(&RULE.replace("src/domain/**", "/src/domain/**"));
     assert_invalid(&repo, &["domain-is-pure", "/src/domain/**", "leading `/`"]);
+}
+
+#[test]
+fn renamed_from_unreadable_javascript_is_unparsable() {
+    let repo = Repo::new();
+    repo.write("qgate.toml", RULE);
+    // Latin-1, not UTF-8.
+    let mut latin1 = ORDER_WITH_BUTTON.as_bytes().to_vec();
+    latin1.extend_from_slice(b"// caf\xe9\n");
+    repo.write("src/domain/order.js", latin1);
+    repo.commit("base");
+    repo.remove("src/domain/order.js");
+    repo.write(
+        "src/domain/order.ts",
+        format!("{ORDER_WITH_BUTTON}// cafe\n"),
+    );
+    repo.commit("migrate to TypeScript");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(
+        stdout(&out),
+        "warning src/domain/order.ts  file not analyzed: the base version is not valid \
+         UTF-8  [input/unparsable]\n",
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(out.status.code(), Some(0));
 }

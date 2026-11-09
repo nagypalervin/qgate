@@ -104,8 +104,13 @@ first architecture rule and, with it, `qgate.toml`.
 
 ### Modified Capabilities
 
-None. `check-command` and `revision-input` keep their requirements. The
-new exit-2 case belongs to `configuration`.
+- `revision-input`: "Renamed files" gives a file renamed from JavaScript
+  the imports of its old version, for the architecture rules (added at the
+  PR 3 review: a pure JS-to-TS rename used to report every existing
+  forbidden import as new).
+
+`check-command` keeps its requirements; the new exit-2 case belongs to
+`configuration`.
 
 ## Impact
 

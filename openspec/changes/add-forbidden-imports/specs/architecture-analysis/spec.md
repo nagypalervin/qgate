@@ -56,8 +56,9 @@ ignored.
 The target of a specifier that starts with `./` or `../` SHALL be the path
 it names, resolved against the importing file's directory, normalized and
 relative to the repository root; a specifier that leaves the repository
-root SHALL be ignored. Any other specifier SHALL be its own target, as
-written. Extensions and `index` files SHALL NOT be added.
+root SHALL be ignored. An empty specifier SHALL have no target; any other
+specifier SHALL be its own target, as written. Extensions and `index`
+files SHALL NOT be added.
 
 #### Scenario: Relative specifier
 
@@ -80,8 +81,9 @@ A pattern SHALL be a glob over `/`-separated paths, relative to the
 repository root: `*` and `?` match within one segment, `**` matches any
 number of segments, and `[...]` is a character class. A pattern without
 glob characters SHALL also match everything below it, and a pattern ending
-in `/**` SHALL also match the directory itself. A leading `./` and a
-trailing `/` SHALL be ignored; a pattern starting with `/` is invalid.
+in `/**` SHALL also match the directory itself. Leading `./`, empty and
+`.` segments and a trailing `/` SHALL be ignored; a pattern that then
+starts with `/` or contains `..` is invalid.
 
 #### Scenario: Package name
 
@@ -97,8 +99,16 @@ trailing `/` SHALL be ignored; a pattern starting with `/` is invalid.
 
 #### Scenario: Equivalent spellings
 
-- **GIVEN** `from = ["./src/domain/"]`
-- **THEN** it matches `src/domain/order.ts`, like `from = ["src/domain"]`
+- **GIVEN** a rule with `from = ["./src//domain/"]` and `to = ["src/ui/**"]`
+- **WHEN** `src/domain/order.ts` adds an import of `"../ui/Button"`
+- **THEN** the import is reported, as with `from = ["src/domain"]`
+
+#### Scenario: Pattern from the file-system root
+
+- **GIVEN** a rule with `to = ["/src/ui/**"]` in `qgate.toml`
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** standard error names the rule and the pattern `/src/ui/**`
+- **AND** the exit code is 2
 
 #### Scenario: Single segment wildcard
 

@@ -303,14 +303,32 @@ None. Without a `qgate.toml`, behaviour is unchanged.
 - **PR 3, review round 1 (two questions answered by the human):**
   - Patterns: a leading `./` and a trailing `/` are dropped (`src/domain/`
     and `./src/ui/**` used to match nothing, silently switching a rule
-    off); a pattern starting with `/` is an invalid pattern (exit 2). The
-    spec says so, with a scenario.
+    off); a pattern starting with `/` is an invalid pattern (exit 2).
   - A file renamed from JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) to
     TypeScript is checked against the imports of its JavaScript version,
     parsed with the TSX grammar; complexity still sees its functions as
-    new. A JS version the grammar cannot read counts as added. Before, a
-    pure JS-to-TS rename reported every existing forbidden import.
+    new. Before, a pure JS-to-TS rename reported every existing forbidden
+    import.
   - `FileChange::old_path` is documented as renames only: `qgate-git`
     passes `-M`, so copies come in as added files.
   - The README says a move counts only when git detects the rename, and
     that query suffixes and `node:` prefixes are matched as written.
+- **PR 3, review round 2:**
+  - Patterns are normalized segment by segment (`normalize`): leading
+    `./`, empty and `.` segments and a trailing `/` go; a pattern that
+    then starts with `/` or has a `..` segment is invalid. Before,
+    `.//src/domain/**` still matched nothing, because the `/` check ran
+    before `./` was stripped. Spec scenarios: "Equivalent spellings" (now
+    with a WHEN) and "Pattern from the file-system root".
+  - A JavaScript old version that cannot be read (not UTF-8, or syntax
+    the TSX grammar rejects, such as Flow) is `input/unparsable`, through
+    the same path as an unreadable TypeScript base. Before, it silently
+    counted as added and reported every existing import as new. This
+    follows "Unparsable files have no architecture findings" ("either
+    version"); the cost is that such a file gets no complexity findings
+    either, where it used to be analyzed as added.
+  - `revision-input` "Renamed files" gets a MODIFIED delta, so the living
+    specs agree after archiving.
+  - The spec states that an empty specifier has no target. The README
+    lists root-absolute imports (`"/src/ui/Button"`) as not supported:
+    patterns cannot start with `/`.

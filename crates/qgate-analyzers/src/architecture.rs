@@ -215,21 +215,8 @@ fn compile(rule: &str, patterns: &[String]) -> Result<GlobSet, PatternError> {
             pattern: written.clone(),
             detail,
         };
-        if written.starts_with('/') {
-            return Err(error(
-                "patterns are relative to the repository root; remove the leading `/`".to_owned(),
-            ));
-        }
-        // `./src/ui/` and `src/ui` mean the same; without this, the first
-        // would silently match nothing.
-        let mut pattern = written.as_str();
-        while let Some(rest) = pattern.strip_prefix("./") {
-            pattern = rest;
-        }
-        let pattern = pattern.trim_end_matches('/');
-        if pattern.is_empty() {
-            return Err(error("the pattern is empty".to_owned()));
-        }
+        let pattern = normalize(written).map_err(|detail| error(detail.to_owned()))?;
+        let pattern = pattern.as_str();
         let has_glob = pattern.contains(['*', '?', '[', '{']);
         let mut globs = vec![pattern.to_owned()];
         if !has_glob {
@@ -248,6 +235,33 @@ fn compile(rule: &str, patterns: &[String]) -> Result<GlobSet, PatternError> {
         pattern: patterns.join(", "),
         detail: e.kind().to_string(),
     })
+}
+
+/// A pattern in the form paths have: segments joined by single `/`, with
+/// a leading `./`, `.` segments, empty segments and a trailing `/`
+/// dropped, so `./src//ui/` means `src/ui`. A pattern that starts with `/`
+/// once leading `./` are gone, contains `..`, or is empty is invalid:
+/// none of them could ever match a path from the repository root.
+fn normalize(pattern: &str) -> Result<String, &'static str> {
+    let mut rest = pattern;
+    while let Some(after) = rest.strip_prefix("./") {
+        rest = after;
+    }
+    if rest.starts_with('/') {
+        return Err("patterns are relative to the repository root; remove the leading `/`");
+    }
+    let mut segments = Vec::new();
+    for segment in rest.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => return Err("`..` cannot match a path from the repository root"),
+            segment => segments.push(segment),
+        }
+    }
+    if segments.is_empty() {
+        return Err("the pattern is empty");
+    }
+    Ok(segments.join("/"))
 }
 
 fn glob_of(pattern: &str) -> Result<Glob, globset::Error> {
@@ -457,17 +471,35 @@ mod tests {
     }
 
     #[test]
-    fn leading_dot_slash_and_trailing_slash_are_dropped() {
+    fn equivalent_spellings_are_normalized() {
         assert!(matches("src/domain/", "src/domain/a.ts"));
         assert!(matches("./src/ui/**", "src/ui/Button"));
         assert!(matches("././react/", "react/jsx-runtime"));
+        assert!(matches("src//domain/./**", "src/domain/a.ts"));
+        assert_eq!(normalize("./src//ui/./x/").as_deref(), Ok("src/ui/x"));
+    }
+
+    #[test]
+    fn equivalent_spellings_through_the_analyzer() {
+        let rules = [rule("domain-is-pure", &["./src//domain/"], &["src/ui/**"])];
+        assert_eq!(
+            fixture!(&rules, None, "src/domain/order.ts", "new_import"),
+            [finding(
+                3,
+                "imports src/ui/Button (\"../ui/Button\"), forbidden by \"domain-is-pure\""
+            )]
+        );
     }
 
     #[test]
     fn absolute_and_empty_patterns_are_invalid() {
         for (pattern, detail) in [
             ("/src/**", "remove the leading `/`"),
+            (".//src/domain/**", "remove the leading `/`"),
+            ("././/src/domain", "remove the leading `/`"),
+            ("src/../ui/**", "`..` cannot match"),
             ("./", "the pattern is empty"),
+            (".", "the pattern is empty"),
             ("", "the pattern is empty"),
         ] {
             let err = ArchitectureAnalyzer::new(&[rule("r", &[pattern], &["x"])])
