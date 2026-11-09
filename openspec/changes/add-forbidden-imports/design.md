@@ -214,10 +214,18 @@ findings for them. The two-file form never calls step 1.
 - **[Interim state after PR 2]** A valid `qgate.toml` is read and
   validated but not applied until PR 3. → All three pull requests land
   before the change is archived; there is no release in between.
-- **[Grammar lag]** tree-sitter-typescript 0.23 rejects `export type *
-  from "x"` (TypeScript 5.0) and `export import x = require("y")`. A file
-  using them is `input/unparsable` and gets no architecture findings, like
-  any unparsable file. → Listed in the README in PR 3; a grammar update
+- **[Grammar lag]** tree-sitter-typescript 0.23 rejects some valid
+  forms, and a file using one is `input/unparsable` and gets no
+  architecture findings, like any unparsable file:
+  - `export type * from "x"` (TypeScript 5.0);
+  - `export import x = require("y")`;
+  - import types with a suffix: `import("./x").Foo<string>`,
+    `import("./w").Bar[]`, `keyof import("./k").T`;
+  - `interface I extends import("./ie").Base {}` and
+    `class Z extends Base<import("./ce").T> {}`.
+
+  Plain import types (`import("./x").T`, `typeof import("./x")`, in a
+  union or as a type argument elsewhere) parse. → Listed in the README in PR 3; a grammar update
   fixes it.
 - **[Build time]** `syn` and `serde_derive` add compile time to a clean
   build. → They are compiled once and cached in CI. The alternative is a

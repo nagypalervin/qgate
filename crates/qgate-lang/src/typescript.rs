@@ -519,8 +519,9 @@ fn passes_a_function(call: Node<'_>) -> bool {
 
 /// The string literal naming the module that `node` imports, if `node` is
 /// an import: an `import` or `export ... from` declaration, the
-/// `require(...)` of `import x = require(...)`, or a call of `import(...)`
-/// or `require(...)` whose only argument is a string literal.
+/// `require(...)` of `import x = require(...)`, a call of `import(...)`
+/// whose first argument is a string literal, or a call of `require(...)`
+/// whose only argument is one.
 fn import_source<'t>(node: Node<'t>, source: &[u8]) -> Option<Node<'t>> {
     match node.kind() {
         // `import x = require("m")` has its source on the require clause,
@@ -911,6 +912,11 @@ mod tests {
                 ("./commented", 39),
                 // an empty specifier is kept as written
                 ("", 40),
+                // source order inside a skipped subtree and around it
+                ("./c1", 43),
+                ("./c2", 43),
+                ("./m1", 44),
+                ("./m2", 44),
             ]
         );
     }

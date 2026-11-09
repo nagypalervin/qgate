@@ -38,3 +38,7 @@ const data = await import("./data.json", { with: { type: "json" } });
 // Comments between arguments are skipped; an empty specifier is kept.
 const commented = require(/* why */ "./commented");
 import "";
+
+// Several imports in one skipped type subtree, next to one outside it.
+type Pick2<T> = T extends import("./c1").A ? import("./c2").B : never;
+let mixed: import("./m1").T = require("./m2");
