@@ -359,3 +359,8 @@ None. Without a `qgate.toml`, behaviour is unchanged.
   - Tests now check both THENs of the rename scenarios (functions new,
     and the import findings) for `.coffee` and for unreadable JavaScript
     with a rule.
+- **PR 3, review round 5:** the early return for braces and escapes in
+  `normalize` came before the `..` check, so `../{src/ui,x}/**` was
+  accepted and could never match. `..` is now checked first in every
+  pattern, inside braces too. The "wherever it moved" rule has a
+  scenario in the revision-input delta.

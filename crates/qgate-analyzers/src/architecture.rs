@@ -237,11 +237,13 @@ fn compile(rule: &str, patterns: &[String]) -> Result<GlobSet, PatternError> {
     })
 }
 
-/// A pattern in the form paths have: segments joined by single `/`, with
-/// a leading `./`, `.` segments, empty segments and a trailing `/`
-/// dropped, so `./src//ui/` means `src/ui`. A pattern that starts with `/`
-/// once leading `./` are gone, contains `..`, or is empty is invalid:
-/// none of them could ever match a path from the repository root.
+/// A pattern in the form paths have. Leading `./` are removed; a pattern
+/// that then starts with `/`, or has a `..` segment anywhere (also inside
+/// braces), is invalid, as is an empty one: none could ever match a path
+/// from the repository root. A pattern with braces or a `\` escape keeps
+/// its glob syntax and is not rewritten further; in any other pattern,
+/// empty and `.` segments and a trailing `/` are dropped, so `./src//ui/`
+/// means `src/ui`.
 fn normalize(pattern: &str) -> Result<String, &'static str> {
     let mut rest = pattern;
     while let Some(after) = rest.strip_prefix("./") {
@@ -249,6 +251,9 @@ fn normalize(pattern: &str) -> Result<String, &'static str> {
     }
     if rest.starts_with('/') {
         return Err("patterns are relative to the repository root; remove the leading `/`");
+    }
+    if rest.split(['/', '{', '}', ',']).any(|part| part == "..") {
+        return Err("`..` cannot match a path from the repository root");
     }
     // Braces and escapes keep their glob meaning: no further rewriting.
     if rest.contains(['{', '\\']) {
@@ -258,7 +263,6 @@ fn normalize(pattern: &str) -> Result<String, &'static str> {
     for segment in rest.split('/') {
         match segment {
             "" | "." => {}
-            ".." => return Err("`..` cannot match a path from the repository root"),
             segment => segments.push(segment),
         }
     }
@@ -513,6 +517,9 @@ mod tests {
             (".//src/domain/**", "remove the leading `/`"),
             ("././/src/domain", "remove the leading `/`"),
             ("src/../ui/**", "`..` cannot match"),
+            ("../{src/ui,x}/**", "`..` cannot match"),
+            ("src/{ui,x}/../ui/**", "`..` cannot match"),
+            ("src/{..,ui}/**", "`..` cannot match"),
             ("./", "the pattern is empty"),
             (".", "the pattern is empty"),
             ("", "the pattern is empty"),

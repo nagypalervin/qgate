@@ -29,3 +29,9 @@ the file counts as new, wherever it moved.
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** no `architecture/forbidden-import` finding is reported for `src/domain/order.ts`
 - **AND** its functions are analyzed as new
+
+#### Scenario: Unreadable JavaScript moved into a forbidden part
+
+- **GIVEN** a rule that forbids `src/domain/**` to import `src/ui/**`, and the head renames `src/app/order.js`, which is not valid UTF-8 and imports `"../ui/Button"`, to `src/domain/order.ts`
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** no `architecture/forbidden-import` finding is reported
