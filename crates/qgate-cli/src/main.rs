@@ -12,6 +12,7 @@ use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use clap::error::ErrorKind as ClapErrorKind;
 use clap::{Arg, ArgMatches, Command, value_parser};
 use qgate_analyzers::complexity::ComplexityAnalyzer;
 use qgate_analyzers::{Analyzer, FileChange};
@@ -25,21 +26,41 @@ fn command() -> Command {
     Command::new("qgate")
         .about("Detects where your codebase starts to break under fast, AI-assisted development")
         .version(env!("CARGO_PKG_VERSION"))
-        .subcommand(
-            Command::new("check")
-                .about("Compare two versions of a TypeScript file and report what got worse")
-                .arg(
-                    Arg::new("before")
-                        .help("The file before the change (.ts, .mts, .cts or .tsx)")
-                        .required(true)
-                        .value_parser(value_parser!(PathBuf)),
+        .subcommand(check_command())
+}
+
+fn check_command() -> Command {
+    Command::new("check")
+        .about("Report what got worse between two versions of TypeScript code")
+        .override_usage(
+            "qgate check <before> <after>\n       qgate check --base <rev> [--head <rev>]",
+        )
+        .arg(
+            Arg::new("before")
+                .help("The file before the change (.ts, .mts, .cts or .tsx)")
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(
+            Arg::new("after")
+                .help("The file after the change; findings report this path")
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(
+            Arg::new("base")
+                .long("base")
+                .value_name("rev")
+                .help(
+                    "Compare git revisions instead of files: the merge base of \
+                             <rev> and --head against --head",
                 )
-                .arg(
-                    Arg::new("after")
-                        .help("The file after the change; findings report this path")
-                        .required(true)
-                        .value_parser(value_parser!(PathBuf)),
-                ),
+                .conflicts_with_all(["before", "after"]),
+        )
+        .arg(
+            Arg::new("head")
+                .long("head")
+                .value_name("rev")
+                .help("The revision to check (default: HEAD); needs --base")
+                .requires("base"),
         )
 }
 
@@ -55,6 +76,19 @@ fn main() -> ExitCode {
     };
 
     if let Some(("check", args)) = matches.subcommand() {
+        let two_files = args.contains_id("before") && args.contains_id("after");
+        if !two_files && !args.contains_id("base") {
+            let err = check_command().error(
+                ClapErrorKind::MissingRequiredArgument,
+                "give two files, or --base <rev> to compare git revisions",
+            );
+            let _ = err.print();
+            return ExitCode::from(INVALID);
+        }
+        if args.contains_id("base") {
+            eprintln!("error: revision mode is not implemented yet");
+            return ExitCode::from(INVALID);
+        }
         return match check(args) {
             Ok(report) => write_stdout(&report),
             Err(message) => {

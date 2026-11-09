@@ -17,7 +17,7 @@ artifacts. Branches: `change/add-git-revision-input` (PR 1), then
 
 ## 2. `qgate check --base` in the CLI, PR 2
 
-- [ ] 2.1 Extend the `check` arguments (design D4: optional positionals, `--base`, `--head` defaulting to `HEAD`, conflicts) and add end-to-end tests for the `Invalid invocation` scenarios (files plus `--base`, `--head` without `--base`, one argument); verify the existing two-file tests still pass unchanged
+- [x] 2.1 Extend the `check` arguments (design D4: optional positionals, `--base`, `--head` defaulting to `HEAD`, conflicts) and add end-to-end tests for the `Invalid invocation` scenarios (files plus `--base`, `--head` without `--base`, one argument); verify the existing two-file tests still pass unchanged
 - [ ] 2.2 Write failing end-to-end tests in `crates/qgate-cli/tests/revisions.rs` with temporary repositories for every scenario of the `revision-input` delta and the revision-mode scenarios of the `check-command` delta (pull request branch, head default, path from a subdirectory, several files order)
 - [ ] 2.3 Implement revision mode in `qgate-cli` (design D4): file selection, before-side choice, parsing with `input/unparsable` findings, analysis, `(path, line, rule)` sort and `GitError` messages with the shallow-clone hint; verify the 2.1 and 2.2 tests pass
 - [ ] 2.4 Update `README.md`: revision-mode usage, the CI snippet with `actions/checkout` and `fetch-depth: 0`, `git` as a requirement for revision mode and tests, and the `input/unparsable` rule; verify every command shown runs as written against a temporary repository
