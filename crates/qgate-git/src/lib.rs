@@ -12,6 +12,9 @@
 //! - [`Repository::read_blob`] returns the exact bytes of one version.
 //! - [`Repository::file_at`] reads one regular file, such as `qgate.toml`,
 //!   as a revision has it; the path is taken literally.
+//! - [`Repository::files_at`] lists every regular file of a revision, and
+//!   [`Repository::blob_reader`] reads many blobs through one
+//!   `git cat-file --batch` process, for analyses that need a whole tree.
 //!
 //! User-supplied revisions starting with `-` are rejected, the rest only
 //! reach `git rev-parse --verify`; later commands receive full commit ids,
@@ -32,9 +35,9 @@
 
 use std::ffi::OsStr;
 use std::fmt;
-use std::io::ErrorKind;
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Output, Stdio};
 
 /// A git repository, identified by its top-level directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +80,100 @@ pub struct ChangedFile {
     pub before: Option<BlobId>,
     /// The head version.
     pub after: BlobId,
+}
+
+/// One regular file of a revision's tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeFile {
+    /// Path from the repository root, `/`-separated.
+    pub path: String,
+    /// The file's contents, for [`BlobReader::read`] or
+    /// [`Repository::read_blob`].
+    pub id: BlobId,
+}
+
+/// Reads many blobs through one long-running `git cat-file --batch`
+/// process (ADR 0002, "Consequences"). Dropping it ends the process.
+#[derive(Debug)]
+pub struct BlobReader {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    stdout: BufReader<ChildStdout>,
+}
+
+/// Arguments of the batch process, for error messages.
+const BATCH_ARGS: [&str; 2] = ["cat-file", "--batch"];
+
+impl BlobReader {
+    /// The raw contents of a blob.
+    ///
+    /// # Errors
+    ///
+    /// [`GitError::UnexpectedOutput`] if `id` names no object or not a
+    /// blob, or git answers something else; [`GitError::Command`] if the
+    /// process cannot be written to or read from.
+    pub fn read(&mut self, id: &BlobId) -> Result<Vec<u8>, GitError> {
+        let io = |e: std::io::Error| GitError::Command {
+            args: BATCH_ARGS.iter().map(|&a| a.to_owned()).collect(),
+            status: None,
+            stderr: e.to_string(),
+        };
+        let unexpected = |detail: String| GitError::UnexpectedOutput {
+            args: BATCH_ARGS.iter().map(|&a| a.to_owned()).collect(),
+            detail,
+        };
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| unexpected("the batch process is closed".to_owned()))?;
+        writeln!(stdin, "{}", id.as_str()).map_err(io)?;
+        stdin.flush().map_err(io)?;
+
+        // `<id> <type> <size>`, or `<id> missing`.
+        let mut header = String::new();
+        self.stdout.read_line(&mut header).map_err(io)?;
+        let header = header.trim_end();
+        let fields: Vec<&str> = header.split(' ').collect();
+        let size = match fields[..] {
+            [_, "blob", size] => size
+                .parse::<usize>()
+                .map_err(|_| unexpected(format!("bad size in `{header}`")))?,
+            [_, kind, size] => {
+                // Skip the object so the next answer starts cleanly.
+                let size = size.parse::<usize>().unwrap_or(0);
+                let mut skipped = vec![0; size + 1];
+                self.stdout.read_exact(&mut skipped).map_err(io)?;
+                return Err(unexpected(format!(
+                    "`{}` is a {kind}, not a blob",
+                    id.as_str()
+                )));
+            }
+            _ => return Err(unexpected(format!("`{}`: {header}", id.as_str()))),
+        };
+        let mut contents = vec![0; size + 1];
+        self.stdout.read_exact(&mut contents).map_err(io)?;
+        // Each object ends with a newline that is not part of it.
+        if contents.pop() != Some(b'\n') {
+            return Err(unexpected(format!(
+                "`{}`: no newline after the object",
+                id.as_str()
+            )));
+        }
+        Ok(contents)
+    }
+
+    #[cfg(test)]
+    fn process_id(&self) -> u32 {
+        self.child.id()
+    }
+}
+
+impl Drop for BlobReader {
+    fn drop(&mut self) {
+        // Closing stdin makes git exit; wait so no zombie process remains.
+        drop(self.stdin.take());
+        let _ = self.child.wait();
+    }
 }
 
 /// Why a git operation failed.
@@ -284,6 +381,79 @@ impl Repository {
         Ok(None)
     }
 
+    /// The regular files of the commit `revision` names, sorted by path as
+    /// a byte string. Symlinks and submodules are left out.
+    ///
+    /// # Errors
+    ///
+    /// [`GitError::UnknownRevision`] if `revision` does not name a commit,
+    /// or another [`GitError`] if git fails.
+    pub fn files_at(&self, revision: &str) -> Result<Vec<TreeFile>, GitError> {
+        let commit = self.resolve(revision)?;
+        let args = ["ls-tree", "-r", "-z", "--full-tree", &commit];
+        let out = self.git(&args)?;
+        if !out.status.success() {
+            return Err(command_error(&args, &out));
+        }
+        let mut files = Vec::new();
+        // Each entry: `<mode> SP <type> SP <id> TAB <path>`, NUL-terminated.
+        for entry in out.stdout.split(|&b| b == 0).filter(|e| !e.is_empty()) {
+            let entry = String::from_utf8_lossy(entry);
+            let unexpected = |detail: String| GitError::UnexpectedOutput {
+                args: args.iter().map(|&a| a.to_owned()).collect(),
+                detail,
+            };
+            let (header, path) = entry
+                .split_once('\t')
+                .ok_or_else(|| unexpected(format!("no tab in entry: {entry}")))?;
+            let [mode, kind, id] = header.split(' ').collect::<Vec<_>>()[..] else {
+                return Err(unexpected(format!("expected 3 fields: {header}")));
+            };
+            if kind == "blob" && REGULAR_MODES.contains(&mode) {
+                files.push(TreeFile {
+                    path: path.to_owned(),
+                    id: BlobId(id.to_owned()),
+                });
+            }
+        }
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(files)
+    }
+
+    /// A reader for many blobs, through one `git cat-file --batch`
+    /// process, for reading a whole tree.
+    ///
+    /// # Errors
+    ///
+    /// [`GitError::GitNotFound`] or another [`GitError`] if the process
+    /// cannot be started.
+    pub fn blob_reader(&self) -> Result<BlobReader, GitError> {
+        let mut child = git_command(&self.dir, &BATCH_ARGS)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            // Errors come back on stdout (`<id> missing`); nothing on
+            // stderr may block the process.
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| spawn_error(&self.dir, &BATCH_ARGS, &e))?;
+        let stdin = child.stdin.take();
+        let stdout = child.stdout.take().map(BufReader::new);
+        if let Some(stdout) = stdout {
+            Ok(BlobReader {
+                child,
+                stdin,
+                stdout,
+            })
+        } else {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(GitError::UnexpectedOutput {
+                args: BATCH_ARGS.iter().map(|&a| a.to_owned()).collect(),
+                detail: "no stdout".to_owned(),
+            })
+        }
+    }
+
     /// The raw contents of a blob.
     ///
     /// # Errors
@@ -415,6 +585,14 @@ fn parse_raw_diff(raw: &[u8]) -> Result<Vec<ChangedFile>, String> {
 /// Run `git` with `args` in `dir`. Prompts are disabled, so a command can
 /// never wait for input.
 fn run<S: AsRef<OsStr>>(dir: &Path, args: &[S]) -> Result<Output, GitError> {
+    git_command(dir, args)
+        .output()
+        .map_err(|e| spawn_error(dir, args, &e))
+}
+
+/// A `git` command with `args` in `dir`, with prompts disabled, so it can
+/// never wait for input.
+fn git_command<S: AsRef<OsStr>>(dir: &Path, args: &[S]) -> Command {
     let mut command = Command::new("git");
     command
         .args(args)
@@ -434,7 +612,12 @@ fn run<S: AsRef<OsStr>>(dir: &Path, args: &[S]) -> Result<Output, GitError> {
     // configuration and repository variables, like the fixtures (design D5).
     #[cfg(test)]
     test_support::isolate(&mut command);
-    command.output().map_err(|e| match e.kind() {
+    command
+}
+
+/// The error for a `git` command that could not be started.
+fn spawn_error<S: AsRef<OsStr>>(dir: &Path, args: &[S], e: &std::io::Error) -> GitError {
+    match e.kind() {
         // Spawning also fails with NotFound when the directory is gone.
         ErrorKind::NotFound if !dir.is_dir() => GitError::NotARepository {
             detail: format!("{} is not a directory", dir.display()),
@@ -448,7 +631,7 @@ fn run<S: AsRef<OsStr>>(dir: &Path, args: &[S]) -> Result<Output, GitError> {
             status: None,
             stderr: e.to_string(),
         },
-    })
+    }
 }
 
 fn stdout_of(out: &Output) -> String {
@@ -871,6 +1054,125 @@ mod tests {
             );
         }
         assert_eq!(entries(&repo.dir), before, "git wrote into the work tree");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn files_at_lists_regular_files_by_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let repo = TestRepo::new();
+        repo.write("b.ts", "b");
+        repo.write("a/z.ts", "z");
+        repo.write("a/b/c.ts", "c");
+        repo.write("a.b", "dot sorts before slash");
+        repo.write("run.sh", "#!/bin/sh\n");
+        std::fs::set_permissions(
+            repo.dir.join("run.sh"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .expect("chmod");
+        std::os::unix::fs::symlink("b.ts", repo.dir.join("link.ts")).expect("symlink");
+        let first = repo.commit("files");
+        repo.git(&[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{first},vendor/lib"),
+        ]);
+        repo.git(&["commit", "-q", "-m", "submodule"]);
+        repo.write("b.ts", "uncommitted");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let files = found.files_at("HEAD").expect("files");
+        let expected: Vec<TreeFile> = ["a.b", "a/b/c.ts", "a/z.ts", "b.ts", "run.sh"]
+            .iter()
+            .map(|&path| TreeFile {
+                path: path.to_owned(),
+                id: blob(&repo, "HEAD", path),
+            })
+            .collect();
+        // Symlinks and submodules are left out; the commit, not the
+        // working tree, is listed.
+        assert_eq!(files, expected);
+    }
+
+    #[test]
+    fn files_at_option_like_revision_is_unknown_and_writes_nothing() {
+        let repo = TestRepo::new();
+        repo.write("a.ts", "x");
+        repo.commit("base");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let before = entries(&repo.dir);
+        for revision in ["--output=written-by-git", "-", "no-such-branch"] {
+            assert_eq!(
+                found.files_at(revision),
+                Err(GitError::UnknownRevision {
+                    revision: revision.to_owned(),
+                })
+            );
+        }
+        assert_eq!(entries(&repo.dir), before, "git wrote into the work tree");
+    }
+
+    #[test]
+    fn blob_reader_reads_many_blobs_exactly() {
+        let repo = TestRepo::new();
+        let contents: [&[u8]; 4] = [
+            b"first\n",
+            b"",
+            b"not \xff\xfe UTF-8\r\n",
+            b"no trailing newline",
+        ];
+        for (i, bytes) in contents.iter().enumerate() {
+            repo.write(&format!("f{i}.ts"), bytes);
+        }
+        repo.commit("blobs");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let mut reader = found.blob_reader().expect("reader");
+        // Twice through, in a different order, with one reader.
+        for i in [0, 1, 2, 3, 2, 0, 3, 1] {
+            let id = blob(&repo, "HEAD", &format!("f{i}.ts"));
+            assert_eq!(reader.read(&id).expect("read"), contents[i], "f{i}.ts");
+        }
+    }
+
+    #[test]
+    fn blob_reader_missing_id_is_an_error_and_the_reader_goes_on() {
+        let repo = TestRepo::new();
+        repo.write("a.ts", "a");
+        repo.commit("base");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let mut reader = found.blob_reader().expect("reader");
+        let missing = BlobId("0".repeat(40));
+        assert!(matches!(
+            reader.read(&missing),
+            Err(GitError::UnexpectedOutput { .. })
+        ));
+        // A tree is not a blob either.
+        let tree = BlobId(repo.git(&["rev-parse", "HEAD^{tree}"]));
+        assert!(matches!(
+            reader.read(&tree),
+            Err(GitError::UnexpectedOutput { .. })
+        ));
+        assert_eq!(
+            reader.read(&blob(&repo, "HEAD", "a.ts")).expect("read"),
+            b"a"
+        );
+    }
+
+    #[test]
+    fn blob_reader_ends_its_process_when_dropped() {
+        let repo = TestRepo::new();
+        repo.write("a.ts", "a");
+        repo.commit("base");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let reader = found.blob_reader().expect("reader");
+        let pid = reader.process_id();
+        drop(reader);
+        // `/proc/<pid>` is gone once the child has been waited for.
+        #[cfg(target_os = "linux")]
+        assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
+        let _ = pid;
     }
 
     #[test]

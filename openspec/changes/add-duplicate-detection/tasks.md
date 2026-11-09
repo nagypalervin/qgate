@@ -15,9 +15,9 @@ Rust 1.85 too. Commit messages and PR bodies are written to files first.
 
 ## 2. Reading the head tree (PR 2)
 
-- [ ] 2.1 Add `Repository::files_at` (D2) with tests: regular and executable files in nested directories, sorted by path; symlinks and submodules left out; an option-like revision rejected without writing anything; verify they pass
-- [ ] 2.2 Add `Repository::blob_reader` and `BlobReader::read` (D2) with tests: many blobs read through one reader with exact bytes (including non-UTF-8 and empty blobs), a missing id is an error, and the process ends when the reader is dropped; verify they pass
-- [ ] 2.3 Update the `qgate-git` crate docs; verify `cargo doc -p qgate-git --no-deps` builds without warnings
+- [x] 2.1 Add `Repository::files_at` (D2) with tests: regular and executable files in nested directories, sorted by path; symlinks and submodules left out; an option-like revision rejected without writing anything; verify they pass
+- [x] 2.2 Add `Repository::blob_reader` and `BlobReader::read` (D2) with tests: many blobs read through one reader with exact bytes (including non-UTF-8 and empty blobs), a missing id is an error, and the process ends when the reader is dropped; verify they pass
+- [x] 2.3 Update the `qgate-git` crate docs; verify `cargo doc -p qgate-git --no-deps` builds without warnings
 
 ## 3. The analysis, the CLI and the README (PR 3)
 

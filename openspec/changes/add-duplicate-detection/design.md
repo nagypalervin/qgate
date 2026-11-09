@@ -242,3 +242,14 @@ finding, which does not fail a run by default.
   - Known exception: a namespace that holds only types keeps its skeleton
     (`export namespace $id { }`, five tokens). It is far below the
     50-token threshold.
+- **PR 2, reading the head tree:**
+  - `run` and the batch process share one `git_command` helper (same
+    environment, test isolation and spawn errors).
+  - The batch process's stderr goes to `/dev/null`. Its answers, including
+    `<id> missing`, come on stdout, and nothing unread on stderr can block
+    it.
+  - An id that names a tree or commit is an error, but its contents are
+    read and discarded first, so the next answer starts cleanly; a test
+    reads a blob after a tree.
+  - `files_at` sorts by path explicitly, although git's tree order already
+    agrees with byte order for full paths.
