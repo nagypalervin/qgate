@@ -302,3 +302,9 @@ The reviewer subagent found one blocker and several real gaps. Decisions:
 - **2.3:** `qgate-cli` depends on `qgate-core` again (for the
   `input/unparsable` finding), after PR 3 of the previous change had dropped
   it as unused.
+- **2.4:** the README commands were run as written with the built binary
+  on the `PATH`: `qgate check --base main` (with and without `--head`) in a
+  temporary repository, the CI line against a full clone (`origin/main`),
+  and a `--depth 1` clone, which fails with the shallow-clone hint. The CI
+  snippet itself is YAML-checked only; qgate has no release binary to
+  install in a workflow yet (M3), which the README says.

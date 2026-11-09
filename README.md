@@ -2,11 +2,25 @@
 
 **Detects where your codebase starts to break under fast, AI-assisted development.**
 
-> Status: early. `qgate check` compares two versions of one TypeScript
-> file for cyclomatic complexity; git revisions and more analyzers follow
-> the [roadmap](#roadmap) below.
+> Status: early. `qgate check` compares TypeScript code between two git
+> revisions (or two files) for cyclomatic complexity; more analyzers and
+> CI integration follow the [roadmap](#roadmap) below.
 
 ## Try it
+
+In a git repository with TypeScript code, check what your branch changed
+compared with `main`:
+
+```sh
+qgate check --base main
+```
+
+qgate compares the merge base of `main` and `HEAD` with `HEAD` (what a
+pull request shows) and analyzes every changed `.ts`, `.mts`, `.cts` and
+`.tsx` file. `--head <rev>` checks another revision instead of `HEAD`.
+Paths in the output are relative to the repository root.
+
+Or compare two files directly, here two fixtures from this repository:
 
 ```sh
 cargo run -q -p qgate-cli -- check \
@@ -18,16 +32,32 @@ cargo run -q -p qgate-cli -- check \
 error   crates/qgate-cli/tests/fixtures/src/orders.ts:42  OrderService.process: cyclomatic complexity 3 -> 9 (+6)  [complexity/cyclomatic-increase]
 ```
 
-`qgate check <before> <after>` accepts `.ts`, `.mts`, `.cts` and `.tsx`
-files and reports, per function:
+qgate reports, per function:
 
 | Rule | Reported when | Warning | Error |
 |---|---|---|---|
 | `complexity/cyclomatic-increase` | an existing function got more complex | +1 to +4 | +5 or more |
-| `complexity/cyclomatic-new` | a new function is already complex | 11 to 20 | above 20 |
+| `complexity/cyclomatic-new` | a new function is already complex (new files count as new) | 11 to 20 | above 20 |
+| `input/unparsable` | `--base` mode only: a changed file has a syntax error, syntax the parser does not support yet, or is not UTF-8; it is skipped | always | - |
 
 It exits with `0` when the analysis ran (findings do not fail it yet) and
-`2` for invalid input, such as an unsupported file or a syntax error.
+`2` for invalid input: an unsupported or unparsable file in the two-file
+form, an unknown revision, or a directory that is not a git repository.
+
+### In CI
+
+`--base` needs the base branch in the clone. `actions/checkout` fetches a
+single commit by default, so fetch the full history:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+- run: qgate check --base origin/${{ github.base_ref }}
+```
+
+qgate has no release binaries yet (planned for M3); until then, build it
+from this repository.
 
 ## Why
 
@@ -96,7 +126,9 @@ openspec/               specs and changes (OpenSpec workflow, see CLAUDE.md)
 ## Building
 
 Requires Rust 1.85 or newer and a C compiler (tree-sitter compiles its
-grammars from C at build time).
+grammars from C at build time). `qgate check --base` needs `git` on the
+`PATH`; the tests need git 2.32 or newer, because they create temporary
+repositories isolated from your git configuration.
 
 ```sh
 cargo build
