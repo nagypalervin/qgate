@@ -21,7 +21,7 @@ Commit messages and PR bodies are written to files first.
     - a tracked file deleted from disk;
     - a plain `mv` of a tracked file, as a rename.
 
-    It leaves out an ignored file and a `skip-worktree` file.
+    It leaves out an ignored file, and files marked `skip-worktree` or `assume-unchanged`.
   - **Clean tree:** gives no changes against `HEAD`.
   - **Nothing changes:** the index file's bytes, `git status --porcelain`, every ref (`git for-each-ref`), `HEAD`'s reflog and `git stash list` are byte-identical before and after.
   - **Hooks do not run:** `pre-commit`, `post-commit` and `post-index-change` hooks that write a marker file leave no marker.
@@ -41,6 +41,15 @@ Commit messages and PR bodies are written to files first.
   - `--no-gpg-sign` (no test failed: `commit-tree` ignores `commit.gpgSign`, so the flag was removed; see design, Implementation Notes);
   - the fixed identity;
   - `core.hooksPath=/dev/null`.
+
+  Added after review rounds 1 and 2, each also caught by a test:
+  - the fixed date;
+  - `core.splitIndex=false`;
+  - the `read-tree` fallback;
+  - the main work tree's index used in a linked work tree;
+  - no stale private index removal;
+  - removal regardless of age;
+  - a name prefix without the dash.
 - [x] 1.4 Update the `qgate-git` crate docs (the method list and the "Commands run at the top level" paragraph); verify `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-git --no-deps` builds
 
 ## 2. The CLI, end-to-end scenarios and the README (PR 2)
@@ -65,8 +74,9 @@ Commit messages and PR bodies are written to files first.
     - No commit appears;
     - Hooks do not run.
 
-    "Split index" is covered in `qgate-git` (review round 1), where the
-    configuration is set up directly.
+    "Split index" and "Interrupted checks" are covered in `qgate-git`
+    (review rounds 1 and 2), where the configuration and the leftover
+    files are set up directly.
   - **"Working tree errors":**
     - Repository without commits;
     - Base HEAD in a repository without commits;
@@ -85,7 +95,7 @@ Commit messages and PR bodies are written to files first.
   - the third usage line and the help text;
   - the snapshot taken before the diff;
   - the head label in `git_message`;
-  - the "cannot read the working tree" message.
+  - `GitError::WorkTree` printed through its `Display` ("cannot take a snapshot of the working tree: ...").
 
   Verify the 2.1 and 2.2 tests pass, and that every existing test passes unchanged.
 - [ ] 2.4 Update `README.md`:

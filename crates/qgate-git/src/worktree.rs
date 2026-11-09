@@ -12,7 +12,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::{GitError, Repository, command_error, git_command, spawn_error, stderr_of, stdout_of};
 
@@ -32,6 +32,11 @@ const SNAPSHOT_CONFIG: [&str; 4] = [
 
 /// How many names [`PrivateIndex::reserve`] tries before giving up.
 const RESERVE_ATTEMPTS: usize = 100;
+
+/// How old a private index must be before a later snapshot removes it as
+/// left behind by an interrupted run. No snapshot takes anywhere near this
+/// long, so a live one is never removed.
+const STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The author and committer of every snapshot. `commit-tree` fails without
 /// an identity, which an agent's sandbox often lacks, and a fixed date
@@ -58,7 +63,9 @@ impl Repository {
     /// method, and the merge base with any base is the one `HEAD` has.
     ///
     /// The index, refs, reflog, stash and working tree are left as they
-    /// were, and no hook runs. The same working tree gives the same id.
+    /// were. No hook runs, except a configured file-system monitor
+    /// (`core.fsmonitor`), which only tells git which files changed. The
+    /// same working tree gives the same id.
     ///
     /// # Errors
     ///
@@ -114,9 +121,12 @@ impl Repository {
     }
 }
 
-/// A copy of the index in the git directory, removed (with its lock file)
-/// when dropped. It lives next to the real index, so a split index still
-/// finds its shared part (design D1).
+/// A copy of the index in the git directory (where `--git-path` puts
+/// per-work-tree files), removed with its lock file when dropped. It stays
+/// in the repository, not the system temp directory, because it belongs to
+/// the repository and is never visible in the work tree (design D1). A
+/// copy that an interrupted run left behind is removed by a later run
+/// once it is a day old.
 struct PrivateIndex {
     path: PathBuf,
 }
@@ -149,7 +159,9 @@ impl PrivateIndex {
             std::path::absolute(&path).unwrap_or(path)
         };
         let real = absolute(real);
-        let index = Self::reserve(absolute(stem).as_os_str())?;
+        let stem = absolute(stem);
+        remove_stale(&stem);
+        let index = Self::reserve(stem.as_os_str())?;
         match std::fs::copy(&real, &index.path) {
             Ok(_) => {}
             Err(e) if e.kind() == ErrorKind::NotFound => {
@@ -215,6 +227,34 @@ impl Drop for PrivateIndex {
     }
 }
 
+/// Remove the private indexes, and their lock files, that interrupted runs
+/// left next to `stem` more than [`STALE_AFTER`] ago. Errors are ignored:
+/// a file that cannot be removed now can be removed by a later run.
+fn remove_stale(stem: &Path) {
+    let (Some(dir), Some(name)) = (stem.parent(), stem.file_name()) else {
+        return;
+    };
+    let prefix = format!("{}-", name.to_string_lossy());
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with(&prefix) {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(|age| age > STALE_AFTER);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// The lock file git writes next to an index while it updates it.
 fn lock_of(path: &Path) -> std::ffi::OsString {
     let mut lock = path.as_os_str().to_os_string();
@@ -275,7 +315,12 @@ mod tests {
     /// Files a check left in the git directory under the private index's
     /// name.
     fn private_indexes(repo: &TestRepo) -> Vec<String> {
-        std::fs::read_dir(repo.dir.join(".git"))
+        private_indexes_in(&repo.dir.join(".git"))
+    }
+
+    /// Files named like a private index in `git_dir`.
+    fn private_indexes_in(git_dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(git_dir)
             .expect("the git directory")
             .map(|entry| entry.expect("an entry").file_name())
             .map(|name| name.to_string_lossy().into_owned())
@@ -407,19 +452,33 @@ mod tests {
 
     #[test]
     fn snapshot_in_a_linked_worktree() {
+        /// Removes the linked work tree even when an assertion fails.
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
         let repo = TestRepo::new();
         repo.write("src/a.ts", "export const a = 1;\n");
+        repo.write("src/kept.ts", "export const k = 1;\n");
         repo.commit("base");
         let linked = crate::test_support::scratch_dir("linked");
+        let _cleanup = Cleanup(linked.clone());
         std::fs::remove_dir(&linked).expect("an empty directory to replace");
+        let linked_arg = linked.to_str().expect("UTF-8");
+        repo.git(&["worktree", "add", "-q", "-b", "side", linked_arg]);
+        // Only the linked work tree's own index marks this file, so a
+        // snapshot that copied the main index would report it.
         repo.git(&[
-            "worktree",
-            "add",
-            "-q",
-            "-b",
-            "side",
-            linked.to_str().expect("UTF-8"),
+            "-C",
+            linked_arg,
+            "update-index",
+            "--skip-worktree",
+            "src/kept.ts",
         ]);
+        std::fs::write(linked.join("src/kept.ts"), "export const k = 2;\n").expect("edit");
         std::fs::write(linked.join("src/a.ts"), "export const a = 2;\n").expect("edit");
         std::fs::write(linked.join("b.ts"), "export const b = 1;\n").expect("add");
 
@@ -433,6 +492,11 @@ mod tests {
             .collect();
 
         assert_eq!(paths, vec!["b.ts", "src/a.ts"]);
+        let linked_git_dir = repo.git(&["-C", linked_arg, "rev-parse", "--absolute-git-dir"]);
+        assert_eq!(
+            private_indexes_in(std::path::Path::new(&linked_git_dir)),
+            Vec::<String>::new()
+        );
         // The main work tree's snapshot does not see the linked one's edits.
         assert_eq!(
             repository(&repo)
@@ -440,12 +504,39 @@ mod tests {
                 .expect("changes"),
             vec![]
         );
-        repo.git(&[
-            "worktree",
-            "remove",
-            "--force",
-            linked.to_str().expect("UTF-8"),
-        ]);
+        repo.git(&["worktree", "remove", "--force", linked_arg]);
+    }
+
+    #[test]
+    fn stale_private_indexes_are_removed_and_recent_ones_kept() {
+        let repo = TestRepo::new();
+        repo.write("src/a.ts", "export const a = 1;\n");
+        repo.commit("base");
+        let git_dir = repo.dir.join(".git");
+        let two_days_ago = SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60);
+        let file = |name: &str, modified: Option<SystemTime>| {
+            let path = git_dir.join(name);
+            std::fs::write(&path, "left behind").expect("write");
+            if let Some(time) = modified {
+                std::fs::File::options()
+                    .write(true)
+                    .open(&path)
+                    .and_then(|f| f.set_modified(time))
+                    .expect("set the modification time");
+            }
+            path
+        };
+        let old = file("qgate-index-1-2-3", Some(two_days_ago));
+        let old_lock = file("qgate-index-1-2-3.lock", Some(two_days_ago));
+        let recent = file("qgate-index-4-5-6", None);
+        let unrelated = file("qgate-indexer", Some(two_days_ago));
+
+        snapshot(&repo);
+
+        assert!(!old.exists(), "the stale private index is still there");
+        assert!(!old_lock.exists(), "the stale lock is still there");
+        assert!(recent.exists(), "a recent private index was removed");
+        assert!(unrelated.exists(), "an unrelated file was removed");
     }
 
     #[test]

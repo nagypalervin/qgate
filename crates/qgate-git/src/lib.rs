@@ -369,9 +369,10 @@ pub enum GitError {
         /// The revision as the caller gave it.
         revision: String,
     },
-    /// No snapshot of the working tree could be taken: most often a file
-    /// that is not ignored cannot be read, but also a failed copy of the
-    /// index or a `git add` that cannot write objects.
+    /// No snapshot of the working tree could be taken because `git add -A`
+    /// failed (most often a file that is not ignored cannot be read), the
+    /// index could not be copied, or no private index could be created.
+    /// Other git failures during a snapshot are [`GitError::Command`].
     WorkTree {
         /// What went wrong, with git's own message where there is one.
         detail: String,

@@ -69,7 +69,9 @@ that holds the working tree. The steps:
    e-mail `qgate@localhost`, date `@0 +0000`) set through `GIT_AUTHOR_*` and
    `GIT_COMMITTER_*`.
 6. **Delete the private index** and any `.lock` next to it, on every path
-   out (a guard with `Drop`).
+   out (a guard with `Drop`). A run that is killed cannot do this, so step 2
+   first removes `qgate-index-*` files in that directory that are more than
+   a day old (see Risks).
 
 The CLI then passes the commit id as the head to the existing calls.
 
@@ -156,11 +158,15 @@ The CLI then passes the commit id as the head to the existing calls.
   an internal id" to the three errors above.
 - **Git side:** errors raised inside the snapshot are mapped as follows:
   - an unknown `HEAD` becomes `UnknownRevision("HEAD")`;
-  - a failing `git add -A`, a failed copy of the index, or no free private
-    index name becomes `GitError::WorkTree { detail }`. It prints as
-    "cannot take a snapshot of the working tree: <detail>". An unreadable
-    file is the usual cause, and git's message names it. A full disk or an
-    unwritable object store gives the same prefix with git's own reason.
+  - a failing `git add -A`, a failed copy of the index, or a private index
+    that cannot be created (an unwritable git directory, no free name)
+    becomes `GitError::WorkTree { detail }`. It prints as "cannot take a
+    snapshot of the working tree: <detail>". An unreadable file is the
+    usual cause, and git's message names it;
+  - every other failing git command of the snapshot (`rev-parse
+    --git-path`, `read-tree`, `write-tree`, `commit-tree`, for example on
+    an unwritable object store) stays `GitError::Command`, as for any git
+    command.
 
 ### D4. CLI shape
 
@@ -181,8 +187,8 @@ The CLI then passes the commit id as the head to the existing calls.
   - its private index guard;
   - `GitError::WorkTree`.
 
-  No new dependency. The unique name uses the process id plus an atomic
-  counter, so tests that run in parallel threads do not collide.
+  No new dependency. The private index's name is reserved as D1 step 2
+  describes (pid, nanoseconds and a counter, created with `create_new`).
 - **`qgate-cli`:**
   - the flag;
   - the label/revision split;
@@ -216,10 +222,13 @@ The CLI then passes the commit id as the head to the existing calls.
   `skip-worktree` and count as unchanged. That is what git status shows,
   and what the spec says.
 - **[Risk] A crash or kill between steps 2 and 6 leaves a
-  `qgate-index-*` file in the git directory.** → It is invisible to git
-  and to the user, holds no data that is not in the work tree, and the
-  next run uses a new name. qgate never deletes it, because it cannot know
-  that no other process still uses it. This is too minor for the README.
+  `qgate-index-*` file**, a full copy of the index, in the git directory.
+  Agent hooks with timeouts make this a normal event, and `git gc` ignores
+  unknown files there. → Every snapshot removes `qgate-index-*` files (and
+  their locks) in that directory that are more than a day old. No snapshot
+  runs that long, so a copy in use is never removed, and the leftovers are
+  bounded by a day's interrupted runs. The spec states this as
+  "Interrupted checks".
 
 ## Migration Plan
 
@@ -270,8 +279,31 @@ None. The option is new and the default is unchanged.
 
     New scenarios cover these: files git does not look at, split index,
     `--base HEAD` without commits, and `qgate.toml` not a regular file.
-  - **`GitError::WorkTree`** covers every failed snapshot, so its message is
-    now "cannot take a snapshot of the working tree", not "cannot read".
+  - **`GitError::WorkTree`** gets the message "cannot take a snapshot of the
+    working tree", not "cannot read", because it also covers a failed index
+    copy and an index that cannot be created.
+- **Review round 2:**
+  - **Interrupted runs:** with stale files no longer deleted, a killed run
+    left a full index copy that nothing removed. Now every snapshot
+    removes private indexes more than a day old (D1 step 6, Risks), with
+    the new "Interrupted checks" requirement.
+  - **`WorkTree` scope:** round 1's commit message and this note claimed
+    `WorkTree` covers every failed snapshot. It does not. A failing
+    `read-tree`, `write-tree` or `commit-tree` (for example an unwritable
+    object store) stays `GitError::Command`. D3 and the variant's docs now
+    say so.
+  - **Linked work tree test:**
+    - it now marks a file `skip-worktree` in the linked index only, so
+      copying the main index fails it (mutation-checked);
+    - it checks that no private index is left in the linked work tree's
+      git directory;
+    - it removes the linked directory even when an assertion fails.
+  - **Docs and artifacts:**
+    - stale reasons in `PrivateIndex`'s doc (split index) and in D5 (the
+      name) are corrected;
+    - `worktree_snapshot` now names the file-system monitor exception;
+    - "Files git does not look at" covers both index bits;
+    - tasks 1.1, 1.3 and 2.3 match what was done.
 - **No `--no-gpg-sign`.** The design first passed it to `commit-tree`.
   Removing it broke no test (task 1.3), because `commit-tree` never signs
   on configuration; only `git commit` does. It was dead code, so it is

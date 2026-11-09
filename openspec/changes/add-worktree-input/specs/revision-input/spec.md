@@ -61,9 +61,9 @@ count as unchanged. The before side SHALL be the merge base of `--base` and
 
 #### Scenario: Files git does not look at
 
-- **GIVEN** `src/a.ts` is marked `assume-unchanged` in the index, and `f` in it was made more complex on disk
+- **GIVEN** the index marks `src/a.ts` `assume-unchanged` and `src/b.ts` `skip-worktree`, and a function in each was made more complex on disk
 - **WHEN** the user runs `qgate check --base main --worktree`
-- **THEN** no finding is reported for `src/a.ts`
+- **THEN** no finding is reported for `src/a.ts` or `src/b.ts`
 
 ### Requirement: The working tree replaces the head everywhere
 
@@ -93,8 +93,8 @@ against.
 ### Requirement: Checking the working tree changes nothing
 
 A check with `--worktree` SHALL NOT change the index (what is staged), `HEAD`,
-refs, the stash, the reflog or any file in the working tree. It SHALL leave
-nothing behind but storage for the snapshot's contents: objects no ref
+refs, the stash, the reflog or any file in the working tree. A completed
+check SHALL leave nothing behind but storage for the snapshot's contents: objects no ref
 reaches and, under a clean filter such as Git LFS, that filter's store. It
 SHALL NOT run git hooks, apart from a configured file-system monitor that
 git asks which files changed.
@@ -122,6 +122,20 @@ git asks which files changed.
 - **GIVEN** the repository uses `core.splitIndex`, and most tracked files changed on disk
 - **WHEN** the user runs `qgate check --base main --worktree`
 - **THEN** the git directory holds the same `sharedindex.*` files as before the check
+
+### Requirement: Interrupted checks
+
+A check with `--worktree` that is interrupted, for example killed by a
+timeout, MAY leave a private copy of the index in the git directory. A later
+check with `--worktree` SHALL remove such copies once they are more than a
+day old, and SHALL NOT remove younger ones, which a running check may use.
+
+#### Scenario: Copy left by an interrupted check
+
+- **GIVEN** an interrupted check left a private copy of the index two days ago, and a check that started a minute ago is still running
+- **WHEN** the user runs `qgate check --base main --worktree`
+- **THEN** the two-day-old copy is gone
+- **AND** the running check's copy is still there
 
 ### Requirement: Working tree errors
 
