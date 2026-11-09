@@ -38,6 +38,7 @@ use std::fmt;
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Output, Stdio};
+use std::thread::JoinHandle;
 
 /// A git repository, identified by its top-level directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,8 +106,22 @@ pub struct BlobReader {
     child: Child,
     stdin: Option<ChildStdin>,
     stdout: Option<BufReader<ChildStdout>>,
-    stderr: Option<ChildStderr>,
+    /// Drains git's stderr while it runs, so git can never block on a full
+    /// pipe, and keeps the last [`STDERR_KEPT`] bytes for error messages.
+    stderr: Option<JoinHandle<Vec<u8>>>,
 }
+
+/// How much of git's stderr a [`BlobReader`] keeps: the end, which holds
+/// the error.
+const STDERR_KEPT: usize = 8 * 1024;
+
+/// The largest blob a [`BlobReader`] reads; larger ones are skipped with
+/// an error rather than allocated. Source files are far smaller.
+#[cfg(not(test))]
+const MAX_BLOB_SIZE: usize = 64 * 1024 * 1024;
+/// Smaller in tests, so a test can exceed it without a huge file.
+#[cfg(test)]
+const MAX_BLOB_SIZE: usize = 2 * 1024 * 1024;
 
 /// Arguments of the batch process, for error messages.
 const BATCH_ARGS: [&str; 2] = ["cat-file", "--batch"];
@@ -135,12 +150,12 @@ impl BlobReader {
             args: BATCH_ARGS.iter().map(|&a| a.to_owned()).collect(),
             detail,
         };
-        if self.stdin.is_none() || self.stdout.is_none() {
+        let (Some(stdin), Some(stdout)) = (self.stdin.as_mut(), self.stdout.as_mut()) else {
             return Err(unexpected(
                 "the batch process was closed after an earlier error".to_owned(),
             ));
-        }
-        match self.exchange(id) {
+        };
+        match Self::exchange(stdin, stdout, id) {
             Ok(Ok(contents)) => Ok(contents),
             // Still in step: the next request can go ahead.
             Ok(Err(detail)) => Err(unexpected(detail)),
@@ -153,18 +168,21 @@ impl BlobReader {
     }
 
     /// One request and its answer: the blob, or why `id` is not one.
-    fn exchange(&mut self, id: &BlobId) -> Result<Result<Vec<u8>, String>, Broken> {
-        let (Some(stdin), Some(stdout)) = (self.stdin.as_mut(), self.stdout.as_mut()) else {
-            return Err(Broken::Protocol("closed".to_owned()));
-        };
+    fn exchange(
+        stdin: &mut ChildStdin,
+        stdout: &mut BufReader<ChildStdout>,
+        id: &BlobId,
+    ) -> Result<Result<Vec<u8>, String>, Broken> {
         writeln!(stdin, "{}", id.as_str()).map_err(Broken::Io)?;
         stdin.flush().map_err(Broken::Io)?;
 
         // `<id> <type> <size>`, or `<id> missing`.
-        let mut header = String::new();
-        if stdout.read_line(&mut header).map_err(Broken::Io)? == 0 {
+        let mut header = Vec::new();
+        if stdout.read_until(b'\n', &mut header).map_err(Broken::Io)? == 0 {
             return Err(Broken::Io(ErrorKind::UnexpectedEof.into()));
         }
+        let header = String::from_utf8(header)
+            .map_err(|_| Broken::Protocol("an answer that is not UTF-8".to_owned()))?;
         let header = header.trim_end();
         let fields: Vec<&str> = header.split(' ').collect();
         if fields.first() != Some(&id.as_str()) {
@@ -173,15 +191,29 @@ impl BlobReader {
                 id.as_str()
             )));
         }
-        let size_of = |size: &str| {
-            size.parse::<usize>()
-                .map_err(|_| Broken::Protocol(format!("bad size in `{header}`")))
-        };
         let (kind, size) = match fields[..] {
             [_, "missing"] => return Ok(Err(format!("`{}` names no object", id.as_str()))),
-            [_, kind, size] => (kind, size_of(size)?),
+            [_, kind, size] => match size.parse::<usize>() {
+                Ok(size) => (kind, size),
+                Err(_) => return Err(Broken::Protocol(format!("bad size in `{header}`"))),
+            },
             _ => return Err(Broken::Protocol(format!("unexpected answer `{header}`"))),
         };
+        if kind != "blob" || size > MAX_BLOB_SIZE {
+            // Skip the object and its newline without keeping it, so the
+            // next answer starts cleanly.
+            let skip = u64::try_from(size).unwrap_or(u64::MAX).saturating_add(1);
+            let skipped = std::io::copy(&mut stdout.by_ref().take(skip), &mut std::io::sink())
+                .map_err(Broken::Io)?;
+            if skipped < skip {
+                return Err(Broken::Io(ErrorKind::UnexpectedEof.into()));
+            }
+            return Ok(Err(if kind == "blob" {
+                format!("`{}` is larger than {MAX_BLOB_SIZE} bytes", id.as_str())
+            } else {
+                format!("`{}` is a {kind}, not a blob", id.as_str())
+            }));
+        }
         let mut contents = vec![0; size + 1];
         stdout.read_exact(&mut contents).map_err(Broken::Io)?;
         // Each object ends with a newline that is not part of it.
@@ -191,24 +223,21 @@ impl BlobReader {
                 id.as_str()
             )));
         }
-        if kind == "blob" {
-            Ok(Ok(contents))
-        } else {
-            Ok(Err(format!("`{}` is a {kind}, not a blob", id.as_str())))
-        }
+        Ok(Ok(contents))
     }
 
     /// Close the reader after `error`, wait for the process and report how
     /// it ended, with what it wrote on standard error.
     fn fail(&mut self, error: &std::io::Error) -> GitError {
         self.close();
-        let mut stderr = String::new();
-        if let Some(mut pipe) = self.stderr.take() {
-            // The process ends once stdin and stdout are closed, so this
-            // reaches end of file.
-            let _ = pipe.read_to_string(&mut stderr);
-        }
         let status = self.child.wait().ok().and_then(|s| s.code());
+        // The drain ends at end of file, once git has exited.
+        let stderr = self
+            .stderr
+            .take()
+            .and_then(|drain| drain.join().ok())
+            .unwrap_or_default();
+        let stderr = String::from_utf8_lossy(&stderr);
         let stderr = stderr.trim();
         GitError::Command {
             args: BATCH_ARGS.iter().map(|&a| a.to_owned()).collect(),
@@ -251,10 +280,31 @@ impl BlobReader {
 impl Drop for BlobReader {
     fn drop(&mut self) {
         self.close();
-        drop(self.stderr.take());
-        // Wait so no zombie process remains.
+        // Wait so no zombie process remains; the stderr drain then ends.
         let _ = self.child.wait();
+        if let Some(drain) = self.stderr.take() {
+            let _ = drain.join();
+        }
     }
+}
+
+/// Read `stderr` to its end on its own thread, keeping the last
+/// [`STDERR_KEPT`] bytes.
+fn drain_stderr(mut stderr: ChildStderr) -> JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut kept = Vec::new();
+        let mut chunk = [0; 4096];
+        while let Ok(n) = stderr.read(&mut chunk) {
+            if n == 0 {
+                break;
+            }
+            kept.extend_from_slice(&chunk[..n]);
+            if kept.len() > STDERR_KEPT {
+                kept.drain(..kept.len() - STDERR_KEPT);
+            }
+        }
+        kept
+    })
 }
 
 /// Why a git operation failed.
@@ -509,16 +559,24 @@ impl Repository {
     /// [`GitError::GitNotFound`] or another [`GitError`] if the process
     /// cannot be started.
     pub fn blob_reader(&self) -> Result<BlobReader, GitError> {
-        let mut child = git_command(&self.dir, &BATCH_ARGS)
+        self.spawn_blob_reader(&[])
+    }
+
+    /// [`Repository::blob_reader`] with extra environment variables, which
+    /// tests use to make git write to stderr.
+    fn spawn_blob_reader(&self, env: &[(&str, &str)]) -> Result<BlobReader, GitError> {
+        let mut command = git_command(&self.dir, &BATCH_ARGS);
+        command.envs(env.iter().copied());
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            // Read once the process has ended, for the error message. In
-            // batch mode git writes to stderr only when it fails.
+            // Drained on a thread while git runs (`GIT_TRACE*` settings can
+            // make it write a lot), and kept for error messages.
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| spawn_error(&self.dir, &BATCH_ARGS, &e))?;
         let stdin = child.stdin.take();
-        let stderr = child.stderr.take();
+        let stderr = child.stderr.take().map(drain_stderr);
         let stdout = child.stdout.take().map(BufReader::new);
         if stdout.is_some() {
             Ok(BlobReader {
@@ -1314,6 +1372,58 @@ mod tests {
             }
             other => panic!("expected the reader to be closed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_blob_above_the_limit_is_skipped_and_the_reader_goes_on() {
+        let repo = TestRepo::new();
+        repo.write("huge.bin", vec![b'x'; MAX_BLOB_SIZE + 1]);
+        repo.write("a.ts", "a");
+        repo.commit("base");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let mut reader = found.blob_reader().expect("reader");
+        match reader.read(&blob(&repo, "HEAD", "huge.bin")) {
+            Err(GitError::UnexpectedOutput { detail, .. }) => {
+                assert!(detail.contains("larger than"), "{detail}");
+            }
+            other => panic!("expected the blob to be refused, got {other:?}"),
+        }
+        assert_eq!(
+            reader.read(&blob(&repo, "HEAD", "a.ts")).expect("read"),
+            b"a"
+        );
+    }
+
+    #[test]
+    fn a_lot_of_stderr_does_not_block_the_reader() {
+        let repo = TestRepo::new();
+        for i in 0..1500 {
+            repo.write(&format!("f{i}.ts"), format!("{i}"));
+        }
+        repo.commit("many blobs");
+        // Pack-access tracing writes a line to stderr for every object
+        // read from a pack: about 170 KB here, far more than a pipe holds.
+        repo.git(&["repack", "-adq"]);
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let ids: Vec<BlobId> = (0..1500)
+            .map(|i| blob(&repo, "HEAD", &format!("f{i}.ts")))
+            .collect();
+        let mut reader = found
+            .spawn_blob_reader(&[("GIT_TRACE_PACK_ACCESS", "2")])
+            .expect("reader");
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for (i, id) in ids.iter().enumerate() {
+                assert_eq!(reader.read(id).expect("read"), format!("{i}").into_bytes());
+            }
+            let _ = done.send(());
+        });
+        assert!(
+            finished
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .is_ok(),
+            "reading hung or failed"
+        );
     }
 
     #[test]

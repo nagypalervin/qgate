@@ -79,8 +79,15 @@ skips comments. Normalization:
     same environment as `run`.
   - `BlobReader::read(&mut self, id) -> Result<Vec<u8>, GitError>`
     writes `<id>\n`, then reads `<id> <type> <size>\n`, then `<size>`
-    bytes and the trailing `\n`. A `missing` answer is an error.
-  - Dropping the reader closes stdin and waits for the process.
+    bytes and the trailing `\n`.
+  - A `missing` answer, a non-blob object or a blob above 64 MiB is an
+    error that leaves the reader in step. An answer out of step closes
+    it. When git ends, the error carries its exit status and the end of
+    its stderr.
+  - Git's stderr is drained on a thread while git runs, keeping the last
+    8 KiB.
+  - Dropping the reader closes stdin and stdout, waits for the process
+    and joins the drain.
 
 The git crate stays language-free: the CLI picks the supported paths.
 
@@ -245,9 +252,8 @@ finding, which does not fail a run by default.
 - **PR 2, reading the head tree:**
   - `run` and the batch process share one `git_command` helper (same
     environment, test isolation and spawn errors).
-  - The batch process's stderr is piped and read only after the process
-    has ended, for the error message (corrected at review; it first went to
-    `/dev/null`, which lost git's message when the process failed).
+  - The batch process's stderr is drained on a thread and its end kept
+    for error messages (see "PR 2, review round 2").
   - An id that names a tree or commit is an error, but its contents are
     read and discarded first, so the next answer starts cleanly; a test
     reads a blob after a tree.
@@ -270,3 +276,16 @@ finding, which does not fail a run by default.
     answer out of step, and a drop with an unread 2 MB answer (with a
     timeout, so it fails rather than hangs).
   - `TreeFile.path` documents its lossy UTF-8, like `ChangedFile.path`.
+- **PR 2, review round 2:**
+  - Reading stderr only after git ended brought back a deadlock: with a
+    `GIT_TRACE*` setting git can write more than a pipe holds while it
+    is still answering, and then blocks. A thread now drains stderr while
+    git runs and keeps its last 8 KiB. A test reads 1,500 packed blobs
+    with `GIT_TRACE_PACK_ACCESS` and a timeout.
+  - A blob above 64 MiB is skipped (read and discarded) with an error
+    that keeps the reader in step, instead of a size-sized allocation;
+    tests use a 2 MiB limit to exceed it cheaply. PR 3 treats a read
+    error for an unchanged head file like an unparsable file: skipped.
+  - A header that is not UTF-8 is a protocol error, not an I/O error;
+    stderr is decoded lossily like `stderr_of`; `exchange` takes the open
+    pipes, so the duplicate "closed" guard is gone.
