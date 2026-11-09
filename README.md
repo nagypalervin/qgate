@@ -217,7 +217,7 @@ Design principles:
 | Milestone | Scope | Status |
 |---|---|---|
 | **M1** | `qgate check`, TypeScript parsing, complexity delta, git revisions, `--fail-on` | done |
-| **M2** | Architecture rules (`qgate.toml`), duplication detection | in progress |
+| **M2** | Architecture rules (`qgate.toml`), duplication detection | done |
 | **M3** | Release binaries, GitHub Action, SARIF output, pull request comments | planned |
 | **M4** | MCP server: AI coding agents check their own changes before opening a pull request | planned |
 | **M5** | Change risk from git history: hotspots (code that is both complex and changed often), code changed without its tests | planned |
