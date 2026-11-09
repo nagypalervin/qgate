@@ -12,6 +12,8 @@
 //! - [`Repository::read_blob`] returns the exact bytes of one version.
 //! - [`Repository::file_at`] reads one regular file, such as `qgate.toml`,
 //!   as a revision has it; the path is taken literally.
+//! - [`Repository::changes`] adds the deleted regular files, with their
+//!   base contents, to the changed ones, from the same diff.
 //! - [`Repository::files_at`] lists every regular file of a revision, and
 //!   [`Repository::blob_reader`] reads many blobs through one
 //!   `git cat-file --batch` process, for analyses that need a whole tree.
@@ -262,6 +264,13 @@ impl BlobReader {
         drop(self.stdout.take());
     }
 
+    /// Whether an earlier error closed the reader, so every further
+    /// [`read`](Self::read) fails.
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        self.stdin.is_none() || self.stdout.is_none()
+    }
+
     #[cfg(test)]
     fn process_id(&self) -> u32 {
         self.child.id()
@@ -453,6 +462,18 @@ impl Repository {
     /// [`GitError::NoMergeBase`] if they share no history, or another
     /// [`GitError`] if git fails.
     pub fn changed_files(&self, base: &str, head: &str) -> Result<Vec<ChangedFile>, GitError> {
+        Ok(self.changes(base, head)?.changed)
+    }
+
+    /// The changed files, as [`Repository::changed_files`] gives them, and
+    /// the regular files the head no longer has as regular files (deleted,
+    /// or replaced by a symlink or submodule) with their contents at the
+    /// merge base, both sorted by path, from one diff.
+    ///
+    /// # Errors
+    ///
+    /// As [`Repository::changed_files`].
+    pub fn changes(&self, base: &str, head: &str) -> Result<Changes, GitError> {
         let (merge_base, head) = self.merge_base_of(base, head)?;
         let args = [
             "diff",
@@ -469,13 +490,14 @@ impl Repository {
         if !out.status.success() {
             return Err(command_error(&args, &out));
         }
-        let mut files =
+        let mut diff =
             parse_raw_diff(&out.stdout).map_err(|detail| GitError::UnexpectedOutput {
                 args: args.iter().map(|&a| a.to_owned()).collect(),
                 detail,
             })?;
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(files)
+        diff.changed.sort_by(|a, b| a.path.cmp(&b.path));
+        diff.deleted.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(diff)
     }
 
     /// The contents of the regular file at `path` (relative to the
@@ -684,14 +706,25 @@ impl Repository {
 /// `160000`) is skipped.
 const REGULAR_MODES: [&str; 2] = ["100644", "100755"];
 
-/// Parse `git diff --raw -z` output into the changed regular files.
+/// What a diff says about regular files: see [`Repository::changes`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Changes {
+    /// Added, modified and renamed regular files.
+    pub changed: Vec<ChangedFile>,
+    /// Regular files that are gone, with their base contents.
+    pub deleted: Vec<TreeFile>,
+}
+
+/// Parse `git diff --raw -z` output into the changed and the deleted
+/// regular files.
 ///
 /// Each record is `:<old-mode> <new-mode> <old-id> <new-id> <status>`,
 /// NUL, path, NUL; renames and copies (`R<score>`, `C<score>`) carry the
 /// old path and then the new path.
-fn parse_raw_diff(raw: &[u8]) -> Result<Vec<ChangedFile>, String> {
+fn parse_raw_diff(raw: &[u8]) -> Result<Changes, String> {
     let mut fields = raw.split(|&b| b == 0);
     let mut files = Vec::new();
+    let mut deleted = Vec::new();
     while let Some(header) = fields.next() {
         if header.is_empty() {
             break;
@@ -727,7 +760,15 @@ fn parse_raw_diff(raw: &[u8]) -> Result<Vec<ChangedFile>, String> {
             Some('M' | 'R' | 'C') if regular(old_mode) && regular(new_mode) => {
                 Some(BlobId(old_id.to_owned()))
             }
-            // Deleted, symlink, submodule, a file that became one, unmerged.
+            // A regular file that is gone, or no longer a regular file.
+            Some('D' | 'T') if regular(old_mode) => {
+                deleted.push(TreeFile {
+                    path,
+                    id: BlobId(old_id.to_owned()),
+                });
+                continue;
+            }
+            // Symlinks, submodules, a file that became one, unmerged.
             _ => continue,
         };
         files.push(ChangedFile {
@@ -737,7 +778,10 @@ fn parse_raw_diff(raw: &[u8]) -> Result<Vec<ChangedFile>, String> {
             after: BlobId(new_id.to_owned()),
         });
     }
-    Ok(files)
+    Ok(Changes {
+        changed: files,
+        deleted,
+    })
 }
 
 /// Run `git` with `args` in `dir`. Prompts are disabled, so a command can
@@ -1306,6 +1350,8 @@ mod tests {
             reader.read(&missing),
             Err(GitError::UnexpectedOutput { .. })
         ));
+        // A missing object keeps the reader in step.
+        assert!(!reader.is_closed());
         // A tree is not a blob either.
         let tree = BlobId(repo.git(&["rev-parse", "HEAD^{tree}"]));
         assert!(matches!(
@@ -1383,6 +1429,7 @@ mod tests {
             reader.read(&BlobId("not an id".to_owned())),
             Err(GitError::UnexpectedOutput { .. })
         ));
+        assert!(reader.is_closed());
         match reader.read(&blob(&repo, "HEAD", "a.ts")) {
             Err(GitError::UnexpectedOutput { detail, .. }) => {
                 assert!(detail.contains("closed"), "{detail}");
@@ -1504,6 +1551,39 @@ mod tests {
         #[cfg(target_os = "linux")]
         assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
         let _ = pid;
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn deleted_files_have_their_base_contents() {
+        let repo = TestRepo::new();
+        repo.write("a.ts", "a");
+        repo.write("keep.ts", "k");
+        repo.write("to-link.ts", "l");
+        repo.commit("base");
+        let a = blob(&repo, "HEAD", "a.ts");
+        let to_link = blob(&repo, "HEAD", "to-link.ts");
+        std::fs::remove_file(repo.dir.join("a.ts")).expect("delete");
+        std::fs::remove_file(repo.dir.join("to-link.ts")).expect("delete");
+        std::os::unix::fs::symlink("keep.ts", repo.dir.join("to-link.ts")).expect("symlink");
+        repo.write("keep.ts", "changed");
+        repo.commit("head");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        assert_eq!(
+            found.changes("HEAD~1", "HEAD").expect("changes").deleted,
+            vec![
+                TreeFile {
+                    path: "a.ts".to_owned(),
+                    id: a,
+                },
+                TreeFile {
+                    path: "to-link.ts".to_owned(),
+                    id: to_link,
+                },
+            ]
+        );
+        // The changed files stay as they were.
+        assert_eq!(changes(&repo, "HEAD~1", "HEAD").len(), 1);
     }
 
     #[test]

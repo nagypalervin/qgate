@@ -25,8 +25,10 @@ See proposal.md for why and what.
 - **Read the head tree once,** in one git process, and keep only what the
   findings need: counts and positions of the windows that the changed
   files contain.
-- **Be deterministic:** the same input gives the same bytes. Hashes are
-  fixed (no `RandomState`), maps are ordered or sorted before output.
+- **Be deterministic:** the same input gives the same bytes. Window hashes
+  are fixed (FNV-1a and polynomial bases, not `RandomState`); hash maps
+  are used for lookups only, and what reaches the output is ordered or
+  sorted.
 
 **Non-Goals:**
 
@@ -107,7 +109,8 @@ let findings = index.findings();
    combines the token hashes polynomially, in wrapping `u64` arithmetic
    (FNV-1a for the token text, a fixed odd base for the window). A
    rolling update makes each window O(1).
-2. **`new`.** It hashes every window of the changed files' head versions
+2. **`new`.** *Counting is per file since PR 3 (Implementation Notes,
+   review round 2).* It hashes every window of the changed files' head versions
    (the candidates), counts each candidate's occurrences there, and
    counts its occurrences in their base versions. That gives
    `delta[h] = after - before`.
@@ -115,7 +118,8 @@ let findings = index.findings();
    candidate hash, records the occurrence `(path, token index, first
    line, last line)`. Other windows are dropped, so memory grows with the
    changed code, not with the repository.
-4. **`findings`.**
+4. **`findings`.** *Superseded in PR 3 (Implementation Notes, review
+   round 2): counted per file that holds a key, not per occurrence.*
    - A candidate is a new duplicate if it occurs at least twice in the
      head and `delta > 0`.
    - Its occurrences in the changed files are ordered by path and
@@ -127,6 +131,9 @@ let findings = index.findings();
 
 ### D4: Blocks and their counterparts
 
+- *Superseded in PR 3 (see Implementation Notes, review rounds 1 and 2):
+  blocks follow one copy in another file, and only copies across files
+  count.*
 - **Blocks.** In each changed file, the reported window starts are merged
   when consecutive (`i`, `i+1`, ...). A block covers tokens `first ..
   last + K`, so its token count is `last - first + K`, and its lines run
@@ -138,11 +145,12 @@ let findings = index.findings();
     candidate too, so its occurrence was recorded.
   - "and `k` more" counts the other occurrences of the first window that
     are not reported.
-- **Hash collisions** are possible in principle. Before a block is
-  reported, the tokens of its first window are compared with the
-  counterpart's. The counterpart's tokens come from the head file, which
-  is read again only for this check; that happens rarely and only for
-  reported blocks.
+- **Hash collisions** are possible in principle. *Superseded in PR 3 (see
+  Implementation Notes): two independent hashes per window, no re-read.*
+  Before a block is reported, the tokens of its first window are compared
+  with the counterpart's. The counterpart's tokens come from the head
+  file, which is read again only for this check; that happens rarely and
+  only for reported blocks.
 
 ### D5: CLI wiring
 
@@ -154,7 +162,9 @@ changed file could be analyzed:
    `parse`, then `index.add`, dropping the model at once. A file that
    cannot be parsed, or is not UTF-8, is skipped silently.
 3. The changed files' head versions are added from their models, which
-   are already parsed.
+   are already parsed. *Superseded in PR 3: `DuplicationIndex::new`
+   counts them itself; deleted files and files renamed to another
+   language are base-only inputs.*
 4. `index.findings()` joins the other findings before sorting.
 
 The two-file form never builds an index.
@@ -169,15 +179,44 @@ The two-file form never builds an index.
 ## Risks / Trade-offs
 
 - **[Run time]** Revision mode now parses the whole head tree on every
-  run. → Task 3.5 measures it on a generated repository of 2,000 files
-  and records the result here. Caching and parallel parsing are the
-  follow-ups if it is too slow.
+  run. → Measured (task 3.4), release build, aarch64 Linux VM:
+  - repository: 2,000 generated TypeScript files, 224,240 lines;
+  - change: 20 files, each adding a copy of a function from another file;
+  - result: 1.4 s wall time and 21 MB peak memory (three runs, all within
+    0.02 s); all 20 copies found.
+
+  - a 400-file change on the same repository: 2.5 s and 308 MB peak
+    (re-measured after review round 3; 20 files: 1.4 s, 21 MB);
+  - the reviewer's worst case: 400 new files and 2,000 unchanged ones
+    sharing one 200-token block, 2.9 s in `findings()` alone. The block
+    search costs changed files x files holding a block x block length.
+  - The coverage of a changed file is linear in its windows: whether a
+    key is shared is decided once per key (round 4 measured 15 s for a
+    400k-token table before that).
+
+  Memory is driven by the changed files, because only their windows are
+  kept (D3); unchanged files add a place for each window they share with
+  them, which grows with the repository for very common code (number
+  tables). It is also high per changed token:
+  every token is a `String`, and every window a map entry. Interning
+  token texts and compacting the window maps are the follow-ups, with
+  caching and parallel parsing, before qgate meets very large pull
+  requests.
+- **[Literal tables match each other]** Normalized, every long array of
+  numbers or strings is the same token pattern, so a new table of 25 or
+  more elements in a repository that has another one is reported
+  (measured: a new 200,000-number table against an existing 30-number
+  one gives one finding, `64 tokens`, in 3.4 s). → Known false positive
+  of type-2 normalization; excluding windows made only of literals and
+  punctuation is the candidate fix, together with thresholds in
+  `qgate.toml`.
 - **[False positives of type-2 normalization]** Structurally identical
   but unrelated code (switch arms, test tables, configuration objects)
   can match. → Kept member names, the exclusions and the 50-token
   threshold limit this; it is a Warning that fails nothing by default;
   thresholds and excludes in `qgate.toml` are the next step.
-- **[Hash collisions]** Checked against the tokens before reporting (D4).
+- **[Hash collisions]** Ruled out in practice by two independent 64-bit
+  hashes per window (Implementation Notes, PR 3).
 - **[Grammar lag]** A head file the grammar cannot parse takes no part,
   silently. A copy of code that sits in such a file is not found.
 - **[Changed-file order]** Which new occurrence counts as the original
@@ -300,3 +339,128 @@ finding, which does not fail a run by default.
   - Object sizes are parsed as `u64`, so a blob too large for `usize`
     is skipped like any oversized one; a test reads a blob of exactly
     the limit.
+- **PR 3, the analysis:**
+  - `DuplicationIndex::new` counts the changed files' head versions as
+    head files itself; the CLI adds only the unchanged files. A changed
+    file can then never be added twice or forgotten.
+  - Hash collisions: each window has two independent 64-bit hashes (FNV-1a
+    with two seeds, two polynomial bases) instead of D4's re-reading of
+    the counterpart. This is deterministic and needs no second read; a
+    test forces the first hash to collide everywhere.
+  - Overlapping occurrences in one file are one copy, not two. In
+    repetitive code (eleven `if (c[i]) { return i; }` lines) a window
+    equals itself shifted by one statement, which reported the function
+    as a duplicate of itself. Repetition far enough apart not to overlap
+    still counts, as the spec says ("in the same file").
+  - What "new" means in counts: the number reported for a block is at
+    most the number of occurrences the changed files gained in total, so
+    code that moved from one changed file to another adds nothing.
+  - The e2e helper `function()` wrote `if (c.k0)`, `if (c.k1)`, ... for a
+    while; review round 2 made same-file repetition irrelevant, and it is
+    back to `if (c[0])`.
+  - Task 3.3: breaking the old/new split per file, the original rule,
+    block merging, the overlap rule, the before subtraction, the per-block
+    budget and the second hash each fails a test. The member-name and
+    import rules live in `qgate-lang` and were checked the same way in
+    PR 1. A one-place fast path (`places.len() < 2`) is an equivalent
+    mutant: the original rule covers it.
+- **PR 3, review round 1:**
+  - Code moved out of a deleted file, or out of a file renamed to another
+    language, was reported as a new copy: only changed files counted as
+    "before". `Repository::deleted_files` lists regular files the head no
+    longer has (deleted, or replaced by a symlink), and the CLI feeds them
+    and the renamed-away files as base-only inputs. E2e tests cover both.
+  - A block now extends only as far as one copy continues it, and the
+    finding names a copy of the whole block (the first by path that
+    covers it), with "and k more" counting the copies of the whole block
+    that do not overlap each other. Before, a run could join windows with
+    different counterparts, name a partial copy, or count shifted views.
+  - The before totals per key are summed once in `new`. Before, each key
+    looped over every changed file, which took 31 s for 800 changed files
+    in the reviewer's measurement.
+  - A read error that closed the batch reader is fatal (`is_closed`),
+    like a git process that ended; only a single unreadable object is
+    skipped.
+  - Known limitation recorded (human decision): within one file, the
+    first occurrences count as old (see Risks).
+  - Not changed: a changed file whose base version cannot be parsed is
+    `input/unparsable` and takes no part in duplication either, as
+    "Compared files" says for files that cannot be parsed.
+- **PR 3, review round 2 (one question answered by the human):**
+  - Repetition within one file produced many findings: a 256-number table
+    gave nine identical lines, and three consecutive copies of a block
+    merged into one finding that overlapped itself. The human chose
+    duplication *across files only*. A block now counts per file that
+    holds it (its first place there), and new duplication is a growth in
+    the number of files. This removes the overlap rule (`apart`) and the
+    "within one file, position decides" limitation.
+  - The spec says how blocks and their copies are chosen: a block follows
+    one copy in another file, the finding names the first file by path
+    whose copy covers it, and "k more" counts further such files.
+  - `Repository::changes` returns changed and deleted files from one diff,
+    replacing a second diff; a deleted JavaScript file counts as before,
+    like a renamed one; `is_closed` is tested; the first place per file
+    of each key is cached for the block search.
+  - Mutation checks for the new counting: the subtraction of files that
+    held a block before, the "only files new to the key" filter, the
+    original rule, the per-block budget, keeping only continuing copies
+    and splitting blocks each fail a test. The copy filter for the
+    block's own file was redundant (that place is always the reported
+    one) and is gone.
+- **PR 3, review round 3 (one question answered by the human):**
+  - An edit next to code another file shares, or moved code with a new
+    neighbour, gave a finding: the window of one new token and 49 shared
+    ones is new to the file. The human chose: a block is reported only if
+    at least 50 of its tokens are new duplicated code, that is, not
+    covered by a window whose block the file already shared with another
+    file (`old_duplicates`). The spec says so, with a scenario.
+  - Reporting is per (changed file, key) instead of per first occurrence,
+    so a copy whose own content repeats (a `switch`, a table with a head)
+    is one block, and a block follows every copy in another file, not
+    only the first place there; "k more" counts files.
+  - "When every file that holds it is new, the first by path is the
+    original" is the spec wording now (it was "when no file held it
+    before"), with a test where the old holder was deleted.
+  - JavaScript renamed to JavaScript no longer counts as code that left.
+  - The two-file test puts the copied block in a neighbouring file, so it
+    shows the form does not look beyond its two files.
+- **PR 3, review round 4:**
+  - The "old duplicated code" coverage hid a genuine copy in a new file
+    that was the original of another copy in the same change. Old now
+    means a shared window the file held before, or one whose block did
+    not grow; new means a window reported for the file. A block needs 50
+    tokens that are new and not old.
+  - Blocks are built from every shared window, not only reported ones, so
+    a copy wrapped around code the file already shared is one block (its
+    new tokens counted), and a block pasted twice into one file is one
+    finding: tokens of windows an earlier block in the file reported do
+    not count again.
+  - Whether a key is shared is computed once (`Counts`), not per window.
+  - The spec names "not itself a new copy" for the counterpart, says the
+    50 new tokens exclude an earlier block in the file, and the two-file
+    scenario matches its test.
+  - Known limitation: when several new files copy overlapping parts of
+    one block, the original can differ per window, and a file can get two
+    overlapping findings naming different copies (three new files a = X[0..60],
+    b = X, c = X[10..70] give c two findings). Allowing new copies as
+    counterparts would make the original of a copy within the change
+    report itself, which is worse.
+  - The roadmap rewrite that commit 5862327 picked up from the working
+    tree by mistake was moved to its own pull request (#17).
+- **PR 3, review round 5 (last; remaining cases recorded as limitations):**
+  - Building blocks from every shared window (round 4) made an unrelated
+    edit to a file with a long shared table cost seconds (1.2 s for a
+    1,000-element table in 50 files, 12.6 s at 2,000 in 100): every place
+    was a candidate copy for the block search, although nothing could be
+    reported. Runs without a window reported for the file are skipped
+    first; a test with a 2,000-token table in 100 files runs in
+    milliseconds.
+  - The spec wording follows the code: an earlier finding in the file
+    excludes the windows (keys) it reported, not every token it covered;
+    the counterpart is "not itself reported as a new copy".
+  - Known limitation: one new copy whose parts match different files can
+    give two overlapping findings (one 60-token copy against `u` = its
+    first 55 tokens and `v` = its last 58 gives two). Like the three-new-
+    files case of round 4, this needs choosing blocks over the whole file
+    rather than window by window; it is recorded for a follow-up change
+    rather than another round in this one.

@@ -445,6 +445,32 @@ fn invalid_qgate_toml_next_to_two_files() {
     assert_eq!(out.status.code(), Some(0));
 }
 
+// duplication-analysis: Compared files, two-file form
+
+#[test]
+fn two_file_form_does_not_check_duplication() {
+    // after.ts copies a block that sits in another file next to it; the
+    // two-file form compares only the two files it is given.
+    let block = "export function formatDate(d: Date): string {\n\
+                   const year = d.getFullYear();\n\
+                   const month = String(d.getMonth() + 1).padStart(2, \"0\");\n\
+                   const day = String(d.getDate()).padStart(2, \"0\");\n\
+                   return `${year}-${month}-${day}`;\n\
+                 }\n";
+    let dir = std::env::temp_dir().join(format!("qgate-dup-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    std::fs::write(dir.join("before.ts"), "").expect("write");
+    std::fs::write(dir.join("after.ts"), block).expect("write");
+    std::fs::write(dir.join("other.ts"), block).expect("write");
+    let out = Command::new(env!("CARGO_BIN_EXE_qgate"))
+        .args(["check", "before.ts", "after.ts"])
+        .current_dir(&dir)
+        .output()
+        .expect("qgate runs");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+}
+
 // Requirement: Help and version
 
 #[test]

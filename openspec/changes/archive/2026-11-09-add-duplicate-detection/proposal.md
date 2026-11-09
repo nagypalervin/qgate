@@ -23,11 +23,13 @@ variables, instead of calling it. This is the second half of M2.
   revision, not only with other changed files. qgate now reads the head
   revision's whole tree, through a single long-lived `git cat-file
   --batch` process.
-- **Only new duplication:** a block is reported when it occurs at least
-  twice in the head revision and the change increased its number of
-  occurrences. Unchanged files are identical in both revisions, so the
-  increase can be computed from the changed files alone; the base
-  revision's other files are never read.
+- **Only new duplication, across files:** a block is reported when it
+  occurs in two or more files of the head revision and the change
+  increased the number of files that hold it (decided at the PR 3 review:
+  repetition within one file does not count). Unchanged files are
+  identical in both revisions, so the increase can be computed from the
+  changed and deleted files alone; the base revision's other files are
+  never read.
 - **Renamed copies count (type-2 clones):**
   - local identifiers and literals are replaced by placeholders;
   - keywords, operators, punctuation and member names (`.getFullYear`)

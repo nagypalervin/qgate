@@ -3,9 +3,10 @@
 **Detects where your codebase starts to break under fast, AI-assisted development.**
 
 > Status: early. `qgate check` compares TypeScript code between two git
-> revisions (or two files) for cyclomatic complexity and, with a
-> [`qgate.toml`](#architecture-rules-qgatetoml), forbidden imports; more
-> analyzers and CI integration follow the [roadmap](#roadmap) below.
+> revisions (or two files) for cyclomatic complexity, newly duplicated
+> code and, with a [`qgate.toml`](#architecture-rules-qgatetoml),
+> forbidden imports; more analyzers and CI integration follow the
+> [roadmap](#roadmap) below.
 
 ## Try it
 
@@ -48,6 +49,7 @@ qgate reports:
 | `complexity/cyclomatic-increase` | an existing function got more complex | +1 to +4 | +5 or more |
 | `complexity/cyclomatic-new` | a new function is already complex (new files count as new) | 11 to 20 | above 20 |
 | `architecture/forbidden-import` | `--base` mode only: a change adds an import that a rule in `qgate.toml` forbids (see below) | - | always |
+| `duplication/duplicate-block` | `--base` mode only: a change adds a copy of a block of at least 50 tokens that exists elsewhere in the repository (see below) | always | - |
 | `input/unparsable` | `--base` mode only: a changed file has a syntax error, syntax the parser does not support yet, or is not UTF-8; it is skipped | always | - |
 
 Exit codes:
@@ -66,6 +68,32 @@ Exit codes:
 (findings never fail it; only a check that could not run does). The
 example above has an Error finding, so it exits with `1`; add
 `--fail-on never` to only see the report.
+
+### Duplicated code
+
+In `--base` mode qgate compares the code a change adds with every
+TypeScript file of the checked revision and reports a new copy:
+
+```
+warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 tokens)  [duplication/duplicate-block]
+```
+
+- **Renamed copies count:**
+  - variable names and literal values are ignored, so a helper copied
+    under other names is still a copy;
+  - member names (`.getFullYear`), keywords and operators are compared;
+  - comments, semicolons, imports and type annotations are ignored.
+- **Copies across files only.** A block counts when it occurs in two or
+  more files; repetition within one file (a data table, similar test
+  cases one after another) does not.
+- **Only new copies are reported.** Duplication the code base already has
+  is not, nor code written next to it; nor is code that only moved, also
+  out of a deleted file; nor a file renamed or moved from `.js` to `.ts`.
+  When a change adds the same block to two new files, the first by path
+  counts as the original.
+- **A block must span at least 50 tokens**, about 5 to 8 lines.
+- It is a Warning, so it fails a run only with `--fail-on warning`. The
+  two-file form does not check duplication.
 
 ### Architecture rules (`qgate.toml`)
 

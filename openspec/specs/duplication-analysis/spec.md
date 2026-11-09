@@ -1,4 +1,4 @@
-# Spec Delta
+# duplication-analysis Specification
 
 ## Purpose
 
@@ -6,7 +6,7 @@ Duplication analysis makes copied code visible per change: it reports the
 blocks that a change newly duplicates, including copies with renamed
 variables, and names an existing copy so the change can reuse it instead.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Normalized tokens
 
@@ -64,14 +64,22 @@ silently. The two-file form SHALL NOT check duplication.
 
 #### Scenario: Two-file form
 
-- **WHEN** the user runs `qgate check before.ts after.ts` where `after.ts` contains the same 60-token block twice
+- **WHEN** the user runs `qgate check before.ts after.ts` where `after.ts` copies a 60-token block from `other.ts` in the same directory
 - **THEN** no `duplication/duplicate-block` finding is reported
 
 ### Requirement: Duplicate blocks
 
-A duplicate block SHALL be a maximal run of at least 50 consecutive
-normalized tokens that occurs at two or more places in the compared
-files, in the same file or in different files.
+A duplicate block SHALL be a run of at least 50 consecutive normalized
+tokens that occurs in two or more files, extending only as far as one copy
+in another file continues it. Repetition within one file (a data table,
+consecutive similar statements, a block pasted twice) SHALL NOT be
+duplication.
+
+#### Scenario: Repetition within one file
+
+- **GIVEN** the change adds a file whose only code is a table of 256 numbers, or the same 60-token block three times
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** no `duplication/duplicate-block` finding is reported
 
 #### Scenario: Below the threshold
 
@@ -81,12 +89,12 @@ files, in the same file or in different files.
 
 ### Requirement: Only new duplication is reported
 
-A duplicate block SHALL be reported only if the change increased its
-number of occurrences: it occurs at least twice in the head revision, and
-the changed files contain more occurrences after the change than before.
-Only occurrences the change added SHALL be reported. When every occurrence
-is new, the first by path and position SHALL count as the original. A file
-renamed from JavaScript counts its JavaScript version as before.
+A duplicate block SHALL be reported only if the change increased the
+number of files that hold it, only in files that did not hold it before,
+at most as many as it added, and only if at least 50 of its tokens are
+new: not covered by duplicated code the file already had, nor by a window
+whose block an earlier finding in the same file reported. When every
+file that holds it is new, the first by path SHALL count as the original.
 
 #### Scenario: Existing duplication
 
@@ -100,9 +108,9 @@ renamed from JavaScript counts its JavaScript version as before.
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** no `duplication/duplicate-block` finding is reported
 
-#### Scenario: Renamed from JavaScript
+#### Scenario: Code written next to shared code
 
-- **GIVEN** `src/util.js` shares a 60-token block with `src/a.ts`, and the change renames `src/util.js` to `src/util.ts` without other edits
+- **GIVEN** `src/a.ts` and `src/u.ts` share a 60-token block, and the change adds a function to `src/a.ts` right above it
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** no `duplication/duplicate-block` finding is reported
 
@@ -112,14 +120,34 @@ renamed from JavaScript counts its JavaScript version as before.
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** one finding is reported, for `src/b.ts`, naming `src/a.ts`
 
+### Requirement: What existed before
+
+The base versions of the changed files SHALL count as before, including
+files the change deletes or renames to another language. A JavaScript
+file (`.js`, `.jsx`, `.mjs`, `.cjs`) the change renames to TypeScript or
+deletes SHALL count as before too.
+
+#### Scenario: Code moved out of a deleted file
+
+- **GIVEN** `src/a.ts` and `src/c.ts` share a 60-token block, and the change deletes `src/a.ts` and adds `src/b.ts` with the block and other code
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** no `duplication/duplicate-block` finding is reported
+
+#### Scenario: Renamed from JavaScript
+
+- **GIVEN** `src/util.js` shares a 60-token block with `src/a.ts`, and the change renames `src/util.js` to `src/util.ts` without other edits
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** no `duplication/duplicate-block` finding is reported
+
 ### Requirement: Duplicate block finding
 
-Each reported occurrence SHALL be one finding with rule
+Each reported block SHALL be one finding with rule
 `duplication/duplicate-block` and severity Warning, at the path and first
 line of the new occurrence. The message SHALL be `duplicates
 <path>:<first>-<last> (lines <first>-<last>, <n> tokens)`, naming the
-first other occurrence by path and line that is not itself reported; with
-`k` further occurrences, `, and <k> more` SHALL end the parentheses.
+first file by path whose copy covers the whole block and is not itself
+reported as a new copy of it; with `k` further such files, `, and <k>
+more` SHALL end the parentheses.
 
 #### Scenario: Message
 

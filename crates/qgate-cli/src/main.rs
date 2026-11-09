@@ -9,6 +9,7 @@
 //! input), else `1` when a finding is at or above the `--fail-on` level,
 //! else `0`.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
@@ -19,11 +20,12 @@ use clap::error::ErrorKind as ClapErrorKind;
 use clap::{Arg, ArgMatches, Command, ValueEnum, value_parser};
 use qgate_analyzers::architecture::{ArchitectureAnalyzer, ForbidRule};
 use qgate_analyzers::complexity::ComplexityAnalyzer;
+use qgate_analyzers::duplication::{ChangedSource, DuplicationIndex};
 use qgate_analyzers::{Analyzer, FileChange};
 use qgate_config::Config;
 use qgate_core::{Finding, Location, Severity};
-use qgate_git::{ChangedFile, GitError, Repository};
-use qgate_lang::{FileModel, Language, ParseError};
+use qgate_git::{BlobId, BlobReader, ChangedFile, Changes, GitError, Repository};
+use qgate_lang::{FileModel, Language, ParseError, Token};
 use qgate_report::render_text;
 
 /// Exit code for a check that ran and found findings at or above the
@@ -275,8 +277,11 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
     // The diff first: it checks both revisions and their merge base, so an
     // unknown base (a shallow clone) is reported as such, never hidden
     // behind a broken qgate.toml.
-    let files = repo
-        .changed_files(base, head)
+    let Changes {
+        changed: files,
+        deleted,
+    } = repo
+        .changes(base, head)
         .map_err(|e| git_message(&e, base))?;
     // Checked before any file is analyzed.
     let architecture = architecture_analyzer(&load_config(&repo, base, head)?)?;
@@ -285,21 +290,130 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
         analyzers.push(&architecture);
     }
     let mut findings = Vec::new();
+    let mut changed_paths = HashSet::new();
+    let mut analyzed = Vec::new();
+    // Code that left the supported files: still a base version for
+    // duplication, so moving it is not a new copy.
+    let mut left = Vec::new();
     for file in files {
         let Some(language) = language_of(&file.path) else {
+            // Renamed from TypeScript to a language qgate does not read:
+            // its old code left. (JavaScript renamed to JavaScript is
+            // neither compared nor gone.)
+            if let (Some(old), Some(id)) = (&file.old_path, &file.before) {
+                if language_of(old).is_some() {
+                    left.push((old.clone(), id.clone()));
+                }
+            }
             continue;
         };
+        changed_paths.insert(file.path.clone());
         match file_change(&repo, &file, language)? {
             Ok(change) => {
                 for analyzer in &analyzers {
                     findings.extend(analyzer.analyze(&change));
                 }
+                analyzed.push(change);
             }
             Err(not_analyzed) => findings.push(not_analyzed),
         }
     }
+    if !analyzed.is_empty() {
+        left.extend(deleted.into_iter().map(|file| (file.path, file.id)));
+        findings.extend(duplication(
+            &repo,
+            base,
+            head,
+            &analyzed,
+            &left,
+            &changed_paths,
+        )?);
+    }
     sort(&mut findings);
     Ok(findings)
+}
+
+/// The `duplication/duplicate-block` findings: the analyzed changed files
+/// against every other supported file of the head revision, read through
+/// one git process and parsed one at a time (design D5 of
+/// `add-duplicate-detection`). A changed file that could not be analyzed
+/// takes no part; an unchanged one that cannot be read or parsed is
+/// skipped silently.
+fn duplication(
+    repo: &Repository,
+    base: &str,
+    head: &str,
+    changes: &[FileChange],
+    left: &[(String, BlobId)],
+    changed_paths: &HashSet<String>,
+) -> Result<Vec<Finding>, String> {
+    let mut reader = repo.blob_reader().map_err(|e| git_message(&e, base))?;
+    // The base tokens of supported files that are gone (deleted, or
+    // renamed to another language); one that cannot be read or parsed
+    // counts as empty.
+    let mut gone: Vec<(String, Vec<Token>)> = Vec::new();
+    for (path, id) in left {
+        // A deleted JavaScript file's code counts too, like a renamed one's.
+        let language = match language_of(path) {
+            Some(language) => language,
+            None if is_javascript(path) => Language::Tsx,
+            None => continue,
+        };
+        let tokens = match read_source(&mut reader, id)? {
+            Some(bytes) => match parse_blob(language, bytes)? {
+                Ok(model) => model.tokens,
+                Err(_) => Vec::new(),
+            },
+            None => Vec::new(),
+        };
+        gone.push((path.clone(), tokens));
+    }
+    let paths: Vec<String> = changes
+        .iter()
+        .map(|change| change.path.to_string_lossy().into_owned())
+        .collect();
+    let mut sources: Vec<ChangedSource<'_>> = changes
+        .iter()
+        .zip(&paths)
+        .map(|(change, path)| ChangedSource {
+            path,
+            before: &change.before.tokens,
+            after: &change.after.tokens,
+        })
+        .collect();
+    sources.extend(gone.iter().map(|(path, tokens)| ChangedSource {
+        path,
+        before: tokens,
+        after: &[],
+    }));
+    let mut index = DuplicationIndex::new(&sources);
+    let tree = repo.files_at(head).map_err(|e| git_message(&e, base))?;
+    for file in tree {
+        if changed_paths.contains(&file.path) {
+            continue;
+        }
+        let Some(language) = language_of(&file.path) else {
+            continue;
+        };
+        let Some(bytes) = read_source(&mut reader, &file.id)? else {
+            continue;
+        };
+        if let Ok(model) = parse_blob(language, bytes)? {
+            index.add(&file.path, &model.tokens);
+        }
+    }
+    Ok(index.findings())
+}
+
+/// One blob through the batch reader: `None` if git cannot give it as a
+/// source file (too large, say), an error if the reader can read no more
+/// (git ended, or its answers went out of step).
+fn read_source(reader: &mut BlobReader, id: &BlobId) -> Result<Option<Vec<u8>>, String> {
+    match reader.read(id) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(e) if reader.is_closed() || matches!(e, GitError::Command { .. }) => Err(e.to_string()),
+        Err(_) => Ok(None),
+    }
 }
 
 /// The configuration as the head revision has it (ADR 0003): uncommitted
