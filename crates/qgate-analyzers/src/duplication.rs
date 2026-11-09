@@ -141,6 +141,15 @@ impl DuplicationIndex {
             let coverage = self.coverage(file, &counts);
             let mut used = HashSet::new();
             for (first, last) in runs(windows, &counts.shared) {
+                // A run without a window reported for this file has no new
+                // tokens: skip it before the costly block search (a long
+                // table the file already shared would cost places x length).
+                if !windows[first..=last]
+                    .iter()
+                    .any(|(key, _)| counts.reported.contains(&(file, *key)))
+                {
+                    continue;
+                }
                 findings.extend(self.blocks(
                     file,
                     first,
@@ -1120,6 +1129,29 @@ mod tests {
                 "duplicates v.ts:1-120 (lines 1-120, 120 tokens)".to_owned()
             )]
         );
+    }
+
+    #[test]
+    fn old_shared_code_is_not_searched_again() {
+        // An edit appends to a file whose 2,000-token table 100 other
+        // files share: there is nothing new to report, and it must stay
+        // fast (the block search would be places x length).
+        let table: Vec<String> = (0..2000).map(|i| format!("p{}", i % 2)).collect();
+        let mut after = table.clone();
+        after.extend(texts("e", 3));
+        let others: Vec<(String, Vec<Token>)> = (0..100)
+            .map(|i| (format!("u{i}.ts"), synthetic(&table)))
+            .collect();
+        let others: Vec<(&str, Vec<Token>)> = others
+            .iter()
+            .map(|(p, t)| (p.as_str(), t.clone()))
+            .collect();
+        let started = std::time::Instant::now();
+        assert_eq!(
+            run(&[("a.ts", synthetic(&table), synthetic(&after))], &others),
+            []
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]

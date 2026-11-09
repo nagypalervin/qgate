@@ -447,3 +447,20 @@ finding, which does not fail a run by default.
     report itself, which is worse.
   - The roadmap rewrite that commit 5862327 picked up from the working
     tree by mistake was moved to its own pull request (#17).
+- **PR 3, review round 5 (last; remaining cases recorded as limitations):**
+  - Building blocks from every shared window (round 4) made an unrelated
+    edit to a file with a long shared table cost seconds (1.2 s for a
+    1,000-element table in 50 files, 12.6 s at 2,000 in 100): every place
+    was a candidate copy for the block search, although nothing could be
+    reported. Runs without a window reported for the file are skipped
+    first; a test with a 2,000-token table in 100 files runs in
+    milliseconds.
+  - The spec wording follows the code: an earlier finding in the file
+    excludes the windows (keys) it reported, not every token it covered;
+    the counterpart is "not itself reported as a new copy".
+  - Known limitation: one new copy whose parts match different files can
+    give two overlapping findings (one 60-token copy against `u` = its
+    first 55 tokens and `v` = its last 58 gives two). Like the three-new-
+    files case of round 4, this needs choosing blocks over the whole file
+    rather than window by window; it is recorded for a follow-up change
+    rather than another round in this one.
