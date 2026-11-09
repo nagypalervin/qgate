@@ -99,3 +99,36 @@ class Shadow {
   static create() {}
   create = wrap({ run() {} });
 }
+
+// Inside a function that passes through, nested names take the binding as
+// prefix, and anonymous callbacks count towards the unit.
+export const Panel = memo((props: Props) => {
+  const handleClick = () => {
+    if (a) {
+      run();
+    }
+  };
+  function inner() {}
+  const o = { m() {} };
+  return props.items.map((i) => (i ? 1 : 0));
+});
+
+// A class field initializer counts wherever the class is, also in a test
+// callback or a static block.
+describe("x", () => {
+  class Fake {
+    h = wrap(() => {
+      if (a) {
+        run();
+      }
+    });
+  }
+});
+
+class Outer {
+  static {
+    class Inner {
+      h = wrap(() => {});
+    }
+  }
+}

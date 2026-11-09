@@ -47,7 +47,8 @@ body barrier.
 **What is a bound call?** One that sits directly at the binding. Formally:
 a `call_expression`, `new_expression` or `await_expression` for which
 `binding_name` finds a binding, while no scope collects, i.e.
-`self.scopes.last()` is not `Some(Some(_))`.
+`self.scopes.last()` is not `Some(Some(_))` (narrowed at review: see
+Implementation Notes, "Review round 1").
 
 - **Only the outermost call qualifies.** Inside `memo(forwardRef(fn))`,
   `forwardRef(...)` is an argument, not a bound value, so `binding_name`
@@ -216,3 +217,10 @@ rule on both revisions.
     block (`module_level.ts`), duplicate suffixes for bound-call units,
     other arguments in a class field, and the segment without a suffix
     (`bound_call_units.ts`).
+- **Review round 2:** fixture cases pin the D4 naming inside a function
+  that passes through (`Panel.handleClick`, `Panel.inner`, `Panel.o.m`,
+  and an anonymous callback counting towards `Panel`), and class field
+  initializers of classes inside a test callback or a static block
+  (`Fake.h`, `Outer.Inner.h`): the spec's "class field initializers"
+  covers them, now with a scenario. The proposal's Impact lists these
+  renames and the suffix a new unit can push onto an existing one.

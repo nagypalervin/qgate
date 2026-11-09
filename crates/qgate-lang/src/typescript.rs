@@ -2,10 +2,10 @@
 //!
 //! One walk over the syntax tree finds the function units, gives each a
 //! qualified name and counts its decision points (design D3 of the
-//! `add-cyclomatic-complexity-check` change); calls bound to a name at
-//! module level are handled in the same walk (design of
-//! `analyze-wrapped-functions`). What counts as a decision point follows
-//! the `complexity` rule of `ESLint`.
+//! `add-cyclomatic-complexity-check` change). Calls bound to a name at
+//! module level or in a class field initializer are handled in the same
+//! walk (design of `analyze-wrapped-functions`). What counts as a decision
+//! point follows the `complexity` rule of `ESLint`.
 
 use std::collections::HashSet;
 
@@ -109,9 +109,10 @@ struct Frame {
     bound: bool,
 }
 
-/// A call, `new` or `await` bound to a name where no unit collects decision
-/// points, as in `export const GET = withAuth(async () => {...})`. Values
-/// that pass through it are named after the binding.
+/// A call, `new` or `await` bound to a name at module level or directly in
+/// a class body (a field initializer), as in
+/// `export const GET = withAuth(async () => {...})`. Values that pass
+/// through it are named after the binding.
 struct Bound {
     /// Id of the topmost node of the call's pass-through chain, so a value
     /// passes through this call when its own chain ends at the same node.
@@ -700,6 +701,15 @@ mod tests {
                 ("Shadow.create", 99, 1),
                 // no unit for the call, so no suffix for its segment
                 ("Shadow.create.run", 100, 1),
+                // nested names take the prefix; the ternary in the
+                // anonymous map callback counts towards Panel
+                ("Panel", 105, 2),
+                ("Panel.handleClick", 106, 2),
+                ("Panel.inner", 111, 1),
+                ("Panel.o.m", 112, 1),
+                // class fields in a test callback and in a static block
+                ("Fake.h", 120, 2),
+                ("Outer.Inner.h", 131, 1),
             ])
         );
         assert_eq!(

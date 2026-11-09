@@ -17,7 +17,9 @@ configuration.
   initializers, where no enclosing function unit collects decision points,
   a call between a value and its binding does not hide the binding.
   Anonymous callbacks without a named ancestor (`describe`/`it` bodies)
-  and static blocks keep today's behaviour. Type wrappers already behave this way: `as`,
+  and static blocks keep today's behaviour, except for the field
+  initializers of classes declared in them, which are class field
+  initializers too. Type wrappers already behave this way: `as`,
   `satisfies`, parentheses and `!`. The binding is a variable, class field,
   object property or default export, as today.
 - **Pass-through positions:** the name passes through:
@@ -49,7 +51,8 @@ configuration.
 
 ### Decisions taken during exploration
 
-- **Module level only** (option A). Only code that is measured nowhere
+- **Module level only** (option A; class field initializers were added
+  at review, because they collect nothing either). Only code that is measured nowhere
   today changes, so existing results keep their numbers. Applying the rule
   everywhere would have split `const total = items.reduce(cb)` out of its
   function as a unit named after a number.
@@ -109,6 +112,13 @@ None.
   because more functions are measured. Some existing units are renamed:
   - methods of objects and classes in bound calls get the prefix
     (`actions.load` becomes `useCart.actions.load`);
+  - names inside a function that passes through take the binding as
+    prefix: a helper in a `memo` component was `handleClick`, is now
+    `Panel.handleClick`, as for `outer.inner` (this is the most common
+    rename);
+  - a new bound-call unit can push an existing unit to a suffix: in
+    `class C { config = wrap(() => {}); config() {} }` the method was
+    `C.config`, is now `C.config#2`;
   - a named function expression in a bound call takes the binding's name
     (`const r = call(function onDone() {})` was `onDone`, is now `r`;
     `const q = { load: wrap(function own() {}) }` was `q.own`, is now

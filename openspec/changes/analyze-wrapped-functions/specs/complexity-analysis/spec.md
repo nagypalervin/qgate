@@ -59,6 +59,11 @@ passes through or is the bound value.
 - **WHEN** the file contains `describe("x", () => { it("y", async () => { const res = await act(async () => { if (a) {} }); }); });` and `class R { static { const h = wrap(() => { if (b) {} }); } }`
 - **THEN** no function unit is found
 
+#### Scenario: Class field in a test callback or a static block
+
+- **WHEN** the file contains `describe("x", () => { class Fake { h = wrap(() => { if (a) {} }); } });` and `class Outer { static { class Inner { h = wrap(() => {}); } } }`
+- **THEN** the units are `Fake.h` with complexity 2 and `Outer.Inner.h` with complexity 1
+
 #### Scenario: Default export
 
 - **WHEN** the file contains `export default withRouter(() => { if (a) {} });`
@@ -92,6 +97,11 @@ segment of their members' qualified names.
 
 - **WHEN** the file contains `export const useCart = defineStore("cart", { actions: { load() { if (a) {} } } });` and `export default defineComponent({ setup() {} });`
 - **THEN** the units are `useCart.actions.load` with complexity 2 and `default.setup` with complexity 1
+
+#### Scenario: Names inside a function that passes through
+
+- **WHEN** the file contains `export const Panel = memo((props) => { const handleClick = () => { if (a) {} }; function inner() {} const o = { m() {} }; return props.items.map((i) => (i ? 1 : 0)); });`
+- **THEN** the units are `Panel` with complexity 2, `Panel.handleClick` with complexity 2, `Panel.inner` and `Panel.o.m`
 
 #### Scenario: Function and object in one call
 
