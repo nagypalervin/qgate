@@ -1,13 +1,34 @@
 //! Analyzers compare a base and a head revision and emit findings.
 //!
-//! Planned analyzers:
+//! Each analyzer implements [`Analyzer`]: it receives a [`FileChange`] (the
+//! language-neutral models of one file before and after a change) and
+//! returns what got worse. Analyzers never parse, read files or print.
+//!
+//! Available:
+//!
+//! - [`complexity`]: per-function cyclomatic complexity increase, and new
+//!   functions that are already complex.
+//!
+//! Planned:
 //!
 //! - `architecture`: forbidden dependencies between layers (M2)
-//! - `complexity`: per-function complexity increase (M1)
 //! - `duplication`: near-duplicate blocks introduced by a change (M2)
 //! - `tests`: changed code without changed tests, coverage drop (M3)
 //!
-//! Status: placeholder.
+//! ```
+//! use std::path::PathBuf;
+//! use qgate_analyzers::{Analyzer, FileChange, complexity::ComplexityAnalyzer};
+//! use qgate_lang::{Language, parse};
+//!
+//! let change = FileChange {
+//!     path: PathBuf::from("src/f.ts"),
+//!     before: parse(Language::TypeScript, "function f(a) { return a; }")?,
+//!     after: parse(Language::TypeScript, "function f(a) { return a ? 1 : 0; }")?,
+//! };
+//! let findings = ComplexityAnalyzer.analyze(&change);
+//! assert_eq!(findings[0].message, "f: cyclomatic complexity 1 -> 2 (+1)");
+//! # Ok::<(), qgate_lang::ParseError>(())
+//! ```
 
 pub mod complexity;
 
