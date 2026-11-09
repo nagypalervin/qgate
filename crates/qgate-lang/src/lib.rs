@@ -14,6 +14,12 @@
 //! `export const GET = withAuth(async () => {...})` the functions passed
 //! through the call form one unit named `GET`.
 //!
+//! The model also lists the file's [`Import`]s: the module specifier of
+//! every `import` and `export ... from` declaration, `import x =
+//! require(...)`, and `import(...)` or `require(...)` call with a string
+//! literal, as written and with its line. Resolving specifiers is up to
+//! the analyzers.
+//!
 //! ```
 //! use qgate_lang::{Language, parse};
 //!
@@ -26,7 +32,7 @@
 mod model;
 mod typescript;
 
-pub use model::{FileModel, Function, ParseError};
+pub use model::{FileModel, Function, Import, ParseError};
 
 /// Parse `source`, written in `language`, into a [`FileModel`].
 ///

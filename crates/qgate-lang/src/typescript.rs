@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 use tree_sitter::{Node, Parser};
 
-use crate::{FileModel, Function, Language, ParseError};
+use crate::{FileModel, Function, Import, Language, ParseError};
 
 /// Parse TypeScript or TSX source into a [`FileModel`].
 pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, ParseError> {
@@ -37,9 +37,8 @@ pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, Parse
 
     let mut walker = Walker::new(source.as_bytes());
     walker.walk(tree.root_node());
-    Ok(FileModel {
-        functions: walker.finish(),
-    })
+    let (functions, imports) = walker.finish();
+    Ok(FileModel { functions, imports })
 }
 
 /// Nodes that define a function unit, if they get a name.
@@ -148,6 +147,8 @@ struct Walker<'s> {
     taken: HashSet<String>,
     /// Bound calls being walked, innermost last.
     bound: Vec<Bound>,
+    /// Imports in source order.
+    imports: Vec<Import>,
 }
 
 impl<'s> Walker<'s> {
@@ -159,6 +160,7 @@ impl<'s> Walker<'s> {
             functions: Vec::new(),
             taken: HashSet::new(),
             bound: Vec::new(),
+            imports: Vec::new(),
         }
     }
 
@@ -190,6 +192,7 @@ impl<'s> Walker<'s> {
     fn enter(&mut self, node: Node<'_>) -> Frame {
         let kind = node.kind();
         let mut frame = Frame::default();
+        self.record_import(node);
 
         // A value passed through a bound call takes the binding's name.
         if FUNCTION_KINDS.contains(&kind) || CONTAINER_KINDS.contains(&kind) {
@@ -422,8 +425,25 @@ impl<'s> Walker<'s> {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
     }
 
-    fn finish(self) -> Vec<Function> {
-        self.functions
+    fn finish(self) -> (Vec<Function>, Vec<Import>) {
+        (self.functions, self.imports)
+    }
+
+    /// Record the import `node` makes, if it is one (design D4 of
+    /// `add-forbidden-imports`).
+    fn record_import(&mut self, node: Node<'_>) {
+        if let Some(source) = import_source(node, self.source) {
+            let text = self.text(source);
+            // A string node always starts and ends with its one-byte quote.
+            let specifier = text
+                .get(1..text.len().saturating_sub(1))
+                .unwrap_or_default()
+                .to_owned();
+            self.imports.push(Import {
+                specifier,
+                line: line_of(source),
+            });
+        }
     }
 }
 
@@ -482,6 +502,40 @@ fn passes_a_function(call: Node<'_>) -> bool {
         }
     }
     false
+}
+
+/// The string literal naming the module that `node` imports, if `node` is
+/// an import: an `import` or `export ... from` declaration, the
+/// `require(...)` of `import x = require(...)`, or a call of `import(...)`
+/// or `require(...)` whose only argument is a string literal.
+fn import_source<'t>(node: Node<'t>, source: &[u8]) -> Option<Node<'t>> {
+    match node.kind() {
+        // `import x = require("m")` has its source on the require clause,
+        // which the walk visits as a node of its own.
+        "import_statement" | "export_statement" | "import_require_clause" => {
+            node.child_by_field_name("source")
+        }
+        "call_expression" => {
+            let function = node.child_by_field_name("function")?;
+            let callee = function.kind() == "import"
+                || (function.kind() == "identifier"
+                    && function.utf8_text(source).is_ok_and(|t| t == "require"));
+            if !callee {
+                return None;
+            }
+            let arguments = node
+                .child_by_field_name("arguments")
+                .filter(|a| a.kind() == "arguments")?;
+            let mut values = named_children(arguments)
+                .into_iter()
+                .filter(|n| n.kind() != "comment");
+            match (values.next(), values.next()) {
+                (Some(only), None) if only.kind() == "string" => Some(only),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 /// The named children of a node.
@@ -787,6 +841,51 @@ mod tests {
                 ("o.'quoted'", 5, 1),
             ])
         );
+    }
+
+    #[test]
+    fn imports_that_count() {
+        let model = parse(
+            Language::TypeScript,
+            include_str!("../fixtures/typescript/imports.ts"),
+        )
+        .expect("fixture parses");
+        let actual: Vec<(&str, u32)> = model
+            .imports
+            .iter()
+            .map(|i| (i.specifier.as_str(), i.line))
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                ("./money", 3),
+                // type-only and side-effect imports count
+                ("../ui/types", 4),
+                ("./polyfills", 5),
+                // re-exports with a source count
+                ("../infra/db", 6),
+                ("./b", 7),
+                // import x = require(...)
+                ("fs", 8),
+                // the line of the specifier, not of `import {`
+                ("./multi", 12),
+                // dynamic import and require inside a function; template
+                // literals, identifiers and two arguments do not count
+                ("../ui/Modal", 19),
+                ("lodash", 20),
+            ]
+        );
+    }
+
+    #[test]
+    fn tsx_imports() {
+        let model = parse(
+            Language::Tsx,
+            "import React from \"react\";\nexport const A = () => <div />;\n",
+        )
+        .expect("parses");
+        assert_eq!(model.imports.len(), 1);
+        assert_eq!(model.imports[0].specifier, "react");
     }
 
     #[test]

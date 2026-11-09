@@ -217,3 +217,14 @@ findings for them. The two-file form never calls step 1.
 ## Migration Plan
 
 None. Without a `qgate.toml`, behaviour is unchanged.
+
+## Implementation Notes
+
+- **PR 1, imports:**
+  - Comments between call arguments are skipped when checking for "exactly
+    one string literal", so `require(/* why */ "x")` counts.
+  - An empty specifier (`import ""`) is recorded as written. It resolves to
+    no path and matches no pattern; skipping it would hide a strange file
+    from no one.
+  - Imports are recorded in `Walker::enter` before any other handling, so
+    a dynamic import inside a bound call or a type wrapper is still found.

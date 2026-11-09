@@ -1,0 +1,27 @@
+// Fixture: imports that count, and forms that do not.
+
+import { a } from "./money";
+import type { T } from "../ui/types";
+import "./polyfills";
+export * from "../infra/db";
+export { b } from "./b";
+import fs = require("fs");
+import {
+  c,
+  d,
+} from "./multi";
+
+// Not imports: an export without a source, and a local binding.
+export const local = 1;
+export { a as money };
+
+async function load(name: string) {
+  const m = await import("../ui/Modal");
+  const x = require("lodash");
+  // Not counted: not a single string literal.
+  const t = await import(`./locales/${name}`);
+  const s = await import(`./static`);
+  const i = require(name);
+  const two = require("a", "b");
+  return [m, x, t, s, i, two];
+}

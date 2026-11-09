@@ -14,9 +14,9 @@ and `cargo test --workspace` passing; the pre-commit hook enforces it.
 
 ## 1. Imports in the language model (PR 1)
 
-- [ ] 1.1 Add fixtures under `crates/qgate-lang/fixtures/typescript/` and failing tests in `typescript.rs` for design D4: every form of "Imports that count" (including `import type`, side-effect imports, `export * from`, `import x = require()`, `import()` and `require()` inside a function), a multi-line import whose line is the specifier's, and the ignored forms (template literal with substitutions, identifier argument, `require` with two arguments); verify they fail
-- [ ] 1.2 Add `Import` and `FileModel::imports` and collect them in the walk (design D4); verify the 1.1 tests pass and every existing `qgate-lang` test passes unchanged
-- [ ] 1.3 Update the crate docs and the `FileModel` doc; verify `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-lang --no-deps` builds
+- [x] 1.1 Add fixtures under `crates/qgate-lang/fixtures/typescript/` and failing tests in `typescript.rs` for design D4: every form of "Imports that count" (including `import type`, side-effect imports, `export * from`, `import x = require()`, `import()` and `require()` inside a function), a multi-line import whose line is the specifier's, and the ignored forms (template literal with substitutions, identifier argument, `require` with two arguments); verify they fail
+- [x] 1.2 Add `Import` and `FileModel::imports` and collect them in the walk (design D4); verify the 1.1 tests pass and every existing `qgate-lang` test passes unchanged
+- [x] 1.3 Update the crate docs and the `FileModel` doc; verify `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-lang --no-deps` builds
 
 ## 2. Configuration (PR 2)
 
