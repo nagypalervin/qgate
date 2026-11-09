@@ -4,14 +4,15 @@
 //! qualified name and counts its decision points (design D3 of the
 //! `add-cyclomatic-complexity-check` change). Calls bound to a name at
 //! module level or in a class field initializer are handled in the same
-//! walk (design of `analyze-wrapped-functions`). What counts as a decision
-//! point follows the `complexity` rule of `ESLint`.
+//! walk (design of `analyze-wrapped-functions`), and so are the file's
+//! imports (design D4 of `add-forbidden-imports`). What counts as a
+//! decision point follows the `complexity` rule of `ESLint`.
 
 use std::collections::HashSet;
 
 use tree_sitter::{Node, Parser};
 
-use crate::{FileModel, Function, Language, ParseError};
+use crate::{FileModel, Function, Import, Language, ParseError};
 
 /// Parse TypeScript or TSX source into a [`FileModel`].
 pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, ParseError> {
@@ -37,9 +38,8 @@ pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, Parse
 
     let mut walker = Walker::new(source.as_bytes());
     walker.walk(tree.root_node());
-    Ok(FileModel {
-        functions: walker.finish(),
-    })
+    let (functions, imports) = walker.finish();
+    Ok(FileModel { functions, imports })
 }
 
 /// Nodes that define a function unit, if they get a name.
@@ -62,6 +62,8 @@ const CONTAINER_KINDS: &[&str] = &[
 
 /// Type-level subtrees: never contain runtime decision points, so the walk
 /// skips them. This keeps conditional types and the like out of the count.
+/// Imports in them (`import("./x").T`) are still recorded, by a separate
+/// scan of the skipped subtree.
 const TYPE_KINDS: &[&str] = &[
     "type_annotation",
     "asserts_annotation",
@@ -148,6 +150,8 @@ struct Walker<'s> {
     taken: HashSet<String>,
     /// Bound calls being walked, innermost last.
     bound: Vec<Bound>,
+    /// Imports in source order.
+    imports: Vec<Import>,
 }
 
 impl<'s> Walker<'s> {
@@ -159,6 +163,7 @@ impl<'s> Walker<'s> {
             functions: Vec::new(),
             taken: HashSet::new(),
             bound: Vec::new(),
+            imports: Vec::new(),
         }
     }
 
@@ -170,7 +175,11 @@ impl<'s> Walker<'s> {
         loop {
             let node = cursor.node();
             frames.push(self.enter(node));
-            if !TYPE_KINDS.contains(&node.kind()) && cursor.goto_first_child() {
+            if TYPE_KINDS.contains(&node.kind()) {
+                // Not entered, but `import("./x").T` in a type still
+                // imports a module.
+                self.record_imports_below(node);
+            } else if cursor.goto_first_child() {
                 continue;
             }
             loop {
@@ -190,6 +199,7 @@ impl<'s> Walker<'s> {
     fn enter(&mut self, node: Node<'_>) -> Frame {
         let kind = node.kind();
         let mut frame = Frame::default();
+        self.record_import(node);
 
         // A value passed through a bound call takes the binding's name.
         if FUNCTION_KINDS.contains(&kind) || CONTAINER_KINDS.contains(&kind) {
@@ -410,9 +420,8 @@ impl<'s> Walker<'s> {
     /// their brackets.
     fn property_name(&self, name: Node<'_>) -> String {
         let text = self.text(name);
-        // A string node always starts and ends with its (one-byte) quote.
-        if name.kind() == "string" && text.len() >= 2 {
-            text[1..text.len() - 1].to_owned()
+        if name.kind() == "string" {
+            unquote(&text).to_owned()
         } else {
             text
         }
@@ -422,8 +431,32 @@ impl<'s> Walker<'s> {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
     }
 
-    fn finish(self) -> Vec<Function> {
-        self.functions
+    fn finish(self) -> (Vec<Function>, Vec<Import>) {
+        (self.functions, self.imports)
+    }
+
+    /// Record the import `node` makes, if it is one (design D4 of
+    /// `add-forbidden-imports`).
+    fn record_import(&mut self, node: Node<'_>) {
+        if let Some(source) = import_source(node, self.source) {
+            self.imports.push(Import {
+                specifier: unquote(&self.text(source)).to_owned(),
+                line: line_of(source),
+            });
+        }
+    }
+
+    /// Record the imports in the subtree below `node`, in source order,
+    /// for a subtree the walk does not enter.
+    fn record_imports_below(&mut self, node: Node<'_>) {
+        let mut pending = named_children(node);
+        pending.reverse();
+        while let Some(next) = pending.pop() {
+            self.record_import(next);
+            let mut children = named_children(next);
+            children.reverse();
+            pending.extend(children);
+        }
     }
 }
 
@@ -482,6 +515,54 @@ fn passes_a_function(call: Node<'_>) -> bool {
         }
     }
     false
+}
+
+/// The string literal naming the module that `node` imports, if `node` is
+/// an import: an `import` or `export ... from` declaration, the
+/// `require(...)` of `import x = require(...)`, a call of `import(...)`
+/// whose first argument is a string literal, or a call of `require(...)`
+/// whose only argument is one.
+fn import_source<'t>(node: Node<'t>, source: &[u8]) -> Option<Node<'t>> {
+    match node.kind() {
+        // `import x = require("m")` has its source on the require clause,
+        // which the walk visits as a node of its own.
+        "import_statement" | "export_statement" | "import_require_clause" => {
+            node.child_by_field_name("source")
+        }
+        "call_expression" => {
+            let function = node.child_by_field_name("function")?;
+            let is_import = function.kind() == "import";
+            let is_require = function.kind() == "identifier"
+                && function.utf8_text(source).is_ok_and(|t| t == "require");
+            if !is_import && !is_require {
+                return None;
+            }
+            let arguments = node
+                .child_by_field_name("arguments")
+                .filter(|a| a.kind() == "arguments")?;
+            let mut values = named_children(arguments)
+                .into_iter()
+                .filter(|n| n.kind() != "comment");
+            match (values.next(), values.next()) {
+                // `import()` may take import attributes as a second
+                // argument; `require` takes exactly one.
+                (Some(first), rest)
+                    if first.kind() == "string" && (is_import || rest.is_none()) =>
+                {
+                    Some(first)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// A string literal's text without its outer quotes, as written: a string
+/// node always starts and ends with its one-byte quote. Escapes stay.
+fn unquote(text: &str) -> &str {
+    text.get(1..text.len().saturating_sub(1))
+        .unwrap_or_default()
 }
 
 /// The named children of a node.
@@ -786,6 +867,73 @@ mod tests {
                 ("o.[key]", 4, 1),
                 ("o.'quoted'", 5, 1),
             ])
+        );
+    }
+
+    #[test]
+    fn imports_that_count() {
+        let model = parse(
+            Language::TypeScript,
+            include_str!("../fixtures/typescript/imports.ts"),
+        )
+        .expect("fixture parses");
+        let actual: Vec<(&str, u32)> = model
+            .imports
+            .iter()
+            .map(|i| (i.specifier.as_str(), i.line))
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                ("./money", 3),
+                // type-only and side-effect imports count
+                ("../ui/types", 4),
+                ("./polyfills", 5),
+                // re-exports with a source count
+                ("../infra/db", 6),
+                ("./b", 7),
+                // import x = require(...)
+                ("fs", 8),
+                // the line of the specifier, not of `import {`
+                ("./multi", 12),
+                // dynamic import and require inside a function; template
+                // literals, identifiers and two arguments do not count
+                ("../ui/Modal", 19),
+                ("lodash", 20),
+                // type positions, inside and outside skipped type subtrees
+                ("./typed", 30),
+                ("./typeof", 31),
+                ("./asserted", 32),
+                // module level, through the bound-call path
+                ("./top", 35),
+                // import attributes do not hide the module
+                ("./data.json", 36),
+                // a comment between arguments is skipped
+                ("./commented", 39),
+                // an empty specifier is kept as written
+                ("", 40),
+                // source order inside a skipped subtree and around it
+                ("./c1", 43),
+                ("./c2", 43),
+                ("./m1", 44),
+                ("./m2", 44),
+            ]
+        );
+    }
+
+    #[test]
+    fn tsx_imports() {
+        let model = parse(
+            Language::Tsx,
+            "import React from \"react\";\nexport const A = () => <div />;\n",
+        )
+        .expect("parses");
+        assert_eq!(
+            model.imports,
+            [Import {
+                specifier: "react".to_owned(),
+                line: 1,
+            }]
         );
     }
 

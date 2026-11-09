@@ -2,12 +2,27 @@
 
 use std::fmt;
 
-/// Everything qgate extracted from one source file.
+/// Everything qgate extracted from one source file: its function units and
+/// its imports.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileModel {
     /// Function units in source order. Qualified names are unique within
     /// the file.
     pub functions: Vec<Function>,
+    /// Imports in source order, wherever they appear in the file.
+    pub imports: Vec<Import>,
+}
+
+/// One import of another module: an `import` or `export ... from`
+/// declaration, `import x = require(...)`, or a call of `import(...)` or
+/// `require(...)` with a string literal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    /// The module specifier as written between the quotes, e.g.
+    /// `../ui/Button` or `react`. Escapes are not decoded.
+    pub specifier: String,
+    /// 1-based line of the specifier's string literal.
+    pub line: u32,
 }
 
 /// One function unit: a named function, method, getter, setter or
