@@ -230,9 +230,12 @@ findings for them. The two-file form never calls step 1.
   Plain import types (`import("./x").T`, `typeof import("./x")`, in a
   union or as a type argument elsewhere) parse. → Listed in the README in PR 3; a grammar update
   fixes it.
-- **[Build time]** `syn` and `serde_derive` add compile time to a clean
-  build. → They are compiled once and cached in CI. The alternative is a
-  hand-written deserializer, which is not worth it.
+- **[Head resolved twice]** `changed_files` and `file_at` each resolve
+  the head revision. If the ref moves between the two calls (a concurrent
+  fetch), the configuration could come from another commit than the
+  diff. → Accepted as very unlikely; resolving once would mean passing
+  commit ids through the git API, whose errors name the revisions as
+  the user wrote them.
 
 ## Migration Plan
 

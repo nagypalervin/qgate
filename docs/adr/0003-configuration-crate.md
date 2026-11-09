@@ -48,8 +48,8 @@ The workspace rules leave no obvious home:
     `serde_spanned`, `winnow`), and a sixth (`toml_writer`) is locked but
     not built with these features.
   - **What it reuses:** `serde` with `derive` and its proc-macro crates
-    (`syn`, `quote`, `proc-macro2`, `serde_derive`) were already in the
-    lock.
+    (`syn`, `quote`, `proc-macro2`, `serde_derive`) were already built:
+    `serde_json`, a build dependency of `tree-sitter`, pulls them in.
   - **Alternatives:** `basic-toml` is in maintenance mode; a hand-written
     parser is not worth owning.
 
