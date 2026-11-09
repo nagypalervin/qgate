@@ -38,6 +38,19 @@ fn a_function_got_more_complex() {
     assert_eq!(out.status.code(), Some(0));
 }
 
+// complexity-analysis: Function wrapped in a call at module level
+
+#[test]
+fn wrapped_route_handler_got_more_complex() {
+    let out = qgate(&["check", "wrapped/before.ts", "wrapped/after.ts"]);
+    assert_eq!(
+        stdout(&out),
+        "warning wrapped/after.ts:2  GET: cyclomatic complexity 2 -> 4 (+2)  \
+         [complexity/cyclomatic-increase]\n"
+    );
+    assert_eq!(out.status.code(), Some(0));
+}
+
 // Requirement: Finding line format
 
 #[test]
