@@ -9,6 +9,8 @@
 //!
 //! Status: placeholder.
 
+pub mod complexity;
+
 use std::path::PathBuf;
 
 use qgate_core::Finding;

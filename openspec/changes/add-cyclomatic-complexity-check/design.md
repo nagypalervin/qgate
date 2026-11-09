@@ -307,6 +307,21 @@ spec ambiguity. Decisions:
   names. Every node kind in `FUNCTION_KINDS` and every decision-point kind
   now has a fixture.
 
+#### PR 2: complexity analyzer
+
+- **2.2/2.3:** the analyzer fixtures use one function shape, `N` single-line
+  `if` statements plus a return, so each complexity is `N + 1` at a glance;
+  the counting itself is covered by the `qgate-lang` fixtures. The tests ran
+  against an empty `analyze` first (five of seven failed, the two
+  "no findings" cases passed trivially); tests and implementation were
+  committed together so every commit stays green.
+- **2.3:** the rule ids are public constants (`INCREASE_RULE`, `NEW_RULE`) so
+  that the CLI tests and later configuration refer to one definition of this
+  public API. The thresholds stay private constants (D8).
+- **2.3:** the analyzer returns findings in the after file's source order;
+  the CLI sorts across analyzers (D8). Matching uses a name map of the
+  before file, which is safe because `qgate-lang` guarantees unique names.
+
 ### ESLint comparison
 
 Run on 2026-11-09 with ESLint 9.39.5, `typescript-eslint` 8.72.1 parser,

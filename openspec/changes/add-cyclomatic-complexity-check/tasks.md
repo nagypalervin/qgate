@@ -22,8 +22,8 @@ and `cargo test --workspace` passing.
 ## 2. Complexity analyzer (`qgate-analyzers`), PR 2
 
 - [x] 2.1 Change the `Analyzer` trait to `analyze(&self, change: &FileChange) -> Vec<Finding>` and add `FileChange` (design D2), documented; verify the workspace builds
-- [ ] 2.2 Write before/after fixture pairs under `fixtures/complexity/` for: small increase, large increase, legacy 40 -> 41, new at 10, 11 and 21, removed plus improved, rename; add failing tests that assert rule id, severity, line, message and metric per spec "Complexity increase rule" to "Finding content"
-- [ ] 2.3 Implement `ComplexityAnalyzer` with the threshold constants (design D8) and verify the 2.2 tests pass
+- [x] 2.2 Write before/after fixture pairs under `fixtures/complexity/` for: small increase, large increase, legacy 40 -> 41, new at 10, 11 and 21, removed plus improved, rename; add failing tests that assert rule id, severity, line, message and metric per spec "Complexity increase rule" to "Finding content"
+- [x] 2.3 Implement `ComplexityAnalyzer` with the threshold constants (design D8) and verify the 2.2 tests pass
 - [ ] 2.4 Update the `qgate-analyzers` module docs (complexity no longer planned) and verify `cargo doc -p qgate-analyzers --no-deps` builds without warnings
 
 ## 3. `qgate check` command (`qgate-cli`), PR 3
