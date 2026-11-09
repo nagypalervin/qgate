@@ -33,6 +33,7 @@
 
 pub mod architecture;
 pub mod complexity;
+pub mod duplication;
 
 use std::path::PathBuf;
 

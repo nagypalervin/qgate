@@ -9,6 +9,7 @@
 //! input), else `1` when a finding is at or above the `--fail-on` level,
 //! else `0`.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ use clap::error::ErrorKind as ClapErrorKind;
 use clap::{Arg, ArgMatches, Command, ValueEnum, value_parser};
 use qgate_analyzers::architecture::{ArchitectureAnalyzer, ForbidRule};
 use qgate_analyzers::complexity::ComplexityAnalyzer;
+use qgate_analyzers::duplication::{ChangedSource, DuplicationIndex};
 use qgate_analyzers::{Analyzer, FileChange};
 use qgate_config::Config;
 use qgate_core::{Finding, Location, Severity};
@@ -285,21 +287,78 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
         analyzers.push(&architecture);
     }
     let mut findings = Vec::new();
+    let mut changed_paths = HashSet::new();
+    let mut analyzed = Vec::new();
     for file in files {
         let Some(language) = language_of(&file.path) else {
             continue;
         };
+        changed_paths.insert(file.path.clone());
         match file_change(&repo, &file, language)? {
             Ok(change) => {
                 for analyzer in &analyzers {
                     findings.extend(analyzer.analyze(&change));
                 }
+                analyzed.push(change);
             }
             Err(not_analyzed) => findings.push(not_analyzed),
         }
     }
+    if !analyzed.is_empty() {
+        findings.extend(duplication(&repo, base, head, &analyzed, &changed_paths)?);
+    }
     sort(&mut findings);
     Ok(findings)
+}
+
+/// The `duplication/duplicate-block` findings: the analyzed changed files
+/// against every other supported file of the head revision, read through
+/// one git process and parsed one at a time (design D5 of
+/// `add-duplicate-detection`). A changed file that could not be analyzed
+/// takes no part; an unchanged one that cannot be read or parsed is
+/// skipped silently.
+fn duplication(
+    repo: &Repository,
+    base: &str,
+    head: &str,
+    changes: &[FileChange],
+    changed_paths: &HashSet<String>,
+) -> Result<Vec<Finding>, String> {
+    let paths: Vec<String> = changes
+        .iter()
+        .map(|change| change.path.to_string_lossy().into_owned())
+        .collect();
+    let sources: Vec<ChangedSource<'_>> = changes
+        .iter()
+        .zip(&paths)
+        .map(|(change, path)| ChangedSource {
+            path,
+            before: &change.before.tokens,
+            after: &change.after.tokens,
+        })
+        .collect();
+    let mut index = DuplicationIndex::new(&sources);
+    let tree = repo.files_at(head).map_err(|e| git_message(&e, base))?;
+    let mut reader = repo.blob_reader().map_err(|e| git_message(&e, base))?;
+    for file in tree {
+        if changed_paths.contains(&file.path) {
+            continue;
+        }
+        let Some(language) = language_of(&file.path) else {
+            continue;
+        };
+        let bytes = match reader.read(&file.id) {
+            Ok(bytes) => bytes,
+            // The git process ended: nothing more can be read.
+            Err(e @ GitError::Command { .. }) => return Err(e.to_string()),
+            // Not readable as a source file (too large, say): no part.
+            Err(_) => continue,
+        };
+        if let Ok(model) = parse_blob(language, bytes)? {
+            index.add(&file.path, &model.tokens);
+        }
+    }
+    Ok(index.findings())
 }
 
 /// The configuration as the head revision has it (ADR 0003): uncommitted

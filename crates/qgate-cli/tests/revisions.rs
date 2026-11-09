@@ -134,9 +134,12 @@ fn stderr(output: &Output) -> String {
 /// A function named `name` with `decisions` decision points, so its
 /// cyclomatic complexity is `decisions + 1`.
 fn function(name: &str, decisions: usize) -> String {
-    let mut text = format!("export function {name}(c: boolean[]): number {{\n");
+    let mut text = format!("export function {name}(c: Flags): number {{\n");
+    // A different member name per line, so the decisions are not repeated
+    // code: `if (c[0])` and `if (c[1])` tokenize alike and would make the
+    // function a duplicate of itself (duplication/duplicate-block).
     for i in 0..decisions {
-        let _ = writeln!(text, "  if (c[{i}]) {{ return {i}; }}");
+        let _ = writeln!(text, "  if (c.k{i}) {{ return {i}; }}");
     }
     text.push_str("  return -1;\n}\n");
     text
@@ -999,4 +1002,91 @@ fn renamed_from_another_unsupported_extension_is_added() {
         "{}",
         stderr(&out)
     );
+}
+
+// duplication-analysis, end to end
+
+const DATE_HELPER: &str = "export function formatDate(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, \"0\");
+  const day = String(d.getDate()).padStart(2, \"0\");
+  return `${year}-${month}-${day}`;
+}
+";
+
+const RENAMED_COPY: &str = "// Orders, with a copy of the date helper under other names.
+import { Order } from \"./order\";
+
+export function formatOrderDate(when: Date): string {
+  const y = when.getFullYear();
+  const m = String(when.getMonth() + 1).padStart(2, \"0\");
+  const dd = String(when.getDate()).padStart(2, \"0\");
+  return `${y}/${m}/${dd}`;
+}
+";
+
+const COPY_FINDING: &str = "warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 \
+                            (lines 4-9, 68 tokens)  [duplication/duplicate-block]\n";
+
+/// A repository whose last commit adds a renamed copy of an unchanged
+/// helper.
+fn repo_with_a_copy() -> Repo {
+    let repo = Repo::new();
+    repo.write("src/utils/date.ts", DATE_HELPER);
+    repo.commit("base");
+    repo.write("src/orders/format.ts", RENAMED_COPY);
+    repo.commit("copy");
+    repo
+}
+
+#[test]
+fn copy_of_an_existing_file_the_change_does_not_touch() {
+    let repo = repo_with_a_copy();
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), COPY_FINDING, "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn failing_on_duplication() {
+    let repo = repo_with_a_copy();
+    let out = repo.qgate(&["--base", "HEAD~1", "--fail-on", "warning"]);
+    assert_eq!(stdout(&out), COPY_FINDING, "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn an_unparsable_unchanged_file_takes_no_part() {
+    let repo = Repo::new();
+    repo.write("src/utils/date.ts", DATE_HELPER);
+    repo.write("src/broken.ts", "function broken(a: number {\n");
+    repo.commit("base");
+    repo.write("src/orders/format.ts", RENAMED_COPY);
+    repo.commit("copy");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), COPY_FINDING, "{}", stderr(&out));
+}
+
+#[test]
+fn renamed_from_javascript_is_not_a_new_copy() {
+    for unreadable in [false, true] {
+        let repo = Repo::new();
+        repo.write("src/a.ts", DATE_HELPER);
+        let mut js = DATE_HELPER.as_bytes().to_vec();
+        if unreadable {
+            js.extend_from_slice(b"// caf\xe9\n");
+        }
+        repo.write("src/util.js", js);
+        repo.commit("base");
+        repo.remove("src/util.js");
+        repo.write("src/util.ts", format!("{DATE_HELPER}// cafe\n"));
+        repo.commit("migrate to TypeScript");
+        let out = repo.qgate(&["--base", "HEAD~1"]);
+        assert_eq!(
+            stdout(&out),
+            "No regressions found.\n",
+            "unreadable: {unreadable}: {}",
+            stderr(&out)
+        );
+    }
 }

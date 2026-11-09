@@ -300,3 +300,27 @@ finding, which does not fail a run by default.
   - Object sizes are parsed as `u64`, so a blob too large for `usize`
     is skipped like any oversized one; a test reads a blob of exactly
     the limit.
+- **PR 3, the analysis:**
+  - `DuplicationIndex::new` counts the changed files' head versions as
+    head files itself; the CLI adds only the unchanged files. A changed
+    file can then never be added twice or forgotten.
+  - Hash collisions: each window has two independent 64-bit hashes (FNV-1a
+    with two seeds, two polynomial bases) instead of D4's re-reading of
+    the counterpart. This is deterministic and needs no second read; a
+    test forces the first hash to collide everywhere.
+  - Overlapping occurrences in one file are one copy, not two. In
+    repetitive code (eleven `if (c[i]) { return i; }` lines) a window
+    equals itself shifted by one statement, which reported the function
+    as a duplicate of itself. Repetition far enough apart not to overlap
+    still counts, as the spec says ("in the same file").
+  - What "new" means in counts: the number reported for a block is at
+    most the number of occurrences the changed files gained in total, so
+    code that moved from one changed file to another adds nothing.
+  - The e2e helper `function()` writes `if (c.k0)`, `if (c.k1)`, ... so
+    its generated decisions are not repeated code.
+  - Task 3.3: breaking the old/new split per file, the original rule,
+    block merging, the overlap rule, the before subtraction, the per-block
+    budget and the second hash each fails a test. The member-name and
+    import rules live in `qgate-lang` and were checked the same way in
+    PR 1. A one-place fast path (`places.len() < 2`) is an equivalent
+    mutant: the original rule covers it.
