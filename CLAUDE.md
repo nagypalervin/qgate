@@ -19,12 +19,15 @@ work here matters as much as what you produce.
 - `crates/qgate-lang`: language adapters, tree-sitter based.
 - `crates/qgate-analyzers`: one module per analyzer, implementing `Analyzer`.
 - `crates/qgate-report`: renders findings. No analysis logic here.
+- `crates/qgate-git`: reads revisions, changed files and blobs by running
+  `git` (ADR 0002). Knows nothing about languages or findings.
 - `crates/qgate-cli`: the `qgate` binary. Thin; wires the others together.
 - `docs/adr/`: architecture decision records. Read them before changing structure.
 
-Dependencies flow one way: `cli -> report, analyzers -> lang -> core`.
-`core` depends on nothing in the workspace. Do not add reverse or sideways
-dependencies; if you think you need one, stop and propose an ADR instead.
+Dependencies flow one way: `cli -> report, analyzers -> lang -> core`, and
+`cli -> git`. `core` and `git` depend on nothing in the workspace. Do not
+add reverse or sideways dependencies; if you think you need one, stop and
+propose an ADR instead.
 
 ## Before you finish any change
 
