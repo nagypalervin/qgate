@@ -9,9 +9,9 @@ Rust 1.85 too. Commit messages and PR bodies are written to files first.
 
 ## 1. Normalized tokens (PR 1)
 
-- [ ] 1.1 Add fixtures under `crates/qgate-lang/fixtures/typescript/` and failing tests in `typescript.rs` for design D1 and "Normalized tokens": a renamed copy gives the same token texts, different member names give different ones, literals and template-string fragments become `$lit`, comments are ignored, imports, `export ... from` and type-level code produce no tokens, and each token has its line; verify they fail
-- [ ] 1.2 Add `Token` and `FileModel::tokens` and emit them in the walk (D1); verify the 1.1 tests pass and every existing `qgate-lang` test passes unchanged
-- [ ] 1.3 Update the crate and `FileModel` docs; verify `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-lang --no-deps` builds
+- [x] 1.1 Add fixtures under `crates/qgate-lang/fixtures/typescript/` and failing tests in `typescript.rs` for design D1 and "Normalized tokens": a renamed copy gives the same token texts, different member names give different ones, literals and template-string fragments become `$lit`, comments are ignored, imports, `export ... from` and type-level code produce no tokens, and each token has its line; verify they fail
+- [x] 1.2 Add `Token` and `FileModel::tokens` and emit them in the walk (D1); verify the 1.1 tests pass and every existing `qgate-lang` test passes unchanged
+- [x] 1.3 Update the crate and `FileModel` docs; verify `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-lang --no-deps` builds
 
 ## 2. Reading the head tree (PR 2)
 

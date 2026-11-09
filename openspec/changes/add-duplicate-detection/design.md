@@ -181,3 +181,19 @@ The two-file form never builds an index.
 
 None. The two-file form is unchanged; revision mode gains a Warning-level
 finding, which does not fail a run by default.
+
+## Implementation Notes
+
+- **PR 1, tokens:**
+  - `type_identifier` leaves become `$id`. Type positions are never
+    entered, so the ones the walk reaches name classes (`class K`); D1's
+    "no token" for them would have dropped class names.
+  - The `as` and `satisfies` keywords stay; only their named type operand
+    is muted.
+  - A file renamed from JavaScript keeps the tokens of its JavaScript
+    version as its base, like its imports (`add-forbidden-imports`). A
+    pure JS-to-TS rename therefore adds no occurrences. If the JavaScript
+    cannot be read, the head's own tokens stand in.
+  - `Frame` has four flags now; clippy's `struct_excessive_bools` is
+    allowed with a comment, because each flag is an independent undo step
+    for one stack, not a state.

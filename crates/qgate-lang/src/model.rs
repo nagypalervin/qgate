@@ -2,8 +2,8 @@
 
 use std::fmt;
 
-/// Everything qgate extracted from one source file: its function units and
-/// its imports.
+/// Everything qgate extracted from one source file: its function units,
+/// its imports and its normalized tokens.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileModel {
     /// Function units in source order. Qualified names are unique within
@@ -11,6 +11,22 @@ pub struct FileModel {
     pub functions: Vec<Function>,
     /// Imports in source order, wherever they appear in the file.
     pub imports: Vec<Import>,
+    /// The file's code as normalized tokens, in source order, for
+    /// comparing code: see [`Token`].
+    pub tokens: Vec<Token>,
+}
+
+/// One normalized token. Identifiers become `$id` and literals `$lit`;
+/// member names, object keys, keywords, operators and punctuation keep
+/// their text. Comments, imports, `export ... from` and type-level code
+/// produce no tokens, so two copies that differ only in names, values or
+/// types have the same tokens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Token {
+    /// The normalized text.
+    pub text: String,
+    /// 1-based line of the token.
+    pub line: u32,
 }
 
 /// One import of another module: an `import` or `export ... from`

@@ -12,7 +12,7 @@ use std::collections::HashSet;
 
 use tree_sitter::{Node, Parser};
 
-use crate::{FileModel, Function, Import, Language, ParseError};
+use crate::{FileModel, Function, Import, Language, ParseError, Token};
 
 /// Parse TypeScript or TSX source into a [`FileModel`].
 pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, ParseError> {
@@ -38,8 +38,12 @@ pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, Parse
 
     let mut walker = Walker::new(source.as_bytes());
     walker.walk(tree.root_node());
-    let (functions, imports) = walker.finish();
-    Ok(FileModel { functions, imports })
+    let (functions, imports, tokens) = walker.finish();
+    Ok(FileModel {
+        functions,
+        imports,
+        tokens,
+    })
 }
 
 /// Nodes that define a function unit, if they get a name.
@@ -104,11 +108,15 @@ const DECISION_KINDS: &[&str] = &[
 ];
 
 /// What entering a node pushed, so leaving it can pop the same.
+// Each flag is an independent undo step for `leave`, one per stack, not a
+// state; an enum or state machine would not fit.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Default)]
 struct Frame {
     segment: bool,
     scope: bool,
     bound: bool,
+    muted: bool,
 }
 
 /// A call, `new` or `await` bound to a name at module level or directly in
@@ -152,6 +160,10 @@ struct Walker<'s> {
     bound: Vec<Bound>,
     /// Imports in source order.
     imports: Vec<Import>,
+    /// Normalized tokens in source order.
+    tokens: Vec<Token>,
+    /// How many entered nodes produce no tokens below them.
+    muted: u32,
 }
 
 impl<'s> Walker<'s> {
@@ -164,6 +176,8 @@ impl<'s> Walker<'s> {
             taken: HashSet::new(),
             bound: Vec::new(),
             imports: Vec::new(),
+            tokens: Vec::new(),
+            muted: 0,
         }
     }
 
@@ -200,6 +214,7 @@ impl<'s> Walker<'s> {
         let kind = node.kind();
         let mut frame = Frame::default();
         self.record_import(node);
+        self.record_token(node, &mut frame);
 
         // A value passed through a bound call takes the binding's name.
         if FUNCTION_KINDS.contains(&kind) || CONTAINER_KINDS.contains(&kind) {
@@ -331,6 +346,9 @@ impl<'s> Walker<'s> {
         if frame.bound {
             self.bound.pop();
         }
+        if frame.muted {
+            self.muted -= 1;
+        }
     }
 
     /// The name a function or container gets, and the 1-based line it
@@ -431,8 +449,45 @@ impl<'s> Walker<'s> {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
     }
 
-    fn finish(self) -> (Vec<Function>, Vec<Import>) {
-        (self.functions, self.imports)
+    fn finish(self) -> (Vec<Function>, Vec<Import>, Vec<Token>) {
+        (self.functions, self.imports, self.tokens)
+    }
+
+    /// Record the normalized token `node` is, if any (design D1 of
+    /// `add-duplicate-detection`), and mute the subtrees that produce none.
+    fn record_token(&mut self, node: Node<'_>, frame: &mut Frame) {
+        if self.muted > 0 {
+            return;
+        }
+        let kind = node.kind();
+        let text = match kind {
+            // Whole literals, without entering them, and the text parts of
+            // a template string, whose `${` and `}` stay.
+            "string" | "regex" | "number" | "jsx_text" | "string_fragment" | "escape_sequence" => {
+                Some("$lit")
+            }
+            _ if produces_no_tokens(node) => None,
+            _ if node.child_count() > 0 => return,
+            "comment" | "predefined_type" => return,
+            _ if IDENTIFIER_KINDS.contains(&kind) => Some("$id"),
+            _ => None,
+        };
+        let mute = text.is_some() && node.child_count() > 0 || produces_no_tokens(node);
+        if mute {
+            self.muted += 1;
+            frame.muted = true;
+        }
+        let text = match text {
+            Some(placeholder) => placeholder.to_owned(),
+            None if mute => return,
+            None => self.text(node),
+        };
+        if !text.is_empty() {
+            self.tokens.push(Token {
+                text,
+                line: line_of(node),
+            });
+        }
     }
 
     /// Record the import `node` makes, if it is one (design D4 of
@@ -515,6 +570,35 @@ fn passes_a_function(call: Node<'_>) -> bool {
         }
     }
     false
+}
+
+/// Identifier leaves, which become `$id`. Member names and object keys
+/// (`property_identifier`, `private_property_identifier`) keep their text.
+/// A `type_identifier` the walk reaches names a class (`class K`), since
+/// type positions are not entered.
+const IDENTIFIER_KINDS: &[&str] = &[
+    "identifier",
+    "type_identifier",
+    "shorthand_property_identifier",
+    "shorthand_property_identifier_pattern",
+    "statement_identifier",
+];
+
+/// Whether `node` and everything below it produce no tokens: imports,
+/// `export ... from`, `implements` clauses and the type operand of `as` and
+/// `satisfies`. Other type-level subtrees are never entered by the walk.
+fn produces_no_tokens(node: Node<'_>) -> bool {
+    match node.kind() {
+        "import_statement" | "implements_clause" => true,
+        "export_statement" => node.child_by_field_name("source").is_some(),
+        _ => node.parent().is_some_and(|parent| {
+            matches!(parent.kind(), "as_expression" | "satisfies_expression")
+                && node.is_named()
+                && parent
+                    .named_child(0)
+                    .is_some_and(|first| first.id() != node.id())
+        }),
+    }
 }
 
 /// The string literal naming the module that `node` imports, if `node` is
@@ -935,6 +1019,134 @@ mod tests {
                 line: 1,
             }]
         );
+    }
+
+    /// The normalized token texts of `source`.
+    fn token_texts(source: &str) -> Vec<String> {
+        parse(Language::TypeScript, source)
+            .expect("parses")
+            .tokens
+            .into_iter()
+            .map(|t| t.text)
+            .collect()
+    }
+
+    #[test]
+    fn tokens_of_a_fixture_with_lines() {
+        let model = parse(
+            Language::TypeScript,
+            include_str!("../fixtures/typescript/tokens.ts"),
+        )
+        .expect("fixture parses");
+        let actual: Vec<(&str, u32)> = model
+            .tokens
+            .iter()
+            .map(|t| (t.text.as_str(), t.line))
+            .collect();
+        // Imports, `export ... from`, the interface, the type alias and
+        // the annotations produce nothing; the comment neither.
+        assert_eq!(
+            actual,
+            [
+                ("export", 10),
+                ("function", 10),
+                ("$id", 10),
+                ("(", 10),
+                ("$id", 10),
+                (")", 10),
+                ("{", 10),
+                ("const", 12),
+                ("$id", 12),
+                ("=", 12),
+                ("$id", 12),
+                (".", 12),
+                ("getFullYear", 12),
+                ("(", 12),
+                (")", 12),
+                (";", 12),
+                ("return", 13),
+                ("`", 13),
+                ("${", 13),
+                ("$id", 13),
+                ("}", 13),
+                ("$lit", 13),
+                ("${", 13),
+                ("$lit", 13),
+                ("}", 13),
+                ("`", 13),
+                ("+", 13),
+                ("$lit", 13),
+                (";", 13),
+                ("}", 14),
+            ]
+        );
+    }
+
+    #[test]
+    fn renamed_copy_has_the_same_tokens() {
+        assert_eq!(
+            token_texts("function fmt(d: Date) { const y = d.getFullYear(); return y + \"-\"; }"),
+            token_texts(
+                "function formatOrderDate(when: Date) { const year = when.getFullYear(); return year + \"/\"; }"
+            )
+        );
+    }
+
+    #[test]
+    fn member_names_and_keys_are_kept() {
+        assert_ne!(
+            token_texts("const y = d.getFullYear();"),
+            token_texts("const y = d.getUTCFullYear();")
+        );
+        assert_eq!(
+            token_texts("const o = { size: a, #b: c }; o?.size;"),
+            [
+                "const", "$id", "=", "{", "size", ":", "$id", ",", "#b", ":", "$id", "}", ";",
+                "$id", "?.", "size", ";"
+            ]
+        );
+    }
+
+    #[test]
+    fn literals_become_one_placeholder() {
+        assert_eq!(
+            token_texts("f(\"a\", 'b', 1.5, /x+/g, true, null);"),
+            [
+                "$id", "(", "$lit", ",", "$lit", ",", "$lit", ",", "$lit", ",", "true", ",",
+                "null", ")", ";"
+            ]
+        );
+    }
+
+    #[test]
+    fn type_level_code_produces_no_tokens() {
+        assert_eq!(
+            token_texts(
+                "const a = b as Foo<T>; const c = d satisfies Bar; class K implements I {}"
+            ),
+            [
+                "const",
+                "$id",
+                "=",
+                "$id",
+                "as",
+                ";",
+                "const",
+                "$id",
+                "=",
+                "$id",
+                "satisfies",
+                ";",
+                "class",
+                "$id",
+                "{",
+                "}"
+            ]
+        );
+        let types_only = "import type { T } from \"./t\";\n\
+                          export type { U } from \"./u\";\n\
+                          type V = T | U;\n";
+        assert_eq!(token_texts(types_only), Vec::<String>::new());
     }
 
     #[test]

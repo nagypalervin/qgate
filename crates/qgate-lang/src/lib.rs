@@ -20,6 +20,11 @@
 //! literal, as written and with its line. Resolving specifiers is up to
 //! the analyzers.
 //!
+//! Finally, the model holds the file's code as normalized [`Token`]s for
+//! finding copies: identifiers become `$id` and literals `$lit`, while
+//! member names, keywords and punctuation keep their text; comments,
+//! imports and type-level code produce none.
+//!
 //! ```
 //! use qgate_lang::{Language, parse};
 //!
@@ -32,7 +37,7 @@
 mod model;
 mod typescript;
 
-pub use model::{FileModel, Function, Import, ParseError};
+pub use model::{FileModel, Function, Import, ParseError, Token};
 
 /// Parse `source`, written in `language`, into a [`FileModel`].
 ///

@@ -377,15 +377,18 @@ fn file_change(
         // complexity is as for any added file.
         (Some(id), None) if file.old_path.as_deref().is_some_and(is_javascript) => {
             let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
-            let imports = if let Ok(model) = parse_blob(Language::Tsx, bytes)? {
-                model.imports
+            // The code it already had is not new either: its tokens count
+            // as the base version for duplication.
+            let (imports, tokens) = if let Ok(model) = parse_blob(Language::Tsx, bytes)? {
+                (model.imports, model.tokens)
             } else {
                 old_path = None;
-                after.imports.clone()
+                (after.imports.clone(), after.tokens.clone())
             };
             FileModel {
                 functions: Vec::new(),
                 imports,
+                tokens,
             }
         }
         (Some(id), Some(old_language)) => {
