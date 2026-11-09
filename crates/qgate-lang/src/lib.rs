@@ -1,16 +1,50 @@
 //! Language adapters.
 //!
-//! Each adapter turns source files into a language-neutral model (functions,
-//! imports, spans) that analyzers work on. Parsing will be built on
-//! tree-sitter; see `docs/adr/0001-rust-and-tree-sitter.md`.
+//! Each adapter turns the source text of one file into a language-neutral
+//! [`FileModel`] that analyzers work on, so analyzers never see syntax
+//! trees. Parsing is built on tree-sitter; see
+//! `docs/adr/0001-rust-and-tree-sitter.md`. This crate does no I/O: callers
+//! read files and pick the [`Language`].
 //!
-//! Status: placeholder. The first adapter (TypeScript) lands in milestone M1.
+//! Supported: TypeScript and TSX. The model holds one [`Function`] per
+//! named function unit with its qualified name, line and cyclomatic
+//! complexity. Anonymous functions count towards their nearest named
+//! ancestor; code outside named functions is not measured.
+//!
+//! ```
+//! use qgate_lang::{Language, parse};
+//!
+//! let model = parse(Language::TypeScript, "function f(a, b) { return a && b; }")?;
+//! assert_eq!(model.functions[0].name, "f");
+//! assert_eq!(model.functions[0].cyclomatic, 2);
+//! # Ok::<(), qgate_lang::ParseError>(())
+//! ```
+
+mod model;
+mod typescript;
+
+pub use model::{FileModel, Function, ParseError};
+
+/// Parse `source`, written in `language`, into a [`FileModel`].
+///
+/// # Errors
+///
+/// Returns [`ParseError::Syntax`] if the source contains a syntax error,
+/// and [`ParseError::Parser`] if the parser itself fails.
+pub fn parse(language: Language, source: &str) -> Result<FileModel, ParseError> {
+    match language {
+        Language::TypeScript | Language::Tsx => typescript::parse(language, source),
+    }
+}
 
 /// A language qgate knows how to analyze.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
-    /// TypeScript and TSX.
+    /// TypeScript (`.ts`, `.mts`, `.cts`).
     TypeScript,
+    /// TypeScript with JSX (`.tsx`). It needs its own grammar: in TSX,
+    /// `<T>x` is a JSX element, in plain TypeScript it is a type assertion.
+    Tsx,
 }
 
 impl Language {
@@ -18,7 +52,8 @@ impl Language {
     #[must_use]
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext {
-            "ts" | "tsx" | "mts" | "cts" => Some(Self::TypeScript),
+            "ts" | "mts" | "cts" => Some(Self::TypeScript),
+            "tsx" => Some(Self::Tsx),
             _ => None,
         }
     }
@@ -30,8 +65,21 @@ mod tests {
 
     #[test]
     fn recognizes_typescript() {
-        assert_eq!(Language::from_extension("ts"), Some(Language::TypeScript));
-        assert_eq!(Language::from_extension("tsx"), Some(Language::TypeScript));
+        for ext in ["ts", "mts", "cts"] {
+            assert_eq!(Language::from_extension(ext), Some(Language::TypeScript));
+        }
+    }
+
+    #[test]
+    fn recognizes_tsx() {
+        assert_eq!(Language::from_extension("tsx"), Some(Language::Tsx));
+    }
+
+    #[test]
+    fn both_grammars_load() {
+        for language in [Language::TypeScript, Language::Tsx] {
+            assert_eq!(parse(language, ""), Ok(FileModel::default()));
+        }
     }
 
     #[test]
