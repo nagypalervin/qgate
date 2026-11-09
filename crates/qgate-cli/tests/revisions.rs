@@ -485,6 +485,56 @@ fn not_valid_utf8() {
     );
 }
 
+// check-command: Failing on findings
+
+#[test]
+fn unparsable_file_in_revision_mode() {
+    let repo = Repo::new();
+    repo.write("src/a.ts", function("f", 0));
+    repo.commit("base");
+    repo.write("src/a.ts", "function broken(a: number {\n");
+    repo.commit("head");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert!(
+        stdout(&out).contains("[input/unparsable]"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(stderr(&out), "");
+    assert_eq!(out.status.code(), Some(0));
+
+    let out = repo.qgate(&["--base", "HEAD~1", "--fail-on", "warning"]);
+    assert!(
+        stdout(&out).contains("[input/unparsable]"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn errors_that_stop_the_check_win() {
+    let repo = feature_repo();
+    let out = repo.qgate(&["--base", "no-such-branch", "--fail-on", "warning"]);
+    assert_eq!(stdout(&out), "");
+    assert!(!stderr(&out).contains("failing"), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn error_finding_in_revision_mode() {
+    let repo = Repo::new();
+    repo.write("src/a.ts", function("f", 0));
+    repo.commit("base");
+    repo.write("src/a.ts", function("f", 6));
+    repo.commit("head");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert!(stdout(&out).starts_with("error "), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(1));
+    let out = repo.qgate(&["--base", "HEAD~1", "--fail-on", "never"]);
+    assert_eq!(out.status.code(), Some(0));
+}
+
 // revision-input: Git errors
 
 #[test]

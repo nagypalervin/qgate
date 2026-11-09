@@ -4,23 +4,28 @@
 //! for changed files, and picks exit codes; parsing, analysis and rendering
 //! live in the library crates.
 //!
-//! Exit codes: `0` when the analysis ran (with or without findings), `2`
-//! for an invalid invocation or input. `1` is reserved for a future "check
-//! failed" mode.
+//! Exit codes: `2` when the check could not run (an invalid invocation or
+//! input), else `1` when a finding is at or above the `--fail-on` level,
+//! else `0`.
 
 use std::fs;
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use clap::builder::PossibleValue;
 use clap::error::ErrorKind as ClapErrorKind;
-use clap::{Arg, ArgMatches, Command, value_parser};
+use clap::{Arg, ArgMatches, Command, ValueEnum, value_parser};
 use qgate_analyzers::complexity::ComplexityAnalyzer;
 use qgate_analyzers::{Analyzer, FileChange};
 use qgate_core::{Finding, Location, Severity};
 use qgate_git::{ChangedFile, GitError, Repository};
 use qgate_lang::{FileModel, Language, ParseError};
 use qgate_report::render_text;
+
+/// Exit code for a check that ran and found findings at or above the
+/// `--fail-on` level.
+const FAILED: u8 = 1;
 
 /// Exit code for invalid invocations and inputs.
 const INVALID: u8 = 2;
@@ -33,6 +38,54 @@ const UNPARSABLE_RULE: &str = "input/unparsable";
 /// the most common cause.
 const SHALLOW_CLONE_HINT: &str = "if this is a shallow clone, fetch the base first \
      (in GitHub Actions: actions/checkout with fetch-depth: 0)";
+
+/// Which findings fail the run: the value of `--fail-on`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FailOn {
+    /// Findings with severity Error.
+    Error,
+    /// Findings with severity Warning or Error.
+    Warning,
+    /// No finding; only a check that could not run fails.
+    Never,
+}
+
+impl FailOn {
+    /// The lowest severity that fails the run, if any does.
+    fn threshold(self) -> Option<Severity> {
+        match self {
+            Self::Error => Some(Severity::Error),
+            Self::Warning => Some(Severity::Warning),
+            Self::Never => None,
+        }
+    }
+
+    /// The value as the user writes it.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Never => "never",
+        }
+    }
+
+    /// How many of `findings` fail the run.
+    fn failing(self, findings: &[Finding]) -> usize {
+        self.threshold().map_or(0, |threshold| {
+            findings.iter().filter(|f| f.severity >= threshold).count()
+        })
+    }
+}
+
+impl ValueEnum for FailOn {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Error, Self::Warning, Self::Never]
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
+        Some(PossibleValue::new(self.name()))
+    }
+}
 
 fn command() -> Command {
     Command::new("qgate")
@@ -74,6 +127,14 @@ fn check_command() -> Command {
                 .help("The revision to check (default: HEAD); needs --base")
                 .requires("base"),
         )
+        .arg(
+            Arg::new("fail-on")
+                .long("fail-on")
+                .value_name("level")
+                .help("Exit with 1 when a finding has this severity or higher")
+                .value_parser(value_parser!(FailOn))
+                .default_value("error"),
+        )
 }
 
 fn main() -> ExitCode {
@@ -106,8 +167,15 @@ fn main() -> ExitCode {
             }
             None => check(args),
         };
-        return match result {
-            Ok(report) => write_stdout(&report),
+        let fail_on = args
+            .get_one::<FailOn>("fail-on")
+            .copied()
+            .unwrap_or(FailOn::Error);
+        return match result.and_then(|findings| {
+            write_stdout(&render_text(&findings))?;
+            Ok(findings)
+        }) {
+            Ok(findings) => exit_code(fail_on, &findings),
             Err(message) => {
                 eprintln!("error: {message}");
                 ExitCode::from(INVALID)
@@ -120,25 +188,38 @@ fn main() -> ExitCode {
 
 /// Write the report to standard output. A reader that stops early (as in
 /// `qgate check ... | head`) is not an error: `print!` would panic there.
-fn write_stdout(report: &str) -> ExitCode {
+fn write_stdout(report: &str) -> Result<(), String> {
     let mut stdout = std::io::stdout().lock();
     match stdout
         .write_all(report.as_bytes())
         .and_then(|()| stdout.flush())
     {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) if e.kind() == ErrorKind::BrokenPipe => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("error: cannot write the report: {e}");
-            ExitCode::from(INVALID)
-        }
+        Err(e) if e.kind() != ErrorKind::BrokenPipe => Err(format!("cannot write the report: {e}")),
+        _ => Ok(()),
     }
 }
 
-/// Run `qgate check` and return the rendered report, or an error message
+/// The exit code of a check that ran: `1` with a summary line on standard
+/// error when findings fail it at the `fail_on` level, else `0`.
+fn exit_code(fail_on: FailOn, findings: &[Finding]) -> ExitCode {
+    let failing = fail_on.failing(findings);
+    if failing == 0 {
+        return ExitCode::SUCCESS;
+    }
+    let noun = if failing == 1 { "finding" } else { "findings" };
+    // Not `eprintln!`: a closed standard error must not turn 1 into a panic.
+    let _ = writeln!(
+        std::io::stderr(),
+        "qgate: failing: {failing} {noun} at or above \"{}\" (see --fail-on)",
+        fail_on.name()
+    );
+    ExitCode::from(FAILED)
+}
+
+/// Run `qgate check` and return the sorted findings, or an error message
 /// for standard error. Nothing is printed here, so a failure leaves standard
 /// output empty.
-fn check(args: &ArgMatches) -> Result<String, String> {
+fn check(args: &ArgMatches) -> Result<Vec<Finding>, String> {
     let path = |name: &str| {
         args.get_one::<PathBuf>(name)
             .ok_or_else(|| format!("missing <{name}>"))
@@ -152,7 +233,7 @@ fn check(args: &ArgMatches) -> Result<String, String> {
 
     let mut findings = ComplexityAnalyzer.analyze(&change);
     sort(&mut findings);
-    Ok(render_text(&findings))
+    Ok(findings)
 }
 
 /// Sort across files and analyzers so the same input always gives the same
@@ -170,8 +251,8 @@ fn sort(findings: &mut [Finding]) {
 }
 
 /// Run `qgate check --base <base> --head <head>` in the repository that
-/// contains the current directory.
-fn check_revisions(base: &str, head: &str) -> Result<String, String> {
+/// contains the current directory, and return the sorted findings.
+fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
     let cwd =
         std::env::current_dir().map_err(|e| format!("cannot read the current directory: {e}"))?;
     let repo = Repository::discover(&cwd).map_err(|e| git_message(&e, base))?;
@@ -189,7 +270,7 @@ fn check_revisions(base: &str, head: &str) -> Result<String, String> {
         }
     }
     sort(&mut findings);
-    Ok(render_text(&findings))
+    Ok(findings)
 }
 
 /// Both versions of one changed file as models, or an `input/unparsable`

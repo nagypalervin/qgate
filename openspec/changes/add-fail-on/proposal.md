@@ -82,3 +82,24 @@ None.
 - **Docs:** README ("Try it" exit codes, "In CI").
 - **Users:** none yet, so the breaking default needs no migration. It is
   stated in the README.
+
+## Implementation Notes
+
+- **Singular in the summary:** one failing finding reads `1 finding at or
+  above "error"`, more read `N findings`. The spec scenario shows the plural
+  form.
+- **Rendering moved into `main`:** `check` and `check_revisions` return the
+  sorted findings instead of the rendered text, so the exit code is decided
+  from the same findings that were printed.
+- **Order of checks:** the report is written first; a write error other
+  than a closed pipe is still exit 2 and wins over 1. A closed pipe keeps
+  the exit code findings give (1 with failing findings), tested with
+  thousands of findings and `--fail-on warning`.
+- **The summary is written with `writeln!` and its error ignored**, not
+  `eprintln!`, so a closed standard error cannot turn exit 1 into a panic.
+- **`FailOn` implements clap's `ValueEnum` by hand** (the `derive` feature
+  is off). clap then rejects unknown values with exit 2 and lists the
+  allowed ones, and `--help` shows the default and the possible values.
+- **Fixture `fail/`:** two functions grow by +6 (Error) and one by +1
+  (Warning), for the summary scenario. Revision-mode tests build their
+  inputs in temporary repositories as before.
