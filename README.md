@@ -88,8 +88,9 @@ warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 
   cases one after another) does not.
 - **Only new copies are reported.** Duplication the code base already has
   is not, nor code written next to it; nor is code that only moved, also
-  out of a deleted file; nor a file renamed or moved from `.js` to `.ts`. When a change adds the same
-  block to two new files, the first by path counts as the original.
+  out of a deleted file; nor a file renamed or moved from `.js` to `.ts`.
+  When a change adds the same block to two new files, the first by path
+  counts as the original.
 - **A block must span at least 50 tokens**, about 5 to 8 lines.
 - It is a Warning, so it fails a run only with `--fail-on warning`. The
   two-file form does not check duplication.

@@ -64,7 +64,7 @@ silently. The two-file form SHALL NOT check duplication.
 
 #### Scenario: Two-file form
 
-- **WHEN** the user runs `qgate check before.ts after.ts` where `after.ts` contains the same 60-token block twice
+- **WHEN** the user runs `qgate check before.ts after.ts` where `after.ts` copies a 60-token block from `other.ts` in the same directory
 - **THEN** no `duplication/duplicate-block` finding is reported
 
 ### Requirement: Duplicate blocks
@@ -92,8 +92,9 @@ duplication.
 A duplicate block SHALL be reported only if the change increased the
 number of files that hold it, only in files that did not hold it before,
 at most as many as it added, and only if at least 50 of its tokens are
-not covered by duplicated code the file already had. When every file
-that holds it is new, the first by path SHALL count as the original.
+new: not covered by duplicated code the file already had or by a block
+reported earlier in the same file. When every file that holds it is new,
+the first by path SHALL count as the original.
 
 #### Scenario: Existing duplication
 
@@ -144,8 +145,9 @@ Each reported block SHALL be one finding with rule
 `duplication/duplicate-block` and severity Warning, at the path and first
 line of the new occurrence. The message SHALL be `duplicates
 <path>:<first>-<last> (lines <first>-<last>, <n> tokens)`, naming the
-first file by path whose copy covers the whole block; with `k` further
-such files, `, and <k> more` SHALL end the parentheses.
+first file by path whose copy covers the whole block and is not itself a
+new copy; with `k` further such files, `, and <k> more` SHALL end the
+parentheses.
 
 #### Scenario: Message
 

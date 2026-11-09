@@ -134,29 +134,40 @@ impl DuplicationIndex {
     /// and then by line.
     #[must_use]
     pub fn findings(&self) -> Vec<Finding> {
-        let reported = self.reported();
+        let counts = self.counts();
         let mut lookup = Lookup::default();
         let mut findings = Vec::new();
         for (file, windows) in self.changed.iter().enumerate() {
-            let old = self.old_duplicates(file, &reported);
-            for (first, last) in runs(windows, &reported, file) {
-                findings.extend(self.blocks(file, first, last, &reported, &old, &mut lookup));
+            let coverage = self.coverage(file, &counts);
+            let mut used = HashSet::new();
+            for (first, last) in runs(windows, &counts.shared) {
+                findings.extend(self.blocks(
+                    file,
+                    first,
+                    last,
+                    &counts,
+                    &coverage,
+                    &mut used,
+                    &mut lookup,
+                ));
             }
         }
         findings
     }
 
-    /// The keys each changed file newly duplicates (design D3, step 4), as
-    /// (changed file, key): per key that two or more files hold, the
-    /// changed files that did not hold it before, as many as the change
-    /// added files that hold it.
-    fn reported(&self) -> HashSet<(usize, Key)> {
-        let mut reported = HashSet::new();
+    /// Which keys two or more files share, which of them grew, and which
+    /// changed files newly duplicate them (design D3, step 4): per growing
+    /// key, the changed files that did not hold it before, as many as the
+    /// change added files that hold it, skipping the first by path when
+    /// every holder is new (the original).
+    fn counts(&self) -> Counts {
+        let mut counts = Counts::default();
         for (key, places) in &self.places {
             let holding: BTreeSet<usize> = places.iter().map(|p| p.path).collect();
             if holding.len() < 2 {
                 continue;
             }
+            counts.shared.insert(*key);
             let changed_holding = holding.iter().filter(|&&f| f < self.changed.len()).count();
             // Files the block left (deleted, or edited away) count too.
             let before_files = self.before_files.get(key).copied().unwrap_or(0);
@@ -164,60 +175,65 @@ impl DuplicationIndex {
             if budget == 0 {
                 continue;
             }
+            counts.growing.insert(*key);
             let mut new: Vec<usize> = holding
                 .iter()
                 .copied()
                 .filter(|&f| f < self.changed.len() && !self.before.contains(&(f, *key)))
                 .collect();
             new.sort_by_key(|&f| &self.paths[f]);
-            // When every file that holds it now is new, the first by path
-            // is the original.
             let skip = usize::from(holding.len() == new.len());
             for file in new.into_iter().skip(skip) {
                 if budget == 0 {
                     break;
                 }
-                reported.insert((file, *key));
+                counts.reported.insert((file, *key));
                 budget -= 1;
             }
         }
-        reported
+        counts
     }
 
-    /// The tokens of a changed file that duplicated code it already had
-    /// covers: every window whose block two or more files hold and that
-    /// is not reported for this file. Only tokens outside them are new
-    /// duplicated code.
-    fn old_duplicates(&self, file: usize, reported: &HashSet<(usize, Key)>) -> Vec<bool> {
+    /// Per token of a changed file: whether a reported window covers it
+    /// (`new`), and whether duplicated code the file already had covers it
+    /// (`old`): a shared window the file held before, or one whose block
+    /// did not grow.
+    fn coverage(&self, file: usize, counts: &Counts) -> Coverage {
         let windows = &self.changed[file];
         let len = windows.last().map_or(0, |(_, p)| p.start + MIN_TOKENS);
-        let mut old = vec![false; len];
+        let mut coverage = Coverage {
+            new: vec![false; len],
+            old: vec![false; len],
+        };
         for &(key, place) in windows {
-            if reported.contains(&(file, key)) {
-                continue;
-            }
-            let shared = self.places[&key].iter().any(|p| p.path != file);
-            if shared {
-                for covered in &mut old[place.start..place.start + MIN_TOKENS] {
-                    *covered = true;
-                }
+            let range = place.start..place.start + MIN_TOKENS;
+            if counts.reported.contains(&(file, key)) {
+                coverage.new[range].fill(true);
+            } else if counts.shared.contains(&key)
+                && (self.before.contains(&(file, key)) || !counts.growing.contains(&key))
+            {
+                coverage.old[range].fill(true);
             }
         }
-        old
+        coverage
     }
 
-    /// The findings for a run of reported windows `first..=last` of a
+    /// The findings for a run of shared windows `first..=last` of a
     /// changed file. A block extends only as far as one copy in another
     /// file continues it, so each finding names a copy of the whole block;
     /// where no copy continues, a new block starts. A block is reported
-    /// only if at least [`MIN_TOKENS`] of its tokens are not `old`.
+    /// only if at least [`MIN_TOKENS`] of its tokens are new duplicated
+    /// code: covered by a reported window, not by duplicated code the file
+    /// already had, and not by a block already reported in this file.
+    #[allow(clippy::too_many_arguments)] // The per-file state of one pass.
     fn blocks(
         &self,
         file: usize,
         first: usize,
         last: usize,
-        reported: &HashSet<(usize, Key)>,
-        old: &[bool],
+        counts: &Counts,
+        coverage: &Coverage,
+        used: &mut HashSet<Key>,
         lookup: &mut Lookup,
     ) -> Vec<Finding> {
         let windows = &self.changed[file];
@@ -225,12 +241,12 @@ impl DuplicationIndex {
         let mut start = first;
         while start <= last {
             let (key, place) = windows[start];
-            // Copies of the first window in other files that hold it from
-            // before the change (or as the original).
+            // Copies of the first window in other files that are not new
+            // copies of it themselves.
             let mut copies: Vec<Place> = self.places[&key]
                 .iter()
                 .copied()
-                .filter(|p| p.path != file && !reported.contains(&(p.path, key)))
+                .filter(|p| p.path != file && !counts.reported.contains(&(p.path, key)))
                 .collect();
             if copies.is_empty() {
                 start += 1;
@@ -254,11 +270,22 @@ impl DuplicationIndex {
             }
             let offset = end - start;
             let tokens = offset + MIN_TOKENS;
-            let new_tokens = old[place.start..place.start + tokens]
-                .iter()
-                .filter(|&&covered| !covered)
+            // Tokens of windows whose keys an earlier block in this file
+            // already reported are not new again.
+            let mut seen = vec![false; tokens];
+            for i in start..=end {
+                if used.contains(&windows[i].0) {
+                    seen[i - start..i - start + MIN_TOKENS].fill(true);
+                }
+            }
+            let new_tokens = (0..tokens)
+                .filter(|&t| {
+                    let at = place.start + t;
+                    coverage.new[at] && !coverage.old[at] && !seen[t]
+                })
                 .count();
             if new_tokens >= MIN_TOKENS {
+                used.extend(windows[start..=end].iter().map(|(k, _)| *k));
                 copies.sort_by_key(|c| (&self.paths[c.path], c.first_line, c.start));
                 let counterpart = copies[0];
                 let counterpart_last_line = lookup
@@ -369,17 +396,29 @@ impl Lookup {
     }
 }
 
-/// Runs of consecutive windows of a changed file whose keys it newly
-/// duplicates, as indices into its windows: each run is one or more
-/// blocks.
-fn runs(
-    windows: &[(Key, Place)],
-    reported: &HashSet<(usize, Key)>,
-    file: usize,
-) -> Vec<(usize, usize)> {
+/// What [`DuplicationIndex::counts`] found.
+#[derive(Default)]
+struct Counts {
+    /// Keys that two or more files hold.
+    shared: HashSet<Key>,
+    /// Shared keys whose number of holding files grew.
+    growing: HashSet<Key>,
+    /// (changed file, key) pairs the change newly duplicates.
+    reported: HashSet<(usize, Key)>,
+}
+
+/// Per token of one changed file, see [`DuplicationIndex::coverage`].
+struct Coverage {
+    new: Vec<bool>,
+    old: Vec<bool>,
+}
+
+/// Runs of consecutive windows of a changed file whose keys another file
+/// shares, as indices into its windows: each run is one or more blocks.
+fn runs(windows: &[(Key, Place)], shared: &HashSet<Key>) -> Vec<(usize, usize)> {
     let mut runs: Vec<(usize, usize)> = Vec::new();
     for (i, (key, _)) in windows.iter().enumerate() {
-        if !reported.contains(&(file, *key)) {
+        if !shared.contains(key) {
             continue;
         }
         match runs.last_mut() {
@@ -904,6 +943,28 @@ mod tests {
     }
 
     #[test]
+    fn an_edit_next_to_shared_code_that_also_grows_elsewhere() {
+        // As above, and n.ts gets a copy of H in the same change: n.ts is
+        // reported, a.ts still is not.
+        let h = texts("h", 60);
+        let mut u = texts("z", 10);
+        u.push("}".to_owned());
+        u.extend(h.iter().cloned());
+        let mut after = texts("y", 10);
+        after.push("}".to_owned());
+        after.extend(h.iter().cloned());
+        let found = run(
+            &[
+                ("a.ts", synthetic(&h), synthetic(&after)),
+                ("n.ts", vec![], synthetic(&h)),
+            ],
+            &[("u.ts", synthetic(&u))],
+        );
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].0, "n.ts");
+    }
+
+    #[test]
     fn moved_code_with_a_new_neighbour_is_not_a_new_copy() {
         // H leaves b.ts and arrives in c.ts after other code ending in
         // `}`; a third file has H after a `}` too.
@@ -992,6 +1053,71 @@ mod tests {
                 "n.ts".to_owned(),
                 1,
                 "duplicates a.ts:1-60 (lines 1-60, 60 tokens)".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn the_original_of_a_copy_within_the_change_still_reports_its_own_copy() {
+        // a.ts and b.ts are new and equal (P+C+Q); v.ts already holds C.
+        let (p, c, q) = (texts("p", 60), texts("c", 60), texts("q", 60));
+        let file: Vec<String> = [p, c.clone(), q].concat();
+        let found = run(
+            &[
+                ("a.ts", vec![], synthetic(&file)),
+                ("b.ts", vec![], synthetic(&file)),
+            ],
+            &[("v.ts", synthetic(&c))],
+        );
+        assert_eq!(
+            found,
+            [
+                (
+                    "a.ts".to_owned(),
+                    61,
+                    "duplicates v.ts:1-60 (lines 61-120, 60 tokens)".to_owned()
+                ),
+                (
+                    "b.ts".to_owned(),
+                    1,
+                    "duplicates a.ts:1-180 (lines 1-180, 180 tokens)".to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_block_pasted_twice_into_a_new_file_is_one_finding() {
+        let b = texts("b", 60);
+        let file: Vec<String> = [b.clone(), texts("x", 5), b.clone()].concat();
+        assert_eq!(
+            run(
+                &[("n.ts", vec![], synthetic(&file))],
+                &[("u.ts", synthetic(&b))]
+            ),
+            [(
+                "n.ts".to_owned(),
+                1,
+                "duplicates u.ts:1-60 (lines 1-60, 60 tokens)".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn a_copy_wrapped_around_code_the_file_already_shared_is_one_block() {
+        // a.ts had S (shared with u.ts); the change wraps it into a copy of
+        // v.ts: 30 new tokens before, 30 after.
+        let (pre, s, post) = (texts("pre", 30), texts("s", 60), texts("post", 30));
+        let whole: Vec<String> = [pre, s.clone(), post].concat();
+        assert_eq!(
+            run(
+                &[("a.ts", synthetic(&s), synthetic(&whole))],
+                &[("u.ts", synthetic(&s)), ("v.ts", synthetic(&whole))]
+            ),
+            [(
+                "a.ts".to_owned(),
+                1,
+                "duplicates v.ts:1-120 (lines 1-120, 120 tokens)".to_owned()
             )]
         );
     }

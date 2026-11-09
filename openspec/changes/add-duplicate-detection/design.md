@@ -190,6 +190,9 @@ The two-file form never builds an index.
   - the reviewer's worst case: 400 new files and 2,000 unchanged ones
     sharing one 200-token block, 2.9 s in `findings()` alone. The block
     search costs changed files x files holding a block x block length.
+  - The coverage of a changed file is linear in its windows: whether a
+    key is shared is decided once per key (round 4 measured 15 s for a
+    400k-token table before that).
 
   Memory is driven by the changed files, because only their windows are
   kept (D3); unchanged files add a place for each window they share with
@@ -199,6 +202,14 @@ The two-file form never builds an index.
   token texts and compacting the window maps are the follow-ups, with
   caching and parallel parsing, before qgate meets very large pull
   requests.
+- **[Literal tables match each other]** Normalized, every long array of
+  numbers or strings is the same token pattern, so a new table of 25 or
+  more elements in a repository that has another one is reported
+  (measured: a new 200,000-number table against an existing 30-number
+  one gives one finding, `64 tokens`, in 3.4 s). → Known false positive
+  of type-2 normalization; excluding windows made only of literals and
+  punctuation is the candidate fix, together with thresholds in
+  `qgate.toml`.
 - **[False positives of type-2 normalization]** Structurally identical
   but unrelated code (switch arms, test tables, configuration objects)
   can match. → Kept member names, the exclusions and the 50-token
@@ -413,3 +424,26 @@ finding, which does not fail a run by default.
   - JavaScript renamed to JavaScript no longer counts as code that left.
   - The two-file test puts the copied block in a neighbouring file, so it
     shows the form does not look beyond its two files.
+- **PR 3, review round 4:**
+  - The "old duplicated code" coverage hid a genuine copy in a new file
+    that was the original of another copy in the same change. Old now
+    means a shared window the file held before, or one whose block did
+    not grow; new means a window reported for the file. A block needs 50
+    tokens that are new and not old.
+  - Blocks are built from every shared window, not only reported ones, so
+    a copy wrapped around code the file already shared is one block (its
+    new tokens counted), and a block pasted twice into one file is one
+    finding: tokens of windows an earlier block in the file reported do
+    not count again.
+  - Whether a key is shared is computed once (`Counts`), not per window.
+  - The spec names "not itself a new copy" for the counterpart, says the
+    50 new tokens exclude an earlier block in the file, and the two-file
+    scenario matches its test.
+  - Known limitation: when several new files copy overlapping parts of
+    one block, the original can differ per window, and a file can get two
+    overlapping findings naming different copies (three new files a = X[0..60],
+    b = X, c = X[10..70] give c two findings). Allowing new copies as
+    counterparts would make the original of a copy within the change
+    report itself, which is worse.
+  - The roadmap rewrite that commit 5862327 picked up from the working
+    tree by mistake was moved to its own pull request (#17).
