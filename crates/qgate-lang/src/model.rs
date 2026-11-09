@@ -11,14 +11,17 @@ pub struct FileModel {
 }
 
 /// One function unit: a named function, method, getter, setter or
-/// constructor, including the anonymous functions nested inside it.
+/// constructor, including the anonymous functions nested inside it. At
+/// module level it can also be the functions passed through one call to a
+/// binding, as in `export const GET = withAuth(async () => {...})`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     /// Qualified name, unique within the file, e.g. `Cart.total` or
     /// `outer.inner`. Later duplicates get a `#2`, `#3` suffix.
     pub name: String,
-    /// 1-based line of the function's name (or of the function itself if
-    /// it has no name of its own, e.g. an unnamed default export).
+    /// 1-based line of the function's name or binding (or of the function
+    /// itself, or the call, if it has no name of its own, e.g. an unnamed
+    /// default export).
     pub line: u32,
     /// Cyclomatic complexity: 1 plus the number of decision points.
     pub cyclomatic: u32,

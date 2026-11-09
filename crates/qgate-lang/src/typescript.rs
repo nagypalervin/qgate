@@ -2,8 +2,10 @@
 //!
 //! One walk over the syntax tree finds the function units, gives each a
 //! qualified name and counts its decision points (design D3 of the
-//! `add-cyclomatic-complexity-check` change). What counts as a decision
-//! point follows the `complexity` rule of `ESLint`.
+//! `add-cyclomatic-complexity-check` change); calls bound to a name at
+//! module level are handled in the same walk (design of
+//! `analyze-wrapped-functions`). What counts as a decision point follows
+//! the `complexity` rule of `ESLint`.
 
 use std::collections::HashSet;
 
@@ -80,6 +82,10 @@ const WRAPPER_KINDS: &[&str] = &[
     "non_null_expression",
 ];
 
+/// Expressions that can be bound to a name and pass a function, object or
+/// class through to that binding (see [`pass_through_top`]).
+const CALL_KINDS: &[&str] = &["call_expression", "new_expression", "await_expression"];
+
 /// Decision points that count once per node, whatever their content.
 const DECISION_KINDS: &[&str] = &[
     "if_statement",
@@ -100,6 +106,20 @@ const DECISION_KINDS: &[&str] = &[
 struct Frame {
     segment: bool,
     scope: bool,
+    bound: bool,
+}
+
+/// A call, `new` or `await` bound to a name where no unit collects decision
+/// points, as in `export const GET = withAuth(async () => {...})`. Values
+/// that pass through it are named after the binding.
+struct Bound {
+    /// Id of the topmost node of the call's pass-through chain, so a value
+    /// passes through this call when its own chain ends at the same node.
+    top: usize,
+    /// The binding's name, made unique.
+    segment: String,
+    /// The unit of the functions that pass through, if there is one.
+    unit: Option<usize>,
 }
 
 struct Walker<'s> {
@@ -114,6 +134,8 @@ struct Walker<'s> {
     functions: Vec<Function>,
     /// Qualified names already given to a unit.
     taken: HashSet<String>,
+    /// Bound calls being walked, innermost last.
+    bound: Vec<Bound>,
 }
 
 impl<'s> Walker<'s> {
@@ -124,6 +146,7 @@ impl<'s> Walker<'s> {
             scopes: Vec::new(),
             functions: Vec::new(),
             taken: HashSet::new(),
+            bound: Vec::new(),
         }
     }
 
@@ -156,6 +179,23 @@ impl<'s> Walker<'s> {
         let kind = node.kind();
         let mut frame = Frame::default();
 
+        // A value passed through a bound call takes the binding's name.
+        if FUNCTION_KINDS.contains(&kind) || CONTAINER_KINDS.contains(&kind) {
+            if let Some(bound) = self
+                .bound
+                .last()
+                .filter(|b| b.top == pass_through_top(node).id())
+            {
+                self.segments.push(bound.segment.clone());
+                frame.segment = true;
+                if let (true, Some(unit)) = (FUNCTION_KINDS.contains(&kind), bound.unit) {
+                    self.scopes.push(Some(unit));
+                    frame.scope = true;
+                }
+                return frame;
+            }
+        }
+
         if FUNCTION_KINDS.contains(&kind) {
             // Anonymous functions open nothing: their decision points go to
             // the enclosing unit.
@@ -181,12 +221,48 @@ impl<'s> Walker<'s> {
         } else if kind == "class_body" {
             self.scopes.push(None);
             frame.scope = true;
+        } else if CALL_KINDS.contains(&kind) && !self.collecting() {
+            frame.bound = self.enter_bound_call(node);
         } else if is_decision_point(node) {
             if let Some(Some(index)) = self.scopes.last() {
                 self.functions[*index].cyclomatic += 1;
             }
         }
         frame
+    }
+
+    /// Whether a unit collects the decision points at the current position.
+    fn collecting(&self) -> bool {
+        matches!(self.scopes.last(), Some(Some(_)))
+    }
+
+    /// Start a bound call if `node` is bound to a name. The unit of the
+    /// functions passing through is created here, before anything nested
+    /// in the call, so units stay in source order; it is not created when
+    /// no function passes through.
+    fn enter_bound_call(&mut self, node: Node<'_>) -> bool {
+        let Some((name, line)) = self.binding_name(node) else {
+            return false;
+        };
+        let segment = self.unique_segment(&name);
+        let unit = passes_a_function(node).then(|| {
+            let mut parts = self.segments.clone();
+            parts.push(segment.clone());
+            let qualified = parts.join(".");
+            self.taken.insert(qualified.clone());
+            self.functions.push(Function {
+                name: qualified,
+                line,
+                cyclomatic: 1,
+            });
+            self.functions.len() - 1
+        });
+        self.bound.push(Bound {
+            top: pass_through_top(node).id(),
+            segment,
+            unit,
+        });
+        true
     }
 
     /// `name`, or `name#2`, `name#3`, ... if the qualified name it would
@@ -213,6 +289,9 @@ impl<'s> Walker<'s> {
         }
         if frame.scope {
             self.scopes.pop();
+        }
+        if frame.bound {
+            self.bound.pop();
         }
     }
 
@@ -318,6 +397,69 @@ impl<'s> Walker<'s> {
     fn finish(self) -> Vec<Function> {
         self.functions
     }
+}
+
+/// The topmost node reached from `node` by passing through: type wrappers,
+/// `await`, call and `new` arguments, and the function of a call (an
+/// immediately invoked function or a curried call). A value passes through
+/// a bound call when both chains end at the same node.
+fn pass_through_top(node: Node<'_>) -> Node<'_> {
+    let mut top = node;
+    while let Some(parent) = top.parent() {
+        let kind = parent.kind();
+        top = if WRAPPER_KINDS.contains(&kind) || kind == "await_expression" {
+            parent
+        } else if kind == "arguments" {
+            match parent.parent() {
+                Some(call) => call,
+                None => break,
+            }
+        } else if kind == "call_expression"
+            && parent
+                .child_by_field_name("function")
+                .is_some_and(|f| f.id() == top.id())
+        {
+            parent
+        } else {
+            break;
+        };
+    }
+    top
+}
+
+/// Whether a function passes through `call`: a bounded scan along the
+/// pass-through edges of [`pass_through_top`], downwards. It never enters a
+/// function body.
+fn passes_a_function(call: Node<'_>) -> bool {
+    let mut pending = vec![call];
+    while let Some(node) = pending.pop() {
+        let kind = node.kind();
+        let mut next = Vec::new();
+        if WRAPPER_KINDS.contains(&kind) || kind == "await_expression" {
+            next.extend(named_children(node));
+        } else if kind == "call_expression" || kind == "new_expression" {
+            next.extend(node.child_by_field_name("function"));
+            if let Some(arguments) = node
+                .child_by_field_name("arguments")
+                .filter(|a| a.kind() == "arguments")
+            {
+                next.extend(named_children(arguments));
+            }
+        }
+        for child in next {
+            if FUNCTION_KINDS.contains(&child.kind()) {
+                return true;
+            }
+            pending.push(child);
+        }
+    }
+    false
+}
+
+/// The named children of a node.
+fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).collect()
 }
 
 /// Line of the earliest `ERROR` or missing node, if the tree has any.
@@ -480,6 +622,77 @@ mod tests {
         assert_eq!(
             ts_units(include_str!("../fixtures/typescript/module_level.ts")),
             triples(&[])
+        );
+    }
+
+    #[test]
+    fn calls_at_module_level_do_not_hide_the_binding() {
+        assert_eq!(
+            ts_units(include_str!("../fixtures/typescript/wrapped_calls.ts")),
+            triples(&[
+                ("GET", 3, 2),
+                // nested calls, a member call, type arguments
+                ("Button", 10, 2),
+                // curried call
+                ("Comp", 19, 2),
+                ("p", 25, 2),
+                ("data", 31, 2),
+                // immediately invoked function
+                ("config", 38, 2),
+                // type wrappers around the call and the function
+                ("typed", 46, 2),
+                ("default", 52, 2),
+            ])
+        );
+    }
+
+    #[test]
+    fn a_bound_call_is_one_unit() {
+        assert_eq!(
+            ts_units(include_str!("../fixtures/typescript/bound_call_units.ts")),
+            triples(&[
+                // three functions summed: 1 + ?? + ternary
+                ("sel", 4, 3),
+                // the ?? in the options object does not count
+                ("h", 11, 2),
+                // the binding wins over `onDone`
+                ("named", 21, 2),
+                // objects and classes: prefix only, no unit of their own
+                ("useCart.actions.load", 30, 2),
+                ("Mixed.m", 39, 2),
+                ("X", 47, 2),
+                ("X.m", 53, 1),
+                // a bound call inside an object that passes through
+                ("nested.a", 58, 2),
+                ("A.onScroll", 67, 2),
+                ("api.load", 75, 2),
+                // `plain = compute(a ?? b)` passes no function: no unit
+            ])
+        );
+        assert_eq!(
+            ts_units(include_str!(
+                "../fixtures/typescript/default_wrapped_object.ts"
+            )),
+            triples(&[("default.setup", 3, 1)])
+        );
+    }
+
+    #[test]
+    fn inside_a_function_calls_change_nothing() {
+        assert_eq!(
+            ts_units(include_str!(
+                "../fixtures/typescript/wrapped_inside_function.ts"
+            )),
+            triples(&[
+                // the useCallback and reduce callbacks count towards
+                // their function
+                ("C", 3, 2),
+                ("outer", 12, 2),
+                // a class field initializer collects nothing, so the rule
+                // applies there
+                ("make", 19, 1),
+                ("make.h", 21, 2),
+            ])
         );
     }
 

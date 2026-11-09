@@ -174,3 +174,25 @@ that passes through. In `wrap({ m() {} }, () => {...})` that would push
 
 None. There is no stored state; the next run of `qgate check` uses the new
 rule on both revisions.
+
+## Implementation Notes
+
+- **`Bound` stores the end of the call's own pass-through chain**, not the
+  call node. In `const typed = wrap(fn as H) satisfies W` the function's
+  chain ends at the `satisfies` expression around the call, so D1's "node
+  id of the bound call" would never match. The walker compares
+  `pass_through_top(value)` with `pass_through_top(call)`, which also
+  covers parentheses and `as` around the call.
+- **The two directions use the same edges:**
+  - type wrappers, `await`, the `arguments` of a call or `new`, and the
+    `function` field of a call;
+  - the `constructor` of `new` and the template string of a tagged
+    template are not edges in either direction, so `pass_through_top`
+    (upward) and the D3 scan (downward) cannot disagree.
+- **Fixtures beyond D5:**
+  - `default_wrapped_object.ts` holds `export default defineComponent(...)`,
+    because a fixture already has a default export;
+  - `wrapped_inside_function.ts` also pins a class field inside a function
+    (`make.h`). The requirement applies there, because a class field
+    initializer collects nothing. So task 1.2's "already passes" held for
+    `C` and `outer` only.

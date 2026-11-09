@@ -9,7 +9,10 @@
 //! Supported: TypeScript and TSX. The model holds one [`Function`] per
 //! named function unit with its qualified name, line and cyclomatic
 //! complexity. Anonymous functions count towards their nearest named
-//! ancestor; code outside named functions is not measured.
+//! ancestor; code outside named functions is not measured. At module level
+//! a call does not hide the binding: in
+//! `export const GET = withAuth(async () => {...})` the functions passed
+//! through the call form one unit named `GET`.
 //!
 //! ```
 //! use qgate_lang::{Language, parse};
