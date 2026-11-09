@@ -95,14 +95,15 @@ fn output_is_byte_identical_across_runs() {
     assert_eq!(first.stdout, second.stdout);
 }
 
-#[test]
-fn closed_output_pipe_is_not_a_crash() {
+/// Run `qgate check` on a file with thousands of Warning findings, with
+/// `extra` arguments, and close standard output before reading it.
+fn run_into_closed_pipe(name: &str, extra: &[&str]) -> Output {
     use std::io::Write as _;
     use std::process::Stdio;
 
     // Enough findings to overflow any pipe buffer, so qgate is still
     // writing when the reader goes away (like `qgate check ... | head -n 1`).
-    let dir = std::env::temp_dir().join(format!("qgate-pipe-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("qgate-pipe-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let big = dir.join("big.ts");
     let mut source = std::fs::File::create(&big).expect("create big.ts");
@@ -122,6 +123,7 @@ fn closed_output_pipe_is_not_a_crash() {
             fixtures.join("same.ts").as_os_str(),
             big.as_os_str(),
         ])
+        .args(extra)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -129,16 +131,153 @@ fn closed_output_pipe_is_not_a_crash() {
     drop(child.stdout.take());
     let out = child.wait_with_output().expect("qgate finishes");
     let _ = std::fs::remove_dir_all(&dir);
+    out
+}
 
+#[test]
+fn closed_output_pipe_is_not_a_crash() {
+    let out = run_into_closed_pipe("pass", &[]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
 }
 
-// Requirement: Findings do not change the exit code
+#[test]
+fn closed_output_pipe_keeps_the_failing_exit_code() {
+    let out = run_into_closed_pipe("fail", &["--fail-on", "warning"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("qgate: failing: 3000 findings"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+// Requirement: Failing on findings
 
 #[test]
-fn error_finding_exits_zero() {
+fn error_finding_exits_one() {
     let out = qgate(&["check", "old/orders.ts", "src/orders.ts"]);
     assert!(stdout(&out).starts_with("error "));
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn warnings_pass_by_default() {
+    let out = qgate(&["check", "grow/before.ts", "grow/after.ts"]);
+    assert!(stdout(&out).starts_with("warning "));
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn failing_on_warnings() {
+    let out = qgate(&[
+        "check",
+        "grow/before.ts",
+        "grow/after.ts",
+        "--fail-on",
+        "warning",
+    ]);
+    assert!(stdout(&out).starts_with("warning "));
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn failing_on_errors_explicitly() {
+    let warnings = qgate(&[
+        "check",
+        "grow/before.ts",
+        "grow/after.ts",
+        "--fail-on",
+        "error",
+    ]);
+    assert_eq!(warnings.status.code(), Some(0));
+    let errors = qgate(&[
+        "check",
+        "old/orders.ts",
+        "src/orders.ts",
+        "--fail-on",
+        "error",
+    ]);
+    assert_eq!(errors.status.code(), Some(1));
+}
+
+#[test]
+fn never_failing() {
+    let default = qgate(&["check", "old/orders.ts", "src/orders.ts"]);
+    let never = qgate(&[
+        "check",
+        "old/orders.ts",
+        "src/orders.ts",
+        "--fail-on",
+        "never",
+    ]);
+    assert_eq!(never.status.code(), Some(0));
+    assert_eq!(never.stdout, default.stdout);
+    assert_eq!(stderr(&never), "");
+}
+
+#[test]
+fn errors_that_stop_the_check_win() {
+    let out = qgate(&[
+        "check",
+        "grow/before.ts",
+        "does-not-exist.ts",
+        "--fail-on",
+        "warning",
+    ]);
+    assert_eq!(stdout(&out), "");
+    assert!(!stderr(&out).contains("failing"), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn summary_of_a_failing_run() {
+    let out = qgate(&["check", "fail/before.ts", "fail/after.ts"]);
+    assert_eq!(
+        stdout(&out),
+        "error   fail/after.ts:1  a: cyclomatic complexity 1 -> 7 (+6)  \
+         [complexity/cyclomatic-increase]\n\
+         error   fail/after.ts:11  b: cyclomatic complexity 1 -> 7 (+6)  \
+         [complexity/cyclomatic-increase]\n\
+         warning fail/after.ts:21  c: cyclomatic complexity 1 -> 2 (+1)  \
+         [complexity/cyclomatic-increase]\n"
+    );
+    assert!(
+        stderr(&out)
+            .ends_with("qgate: failing: 2 findings at or above \"error\" (see --fail-on)\n"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn summary_counts_one_finding() {
+    let out = qgate(&["check", "old/orders.ts", "src/orders.ts"]);
+    assert_eq!(
+        stderr(&out),
+        "qgate: failing: 1 finding at or above \"error\" (see --fail-on)\n"
+    );
+}
+
+#[test]
+fn summary_names_the_level() {
+    let out = qgate(&[
+        "check",
+        "fail/before.ts",
+        "fail/after.ts",
+        "--fail-on",
+        "warning",
+    ]);
+    assert_eq!(
+        stderr(&out),
+        "qgate: failing: 3 findings at or above \"warning\" (see --fail-on)\n"
+    );
+}
+
+#[test]
+fn a_passing_run_prints_no_summary() {
+    let out = qgate(&["check", "grow/before.ts", "grow/after.ts"]);
+    assert_eq!(stderr(&out), "");
     assert_eq!(out.status.code(), Some(0));
 }
 
@@ -236,14 +375,29 @@ fn head_without_base() {
 }
 
 #[test]
+fn unknown_fail_on_level() {
+    let out = qgate(&["check", "same.ts", "same.ts", "--fail-on", "info"]);
+    let err = stderr(&out);
+    assert!(err.contains("info"), "{err}");
+    assert!(
+        err.contains("[possible values: error, warning, never]"),
+        "{err}"
+    );
+    assert_eq!(stdout(&out), "");
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
 fn help_shows_both_forms() {
     let out = qgate(&["check", "--help"]);
-    assert!(
-        stdout(&out).contains("qgate check <before> <after>"),
-        "{}",
-        stdout(&out)
-    );
-    assert!(stdout(&out).contains("qgate check --base <rev> [--head <rev>]"));
+    let help = stdout(&out);
+    // Both forms name --fail-on, so a usage error shows the opt-out.
+    for form in [
+        "qgate check <before> <after> [--fail-on <level>]\n",
+        "qgate check --base <rev> [--head <rev>] [--fail-on <level>]\n",
+    ] {
+        assert!(help.contains(form), "{help}");
+    }
 }
 
 #[test]

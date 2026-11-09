@@ -98,12 +98,14 @@ or a message.
 
 In revision mode, when either version of a selected file cannot be parsed or
 is not valid UTF-8, the system SHALL skip that file, report one Warning
-finding with rule `input/unparsable` for its head path, continue with the
-other files and exit with code 0.
+finding with rule `input/unparsable` for its head path and continue with the
+other files. The finding affects the exit code like any other Warning (see
+"Failing on findings" in the `check-command` capability): it fails the run
+only with `--fail-on warning`.
 
 #### Scenario: Syntax error in the head version
 
-- **GIVEN** the head version of `src/a.ts` has its first syntax error on line 12, and `src/b.ts` got more complex
+- **GIVEN** the head version of `src/a.ts` has its first syntax error on line 12, and `src/b.ts` got more complex by less than 5 (a Warning)
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** the output contains `warning src/a.ts:12  file not analyzed: syntax error on line 12 (or syntax the parser does not support yet)  [input/unparsable]`
 - **AND** it also contains the finding for `src/b.ts`

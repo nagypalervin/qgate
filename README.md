@@ -48,11 +48,22 @@ qgate reports, per function:
 | `complexity/cyclomatic-new` | a new function is already complex (new files count as new) | 11 to 20 | above 20 |
 | `input/unparsable` | `--base` mode only: a changed file has a syntax error, syntax the parser does not support yet, or is not UTF-8; it is skipped | always | - |
 
-It exits with `0` when the analysis ran (findings do not fail it yet) and
-`2` when it could not run, for example: an invalid invocation, an
-unsupported or unparsable file in the two-file form, an unknown revision,
-revisions without a merge base, a directory outside a git repository, or no
-`git` on the `PATH`.
+Exit codes:
+
+- `0`: the analysis ran and no finding reached the `--fail-on` level;
+- `1`: at least one finding did. The report is printed as usual, and one
+  line on standard error says why the run failed, for example
+  `qgate: failing: 1 finding at or above "error" (see --fail-on)`;
+- `2`: the check could not run, for example: an invalid invocation, an
+  unsupported or unparsable file in the two-file form, an unknown revision,
+  revisions without a merge base, a directory outside a git repository, or
+  no `git` on the `PATH`. This wins over `1`.
+
+`--fail-on` takes `error` (the default: only Errors fail the run),
+`warning` (Warnings fail it too, including `input/unparsable`) or `never`
+(findings never fail it; only a check that could not run does). The
+example above has an Error finding, so it exits with `1`; add
+`--fail-on never` to only see the report.
 
 ### In CI
 
@@ -69,6 +80,10 @@ history:
   env:
     BASE_REF: ${{ github.base_ref }}
 ```
+
+The job fails when the pull request adds an Error finding. Use
+`--fail-on warning` for a stricter gate, or `--fail-on never` to report
+without failing the job.
 
 qgate has no release binaries yet (planned for M3); until then, install
 it with `cargo install` as above.
