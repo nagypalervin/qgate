@@ -267,14 +267,17 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
     let cwd =
         std::env::current_dir().map_err(|e| format!("cannot read the current directory: {e}"))?;
     let repo = Repository::discover(&cwd).map_err(|e| git_message(&e, base))?;
-    // Read and checked before the diff, so an invalid file fails fast. The
-    // architecture analyzer applies its rules (add-forbidden-imports PR 3).
+    // The diff first: it checks both revisions and their merge base, so an
+    // unknown base (a shallow clone) is reported as such, never hidden
+    // behind a broken qgate.toml.
+    let files = repo
+        .changed_files(base, head)
+        .map_err(|e| git_message(&e, base))?;
+    // Checked before any file is analyzed. The architecture analyzer
+    // applies the rules (add-forbidden-imports PR 3).
     let _config = load_config(&repo, base, head)?;
     let mut findings = Vec::new();
-    for file in repo
-        .changed_files(base, head)
-        .map_err(|e| git_message(&e, base))?
-    {
+    for file in files {
         let Some(language) = language_of(&file.path) else {
             continue;
         };

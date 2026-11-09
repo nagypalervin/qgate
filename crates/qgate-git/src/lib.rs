@@ -420,6 +420,16 @@ fn run<S: AsRef<OsStr>>(dir: &Path, args: &[S]) -> Result<Output, GitError> {
         .args(args)
         .current_dir(dir)
         .env("GIT_TERMINAL_PROMPT", "0");
+    // `file_at` passes `--literal-pathspecs`, which git refuses next to
+    // any other global pathspec setting a user may have exported.
+    for variable in [
+        "GIT_LITERAL_PATHSPECS",
+        "GIT_GLOB_PATHSPECS",
+        "GIT_NOGLOB_PATHSPECS",
+        "GIT_ICASE_PATHSPECS",
+    ] {
+        command.env_remove(variable);
+    }
     // Tests run the code under test isolated from the developer's git
     // configuration and repository variables, like the fixtures (design D5).
     #[cfg(test)]
@@ -826,6 +836,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn file_at_rejects_directories_and_symlinks() {
         let repo = TestRepo::new();
         repo.write("qgate.toml/inner", "x");

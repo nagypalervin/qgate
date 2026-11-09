@@ -39,13 +39,19 @@ The workspace rules leave no obvious home:
   - `analyzers -> config` would couple every analyzer to the file format;
   - rule types in `qgate-core` would put pattern logic in a types-only
     crate.
-- **`toml` 0.9**, with `default-features = false` and the features `parse`,
-  `serde` and `std`, is the maintained reference implementation, and its
-  errors carry line and column. Measured in a throwaway crate, it adds
-  about 11 crates together with `serde` derive, most of them build-time
-  proc-macro crates (`syn`, `quote`, `serde_derive`, `proc-macro2`).
-  `basic-toml` adds about 7 but is in maintenance mode; a hand-written
-  parser is not worth owning.
+- **`toml` 1.x**, with `default-features = false` and the features
+  `parse`, `serde` and `std`, is the maintained reference implementation
+  (MSRV 1.85), and its errors carry a byte span, from which we give line
+  and column.
+  - **What it adds, measured against the workspace's `Cargo.lock`:** five
+    crates are built (`toml`, `toml_parser`, `toml_datetime`,
+    `serde_spanned`, `winnow`), and a sixth (`toml_writer`) is locked but
+    not built with these features.
+  - **What it reuses:** `serde` with `derive` and its proc-macro crates
+    (`syn`, `quote`, `proc-macro2`, `serde_derive`) were already in the
+    lock.
+  - **Alternatives:** `basic-toml` is in maintenance mode; a hand-written
+    parser is not worth owning.
 
 ## Consequences
 

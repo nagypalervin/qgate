@@ -93,6 +93,7 @@ pub fn parse(bytes: &[u8]) -> Result<Config, ConfigError> {
 fn check(config: &Config) -> Result<(), ConfigError> {
     let mut names = HashSet::new();
     for (index, rule) in config.architecture.forbid.iter().enumerate() {
+        // A blank name could not tell findings apart, so it counts as empty.
         if rule.name.trim().is_empty() {
             return Err(ConfigError::new(format!(
                 "architecture.forbid rule {}: `name` is empty",
@@ -101,14 +102,14 @@ fn check(config: &Config) -> Result<(), ConfigError> {
         }
         if !names.insert(rule.name.as_str()) {
             return Err(ConfigError::new(format!(
-                "architecture.forbid: duplicate rule name \"{}\"",
+                "architecture.forbid: duplicate rule name {:?}",
                 rule.name
             )));
         }
         for (key, list) in [("from", &rule.from), ("to", &rule.to)] {
             if list.is_empty() {
                 return Err(ConfigError::new(format!(
-                    "architecture.forbid rule \"{}\": `{key}` is empty",
+                    "architecture.forbid rule {:?}: `{key}` is empty",
                     rule.name
                 )));
             }
@@ -123,9 +124,11 @@ fn toml_error(text: &str, error: &toml::de::Error) -> ConfigError {
     let message = error.message().trim_end();
     match error.span() {
         Some(span) => {
-            let before = &text[..span.start.min(text.len())];
+            let before = text.get(..span.start).unwrap_or(text);
             let line = before.matches('\n').count() + 1;
-            let column = before.len() - before.rfind('\n').map_or(0, |i| i + 1) + 1;
+            // In characters, as editors count them, not bytes.
+            let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+            let column = before[line_start..].chars().count() + 1;
             ConfigError::new(format!("line {line}, column {column}: {message}"))
         }
         None => ConfigError::new(message),
@@ -189,6 +192,32 @@ to = ["@prisma/client"]
             "[[architecture.forbid]]\nfrom = [\"a\"]\nname = \"domain-is-pure\nto = [\"b\"]\n";
         let err = error(text);
         assert!(err.starts_with("line 3, column "), "{err}");
+    }
+
+    #[test]
+    fn column_counts_characters_and_crlf_lines() {
+        let text = "[architecture]\n# \u{e9}\u{6f22}\u{5b57}\nforbid = \"\u{e9}\u{6f22}\" x\n";
+        // `x` is the 15th character on line 3 but its 18th byte.
+        assert!(
+            error(text).starts_with("line 3, column 15: "),
+            "{}",
+            error(text)
+        );
+        let crlf = "[[architecture.forbid]]\r\nfrom = [\"a\"]\r\nname = \"r\" x\r\n";
+        assert!(
+            error(crlf).starts_with("line 3, column 12: "),
+            "{}",
+            error(crlf)
+        );
+    }
+
+    #[test]
+    fn names_in_messages_are_escaped() {
+        let rule = "[[architecture.forbid]]\nname = 'a\"b'\nfrom = [\"a\"]\nto = [\"b\"]\n";
+        assert_eq!(
+            error(&format!("{rule}{rule}")),
+            "architecture.forbid: duplicate rule name \"a\\\"b\""
+        );
     }
 
     #[test]

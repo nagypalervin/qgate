@@ -75,8 +75,8 @@ of the agent prompt.**
 
 | Option | Crates added | Messages | Status |
 |---|---|---|---|
-| `toml` 0.9, `default-features = false`, features `parse`, `serde`, `std` | about 11, mostly build-time proc-macro (`syn`, `quote`, `serde_derive`, `proc-macro2`) | line and column, with the key path | the reference implementation, actively maintained |
-| `basic-toml` 0.1 | about 7 | line and column | maintenance mode, older TOML |
+| `toml` 1.x, `default-features = false`, features `parse`, `serde`, `std` | 5 built crates in this workspace (`serde` derive was already locked) | a byte span, turned into line and column | the reference implementation, actively maintained, MSRV 1.85 |
+| `basic-toml` 0.1 | fewer | line and column | maintenance mode, older TOML |
 | hand-written parser | 0 | ours | a TOML parser is not our problem |
 
 Choose `toml`. The commit message states why, as CLAUDE.md requires.
@@ -148,9 +148,11 @@ Result<Option<Vec<u8>>, GitError>`.
    - anything else (tree, symlink, submodule) is a new
      `GitError::NotARegularFile`.
 
-The CLI reads the configuration **before** the diff. An invalid
-`qgate.toml` then fails fast. An unknown revision still fails first,
-because `file_at` resolves the revision.
+The CLI reads the configuration **after** the diff, before analyzing any
+file (corrected at the PR 2 review; see Implementation Notes). The diff
+checks both revisions and their merge base, so an unknown base, the
+usual shallow-clone failure, keeps its message and hint even when
+`qgate.toml` is broken.
 
 ### D6: `FileChange` gains the old path
 
@@ -188,7 +190,8 @@ of its target in `after`
 
 In revision mode:
 
-1. `file_at(head, "qgate.toml")`.
+1. `changed_files(base, head)`, as before; then `file_at(head,
+   "qgate.toml")`.
 2. Parse it (`qgate-config`) and build `ArchitectureAnalyzer::new(...)`.
    Every error at this step exits with 2 and the message
    `qgate.toml: <problem>`.
@@ -261,3 +264,18 @@ None. Without a `qgate.toml`, behaviour is unchanged.
   must equal the requested path exactly, so a pattern can never select
   another file even if a git version treated the argument as one. A test
   shows that `*.toml`, `qgate.tom?` and `:(glob)*.toml` find nothing.
+- **PR 2, review round 1:**
+  - Reading `qgate.toml` before the diff resolved only the head, so an
+    unknown base was reported as a broken configuration, without the
+    shallow-clone hint. The diff now runs first (D5, D8); an e2e test pins
+    "unknown base + invalid `qgate.toml`".
+  - `toml` moved from 0.9 to 1.x (same features, MSRV 1.85, one `winnow`
+    instead of two). The dependency counts were corrected against the
+    workspace's lock file: 5 built crates, not about 11.
+  - Error columns count characters, not bytes; tests pin a non-ASCII line
+    and a CRLF file. Rule names in messages are escaped (`{:?}`).
+  - A blank name (`"  "`) is rejected like an empty one: it could not tell
+    findings apart.
+  - `run` removes `GIT_*_PATHSPECS` from git's environment: git refuses
+    `--literal-pathspecs` next to another global pathspec setting, which
+    made every revision-mode run fail for users who export one.

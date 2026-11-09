@@ -743,3 +743,28 @@ fn configuration_comes_from_the_head_revision() {
     let out = fixed.qgate(&["--base", "HEAD~1"]);
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
 }
+
+#[test]
+fn unknown_base_wins_over_an_invalid_configuration() {
+    let repo = repo_with_config("broken [");
+    let out = repo.qgate(&["--base", "no-such-branch"]);
+    let err = stderr(&out);
+    assert!(err.contains("unknown revision `no-such-branch`"), "{err}");
+    assert!(err.contains("fetch-depth: 0"), "{err}");
+    assert!(!err.contains("qgate.toml"), "{err}");
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn global_pathspec_settings_do_not_break_revision_mode() {
+    let repo = repo_with_config(RULE);
+    for variable in ["GIT_GLOB_PATHSPECS", "GIT_ICASE_PATHSPECS"] {
+        let out = isolate(&mut Command::new(env!("CARGO_BIN_EXE_qgate")))
+            .args(["check", "--base", "HEAD~1"])
+            .env(variable, "1")
+            .current_dir(&repo.dir)
+            .output()
+            .expect("qgate runs");
+        assert_eq!(out.status.code(), Some(0), "{variable}: {}", stderr(&out));
+    }
+}
