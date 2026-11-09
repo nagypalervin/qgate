@@ -224,3 +224,6 @@ sort key gaining the path, which is constant in that mode.
   although `-M` alone never reports copies.
 - **1.4:** results are sorted by head path in code instead of relying on
   git's output order, which for renames follows the old path.
+- **1.6:** the crate example is a `no_run` doctest rather than a plain
+  code block: it cannot create a repository, but it is still compiled, so
+  the documented API cannot drift.

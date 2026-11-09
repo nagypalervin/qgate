@@ -1,6 +1,31 @@
 //! Changed files and file versions between two git revisions.
 //!
-//! Status: types only; the implementation follows.
+//! Everything goes through the `git` command (ADR 0002): no git library,
+//! no dependencies. The crate returns plain data and errors and never
+//! prints; it knows nothing about languages or findings.
+//!
+//! - [`Repository::discover`] finds the work tree containing a directory.
+//! - [`Repository::changed_files`] lists the regular files changed from the
+//!   merge base of two revisions to the second one, as a pull request shows
+//!   them. Renames carry their old path; deleted files, symlinks,
+//!   submodules and type changes are left out.
+//! - [`Repository::read_blob`] returns the exact bytes of one version.
+//!
+//! User-supplied revisions only ever reach `git rev-parse --verify
+//! --end-of-options`; later commands receive full commit ids, so a revision
+//! cannot act as an option. Requires git 2.24 or newer.
+//!
+//! ```no_run
+//! use std::path::Path;
+//! use qgate_git::Repository;
+//!
+//! let repo = Repository::discover(Path::new("."))?;
+//! for file in repo.changed_files("origin/main", "HEAD")? {
+//!     let after = repo.read_blob(&file.after)?;
+//!     println!("{}: {} bytes", file.path, after.len());
+//! }
+//! # Ok::<(), qgate_git::GitError>(())
+//! ```
 
 use std::ffi::OsStr;
 use std::fmt;
