@@ -169,9 +169,15 @@ The two-file form never builds an index.
 ## Risks / Trade-offs
 
 - **[Run time]** Revision mode now parses the whole head tree on every
-  run. → Task 3.5 measures it on a generated repository of 2,000 files
-  and records the result here. Caching and parallel parsing are the
-  follow-ups if it is too slow.
+  run. → Measured (task 3.4), release build, aarch64 Linux VM:
+  - repository: 2,000 generated TypeScript files, 224,240 lines;
+  - change: 20 files, each adding a copy of a function from another file;
+  - result: 1.4 s wall time and 21 MB peak memory (three runs, all within
+    0.02 s); all 20 copies found.
+
+  Memory stays flat because only the changed files' windows are kept (D3).
+  Caching and parallel parsing remain the follow-ups for much larger
+  repositories.
 - **[False positives of type-2 normalization]** Structurally identical
   but unrelated code (switch arms, test tables, configuration objects)
   can match. → Kept member names, the exclusions and the 50-token
