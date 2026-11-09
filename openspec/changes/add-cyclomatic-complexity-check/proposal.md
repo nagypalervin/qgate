@@ -61,6 +61,12 @@ crates their first real shape before more analyzers depend on it.
   `complexity/cyclomatic-new`.
 - Module-level code (statements outside any function), including anonymous
   callbacks with no named ancestor, such as `describe`/`it` blocks in tests.
+- Stable matching of duplicate names. Duplicates are numbered in source
+  order (`A.create`, `A.create#2`), so adding or removing one shifts the
+  suffixes of the others. Known limitation: adding `static create() {}`
+  above an untouched, complex `create()` reports the untouched method as a
+  new function. Accepted at PR 2 review (2026-11-09) because duplicate names
+  in one scope are rare.
 - Functions wrapped in a call at module level, such as
   `export const GET = withAuth(async (req) => {...})` or
   `export const Button = memo(() => {...})`. They have no named ancestor, so
