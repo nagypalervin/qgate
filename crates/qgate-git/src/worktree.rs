@@ -288,6 +288,26 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_from_a_subdirectory_covers_the_whole_tree() {
+        let repo = TestRepo::new();
+        repo.write("src/a.ts", "export const a = 1;\n");
+        repo.commit("base");
+        repo.write("root.ts", "export const r = 1;\n");
+        repo.write("src/b.ts", "export const b = 1;\n");
+
+        let from_src = Repository::discover(&repo.dir.join("src")).expect("a repository");
+        let snapshot = from_src.worktree_snapshot().expect("a snapshot");
+        let paths: Vec<String> = from_src
+            .changed_files("HEAD", &snapshot)
+            .expect("changes")
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+
+        assert_eq!(paths, vec!["root.ts", "src/b.ts"]);
+    }
+
+    #[test]
     fn clean_working_tree_is_the_head_tree() {
         let repo = TestRepo::new();
         repo.write("src/a.ts", "export const a = 1;\n");

@@ -41,7 +41,7 @@ Commit messages and PR bodies are written to files first.
   - `--no-gpg-sign` (no test failed: `commit-tree` ignores `commit.gpgSign`, so the flag was removed; see design, Implementation Notes);
   - the fixed identity;
   - `core.hooksPath=/dev/null`.
-- [ ] 1.4 Update the `qgate-git` crate docs (the method list and the "Commands run at the top level" paragraph); verify `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-git --no-deps` builds
+- [x] 1.4 Update the `qgate-git` crate docs (the method list and the "Commands run at the top level" paragraph); verify `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-git --no-deps` builds
 
 ## 2. The CLI, end-to-end scenarios and the README (PR 2)
 

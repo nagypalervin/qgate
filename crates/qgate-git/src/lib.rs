@@ -17,11 +17,17 @@
 //! - [`Repository::files_at`] lists every regular file of a revision, and
 //!   [`Repository::blob_reader`] reads many blobs through one
 //!   `git cat-file --batch` process, for analyses that need a whole tree.
+//! - [`Repository::worktree_snapshot`] turns the working tree, uncommitted
+//!   and untracked files included, into a commit that no ref points to, so
+//!   every method above can check it like a revision. It leaves the index,
+//!   refs and stash alone and runs no hooks.
 //!
 //! User-supplied revisions starting with `-` are rejected, the rest only
 //! reach `git rev-parse --verify`; later commands receive full commit ids,
 //! so a revision cannot act as an option. Commands run at the top level of
-//! the work tree, so settings such as `diff.relative` cannot narrow them.
+//! the work tree, so settings such as `diff.relative` cannot narrow them,
+//! and a snapshot stages the whole working tree, whichever directory the
+//! repository was discovered from.
 //!
 //! ```no_run
 //! use std::path::Path;
