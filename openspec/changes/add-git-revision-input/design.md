@@ -308,3 +308,26 @@ The reviewer subagent found one blocker and several real gaps. Decisions:
   and a `--depth 1` clone, which fails with the shallow-clone hint. The CI
   snippet itself is YAML-checked only; qgate has no release binary to
   install in a workflow yet (M3), which the README says.
+
+#### Changes after the PR 2 review (2026-11-09)
+
+- **Sort order (asked, human chose git's order):** paths now compare as
+  byte strings, as `git diff` and `sort` order them (`src-x.ts` before
+  `src/a.ts`), instead of component-wise `PathBuf` order. Spec "Deterministic
+  output order" says so, with a scenario and a test.
+- **Base side not valid UTF-8, and both sides broken:** behaviour existed
+  but was untested and only in these notes; both now have spec scenarios and
+  end-to-end tests.
+- **Shallow-clone hint** only for an unknown `--base` that does not start
+  with `-`: an unknown `--head` or an option-like value was sent the wrong
+  way. Spec scenario "Unknown head revision" added.
+- **README:** install step (`cargo install --locked --path
+  crates/qgate-cli`, verified into a scratch `--root`), the complete list of
+  exit-code-2 cases, and the CI snippet marked as `on: pull_request` with
+  the base ref passed through `env:` (GitHub's hardening advice) and run
+  against a full clone.
+- **Test isolation** now also clears `GIT_TEMPLATE_DIR`, so a developer's
+  template hooks are not copied into test repositories.
+- The reason for the `qgate-core` and `qgate-git` dependencies of
+  `qgate-cli`, missing from commit aab1748, is given in the review-fix
+  commit message.

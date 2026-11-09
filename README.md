@@ -8,8 +8,15 @@
 
 ## Try it
 
-In a git repository with TypeScript code, check what your branch changed
-compared with `main`:
+Install it from a clone of this repository (release binaries come with
+M3):
+
+```sh
+cargo install --locked --path crates/qgate-cli
+```
+
+Then, in a git repository with TypeScript code, check what your branch
+changed compared with `main`:
 
 ```sh
 qgate check --base main
@@ -20,7 +27,8 @@ pull request shows) and analyzes every changed `.ts`, `.mts`, `.cts` and
 `.tsx` file. `--head <rev>` checks another revision instead of `HEAD`.
 Paths in the output are relative to the repository root.
 
-Or compare two files directly, here two fixtures from this repository:
+Or compare two files directly, here two fixtures from this repository
+(without installing):
 
 ```sh
 cargo run -q -p qgate-cli -- check \
@@ -41,23 +49,29 @@ qgate reports, per function:
 | `input/unparsable` | `--base` mode only: a changed file has a syntax error, syntax the parser does not support yet, or is not UTF-8; it is skipped | always | - |
 
 It exits with `0` when the analysis ran (findings do not fail it yet) and
-`2` for invalid input: an unsupported or unparsable file in the two-file
-form, an unknown revision, or a directory that is not a git repository.
+`2` when it could not run, for example: an invalid invocation, an
+unsupported or unparsable file in the two-file form, an unknown revision,
+revisions without a merge base, a directory outside a git repository, or no
+`git` on the `PATH`.
 
 ### In CI
 
-`--base` needs the base branch in the clone. `actions/checkout` fetches a
-single commit by default, so fetch the full history:
+For a workflow triggered `on: pull_request` (`github.base_ref` is empty
+for other events). `--base` needs the base branch in the clone, and
+`actions/checkout` fetches a single commit by default, so fetch the full
+history:
 
 ```yaml
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0
-- run: qgate check --base origin/${{ github.base_ref }}
+- run: qgate check --base "origin/$BASE_REF"
+  env:
+    BASE_REF: ${{ github.base_ref }}
 ```
 
-qgate has no release binaries yet (planned for M3); until then, build it
-from this repository.
+qgate has no release binaries yet (planned for M3); until then, install
+it with `cargo install` as above.
 
 ## Why
 

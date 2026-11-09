@@ -28,6 +28,8 @@ const REPOSITORY_VARIABLES: &[&str] = &[
     "GIT_CONFIG_PARAMETERS",
     "GIT_CONFIG_COUNT",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    // Would copy the developer's hooks into `git init`ed test repositories.
+    "GIT_TEMPLATE_DIR",
 ];
 
 /// Isolate a git command from the developer's environment: no repository

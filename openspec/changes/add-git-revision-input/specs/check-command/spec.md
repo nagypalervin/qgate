@@ -48,9 +48,10 @@ SHALL be rendered as `<path>` alone.
 
 ### Requirement: Deterministic output order
 
-The system SHALL print findings sorted by path, then by line number
-ascending (a finding without a line first), then by rule id, so that the
-same inputs always produce byte-identical output.
+The system SHALL print findings sorted by path compared as a byte string
+(the order git uses), then by line number ascending (a finding without a
+line first), then by rule id, so that the same inputs always produce
+byte-identical output.
 
 #### Scenario: Several findings
 
@@ -63,6 +64,12 @@ same inputs always produce byte-identical output.
 - **GIVEN** findings in `src/b.ts` line 5 and `src/a.ts` line 40
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** the finding for `src/a.ts` is printed before the finding for `src/b.ts`
+
+#### Scenario: Byte order of paths
+
+- **GIVEN** findings in `src/a.ts` and `src-x.ts`
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** the finding for `src-x.ts` is printed first, because `-` sorts before `/`
 
 ### Requirement: Supported input files
 

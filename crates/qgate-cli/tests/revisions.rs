@@ -25,6 +25,8 @@ const REPOSITORY_VARIABLES: &[&str] = &[
     "GIT_CONFIG_PARAMETERS",
     "GIT_CONFIG_COUNT",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    // Would copy the developer's hooks into `git init`ed test repositories.
+    "GIT_TEMPLATE_DIR",
 ];
 
 /// Isolate a command (git, or qgate and the git it starts) from the
@@ -228,6 +230,30 @@ fn several_files_sort_by_path_first() {
     assert_eq!(locations, ["src/a.ts:40", "src/b.ts:5"], "{}", stderr(&out));
 }
 
+#[test]
+fn paths_sort_as_byte_strings_like_git() {
+    let repo = Repo::new();
+    repo.write("src/a.ts", function("a", 1));
+    repo.write("src-x.ts", function("x", 1));
+    repo.commit("base");
+    repo.write("src/a.ts", function("a", 2));
+    repo.write("src-x.ts", function("x", 2));
+    repo.commit("head");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    let paths: Vec<String> = stdout(&out)
+        .lines()
+        .map(|l| {
+            l.split(':')
+                .next()
+                .unwrap_or_default()
+                .trim_start_matches("warning ")
+                .to_owned()
+        })
+        .collect();
+    // `-` (0x2D) sorts before `/` (0x2F), as in `git diff` and `sort`.
+    assert_eq!(paths, ["src-x.ts", "src/a.ts"], "{}", stderr(&out));
+}
+
 // revision-input: Merge-base comparison
 
 #[test]
@@ -410,6 +436,40 @@ fn syntax_error_only_in_the_base_version() {
 }
 
 #[test]
+fn base_version_not_valid_utf8() {
+    let repo = Repo::new();
+    repo.write("src/a.ts", b"export const s = \"\xff\xfe\";\n");
+    repo.commit("base");
+    repo.write("src/a.ts", function("f", 0));
+    repo.commit("head");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(
+        stdout(&out),
+        "warning src/a.ts  file not analyzed: the base version is not valid UTF-8  \
+         [input/unparsable]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn broken_on_both_sides_reports_the_head() {
+    let repo = Repo::new();
+    repo.write("src/a.ts", padding(2) + "function broken(a: number {\n");
+    repo.commit("base");
+    repo.write("src/a.ts", padding(6) + "function broken(a: number {\n");
+    repo.commit("head");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(
+        stdout(&out),
+        "warning src/a.ts:7  file not analyzed: syntax error on line 7 (or syntax the \
+         parser does not support yet)  [input/unparsable]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
 fn not_valid_utf8() {
     let repo = Repo::new();
     repo.write("src/a.ts", function("f", 0));
@@ -436,6 +496,21 @@ fn unknown_base_revision() {
     assert!(err.contains("fetch-depth: 0"), "{err}");
     assert_eq!(stdout(&out), "");
     assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn unknown_head_or_option_like_base_gets_no_shallow_clone_hint() {
+    let repo = feature_repo();
+    for args in [
+        ["--base", "main", "--head", "no-such"].as_slice(),
+        &["--base=-x"],
+    ] {
+        let out = repo.qgate(args);
+        let err = stderr(&out);
+        assert!(err.contains("unknown revision"), "{err}");
+        assert!(!err.contains("fetch-depth"), "{args:?}: {err}");
+        assert_eq!(out.status.code(), Some(2));
+    }
 }
 
 #[test]

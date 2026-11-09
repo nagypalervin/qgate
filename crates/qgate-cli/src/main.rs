@@ -156,14 +156,18 @@ fn check(args: &ArgMatches) -> Result<String, String> {
 }
 
 /// Sort across files and analyzers so the same input always gives the same
-/// bytes: by path, then line (no line first), then rule id.
+/// bytes: by path as a byte string (the order git uses), then line (no line
+/// first), then rule id.
 fn sort(findings: &mut [Finding]) {
     findings.sort_by(|a, b| {
-        (&a.location.path, a.location.line, &a.rule).cmp(&(
-            &b.location.path,
-            b.location.line,
-            &b.rule,
-        ))
+        let key = |f: &Finding| {
+            (
+                f.location.path.as_os_str().as_encoded_bytes().to_vec(),
+                f.location.line,
+                f.rule.clone(),
+            )
+        };
+        key(a).cmp(&key(b))
     });
 }
 
@@ -172,11 +176,11 @@ fn sort(findings: &mut [Finding]) {
 fn check_revisions(base: &str, head: &str) -> Result<String, String> {
     let cwd =
         std::env::current_dir().map_err(|e| format!("cannot read the current directory: {e}"))?;
-    let repo = Repository::discover(&cwd).map_err(|e| git_message(&e))?;
+    let repo = Repository::discover(&cwd).map_err(|e| git_message(&e, base))?;
     let mut findings = Vec::new();
     for file in repo
         .changed_files(base, head)
-        .map_err(|e| git_message(&e))?
+        .map_err(|e| git_message(&e, base))?
     {
         let Some(language) = language_of(&file.path) else {
             continue;
@@ -208,7 +212,7 @@ fn file_change(
         metric: None,
     };
 
-    let after_bytes = repo.read_blob(&file.after).map_err(|e| git_message(&e))?;
+    let after_bytes = repo.read_blob(&file.after).map_err(|e| e.to_string())?;
     let after = match parse_blob(language, after_bytes)? {
         Ok(model) => model,
         Err(Unparsable::NotUtf8) => {
@@ -229,7 +233,7 @@ fn file_change(
     };
     let before = match (&file.before, old_language) {
         (Some(id), Some(old_language)) => {
-            let bytes = repo.read_blob(id).map_err(|e| git_message(&e))?;
+            let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
             match parse_blob(old_language, bytes)? {
                 Ok(model) => model,
                 Err(Unparsable::NotUtf8) => {
@@ -282,10 +286,15 @@ fn language_of(path: &str) -> Option<Language> {
         .and_then(Language::from_extension)
 }
 
-/// The message for a git error, with a hint where one helps.
-fn git_message(error: &GitError) -> String {
+/// The message for a git error. An unknown `base` gets the shallow-clone
+/// hint; an unknown head or an option-like value would be misled by it.
+fn git_message(error: &GitError, base: &str) -> String {
     match error {
-        GitError::UnknownRevision { .. } => format!("{error}; {SHALLOW_CLONE_HINT}"),
+        GitError::UnknownRevision { revision }
+            if revision == base && !revision.starts_with('-') =>
+        {
+            format!("{error}; {SHALLOW_CLONE_HINT}")
+        }
         _ => error.to_string(),
     }
 }
