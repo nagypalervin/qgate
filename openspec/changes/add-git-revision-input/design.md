@@ -200,3 +200,6 @@ sort key gaining the path, which is constant in that mode.
 ## Implementation Notes
 
 <!-- Decisions made during apply are recorded here, per CLAUDE.md. -->
+
+- **1.2:** `Repository` also exposes `root()`, the work-tree top level.
+  The CLI needs it to report where it looked; it adds no behaviour.

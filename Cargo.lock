@@ -130,6 +130,10 @@ name = "qgate-core"
 version = "0.0.1"
 
 [[package]]
+name = "qgate-git"
+version = "0.0.1"
+
+[[package]]
 name = "qgate-lang"
 version = "0.0.1"
 dependencies = [

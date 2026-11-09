@@ -1,0 +1,12 @@
+[package]
+name = "qgate-git"
+description = "Changed files and file versions between two git revisions, read through the git command."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
