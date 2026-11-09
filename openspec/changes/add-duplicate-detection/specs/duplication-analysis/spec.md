@@ -10,10 +10,10 @@ variables, and names an existing copy so the change can reuse it instead.
 
 ### Requirement: Normalized tokens
 
-The system SHALL compare code as normalized tokens; comments, semicolons
-and layout SHALL be ignored. Identifiers SHALL become one placeholder.
-Strings, numbers and regexes, and each text part of a template or of JSX
-text, SHALL become another, one per literal or part whatever its content.
+The system SHALL compare code as normalized tokens; comments, semicolons,
+a shebang line and layout SHALL be ignored. Identifiers SHALL become one
+placeholder. Strings, numbers and regexes, and each run of template or JSX
+text between substitutions, SHALL become another, one per literal or run.
 Member, key, class and enum member names, JSX attribute and namespaced
 names, lowercase JSX element names, keywords (`true`, `null` included),
 operators and other punctuation SHALL be kept.
@@ -33,9 +33,10 @@ operators and other punctuation SHALL be kept.
 
 Import declarations, `export ... from` declarations and type-level code
 SHALL produce no tokens. Type-level code includes type annotations, type
-and interface declarations, overload and abstract signatures, index
-signatures, `declare` declarations, type-only exports, and the `as T`,
-`satisfies T`, `x!`, optional `?` and `this` parameter syntax.
+and interface declarations, overload and abstract signatures, abstract and
+`declare` fields, index signatures, `declare` declarations, type-only
+exports, `implements` clauses, and the `as T`, `satisfies T`, non-null and
+definite-assignment `!`, optional `?` and `this` parameter syntax.
 
 #### Scenario: Imports and types are not compared
 

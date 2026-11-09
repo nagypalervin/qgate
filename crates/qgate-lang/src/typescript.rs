@@ -668,7 +668,7 @@ fn produces_no_tokens(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
             "non_null_expression" | "variable_declarator" | "public_field_definition" => {
                 kind == "!" || (kind == "?" && parent.kind() == "public_field_definition")
             }
-            "optional_parameter" | "method_definition" | "method_signature" => kind == "?",
+            "optional_parameter" | "method_definition" => kind == "?",
             _ => false,
         }),
     }
