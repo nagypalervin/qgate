@@ -39,9 +39,10 @@ jobs:
 
       - name: Smoke test qgate check
         # Explicit bash enables pipefail, so a qgate failure is not hidden by grep.
+        # The example has an Error finding; --fail-on never keeps the exit code 0.
         shell: bash
         run: |
-          cargo run -q -p qgate-cli -- check \
+          cargo run -q -p qgate-cli -- check --fail-on never \
             crates/qgate-cli/tests/fixtures/old/orders.ts \
             crates/qgate-cli/tests/fixtures/src/orders.ts \
             | grep -F '[complexity/cyclomatic-increase]'

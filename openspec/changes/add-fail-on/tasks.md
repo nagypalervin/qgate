@@ -12,7 +12,7 @@ and `cargo test --workspace` passing, chained with `&&` only.
 - [x] 1.2 Write failing end-to-end tests in `crates/qgate-cli/tests/revisions.rs` for "Unparsable file in revision mode" (exit 0 by default, 1 with `--fail-on warning`) and "Errors that stop the check win" (unknown base with `--fail-on warning` exits 2)
 - [x] 1.3 Implement `--fail-on error|warning|never` in `qgate-cli`: a clap value parser restricted to the three values, the level compared with `Severity`'s order, exit 1 after the report is written, and the summary line on standard error; a broken output pipe does not change the exit code. Verify the 1.1 and 1.2 tests pass and record decisions under "Implementation Notes" in the proposal
 - [ ] 1.4 Add `--fail-on never` to the "Smoke test qgate check" step in `.github/workflows/ci.yml`, and verify the step passes on the pull request
-- [ ] 1.5 Update `README.md`: exit codes (0, 1 with `--fail-on`, 2), the default and how to opt out, and the "In CI" section; verify every command shown behaves as described
+- [x] 1.5 Update `README.md`: exit codes (0, 1 with `--fail-on`, 2), the default and how to opt out, and the "In CI" section; verify every command shown behaves as described
 
 ## Workflow follow-up
 
