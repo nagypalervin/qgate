@@ -12,7 +12,7 @@ artifacts. Branches: `change/add-git-revision-input` (PR 1), then
 - [x] 1.2 Add the `crates/qgate-git` workspace member with no dependencies, the documented public types of design D2 (`Repository`, `ChangedFile`, `BlobId`, `GitError` with `Display` and `Error`) and stub methods; verify `cargo build --workspace` and clippy with `missing_docs` pass and `cargo tree -p qgate-git` shows no dependencies
 - [x] 1.3 Write the temp-repository test helper (design D5) and failing tests for `discover` (inside a repository, in a subdirectory, not a repository) and for revision resolution and merge base (unknown revision, option-like revision `--output=...` leaves no file, no merge base, merge base on a moved base); then implement `discover` and the resolution and merge-base steps of design D3 until they pass
 - [x] 1.4 Write failing tests for `changed_files`: modified, added, deleted (absent), renamed (old path set), renamed from `.js`, symlink, type change and submodule entry (absent), executable mode, a non-UTF-8 path, and no changes; then implement the `--raw -z -M` parsing until they pass
-- [ ] 1.5 Write a failing test that `read_blob` returns the exact bytes of an old and a new version (including invalid UTF-8 content); implement it with `git cat-file blob`; verify the tests pass
+- [x] 1.5 Write a failing test that `read_blob` returns the exact bytes of an old and a new version (including invalid UTF-8 content); implement it with `git cat-file blob`; verify the tests pass
 - [ ] 1.6 Write the `qgate-git` crate docs with a doctest-free usage example (doctests cannot create repositories) and verify `cargo doc -p qgate-git --no-deps` builds without warnings
 
 ## 2. `qgate check --base` in the CLI, PR 2

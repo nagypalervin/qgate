@@ -171,8 +171,15 @@ impl Repository {
     ///
     /// A [`GitError`] if git fails.
     pub fn read_blob(&self, id: &BlobId) -> Result<Vec<u8>, GitError> {
-        let _ = id;
-        Err(not_implemented())
+        // `blob` instead of `-p`: raw bytes, no textconv, and the id comes
+        // from git itself, never from the user.
+        let args = ["cat-file", "blob", id.as_str()];
+        let out = self.git(&args)?;
+        if out.status.success() {
+            Ok(out.stdout)
+        } else {
+            Err(command_error(&args, &out))
+        }
     }
 }
 
@@ -315,15 +322,6 @@ fn command_error(args: &[&str], out: &Output) -> GitError {
         args: args.iter().map(|&a| a.to_owned()).collect(),
         status: out.status.code(),
         stderr: stderr_of(out),
-    }
-}
-
-/// Placeholder until the methods are implemented.
-fn not_implemented() -> GitError {
-    GitError::Command {
-        args: Vec::new(),
-        status: None,
-        stderr: "not implemented yet".to_owned(),
     }
 }
 
@@ -561,6 +559,28 @@ mod tests {
         let found = changes(&repo, "HEAD~1", "HEAD");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].path, "bad-\u{fffd}.ts");
+    }
+
+    #[test]
+    fn read_blob_returns_exact_bytes_of_both_versions() {
+        let repo = TestRepo::new();
+        repo.write("a.ts", "old\r\nversion\n");
+        repo.commit("base");
+        let new_bytes: &[u8] = b"new \xff\xfe not UTF-8\n";
+        repo.write("a.ts", new_bytes);
+        repo.commit("head");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let change = found
+            .changed_files("HEAD~1", "HEAD")
+            .expect("changed files")
+            .pop()
+            .expect("one change");
+        let before = change.before.expect("a modified file has a before blob");
+        assert_eq!(
+            found.read_blob(&before).expect("old blob"),
+            b"old\r\nversion\n"
+        );
+        assert_eq!(found.read_blob(&change.after).expect("new blob"), new_bytes);
     }
 
     #[test]
