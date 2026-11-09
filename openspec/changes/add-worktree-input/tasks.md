@@ -34,11 +34,11 @@ Commit messages and PR bodies are written to files first.
 
   Verify the tests fail.
 - [x] 1.2 Implement `Repository::worktree_snapshot`, the private index guard and `GitError::WorkTree` (D1, D2, D5), without new dependencies; verify the 1.1 tests pass and every existing `qgate-git` test passes unchanged
-- [ ] 1.3 Check that the tests bite. Break each of these, one at a time, and confirm a test fails for each:
+- [x] 1.3 Check that the tests bite. Break each of these, one at a time, and confirm a test fails for each:
   - the index copy (start from `read-tree` only);
   - `-A` (use plain `add -u`);
   - the guard's removal;
-  - `--no-gpg-sign`;
+  - `--no-gpg-sign` (no test failed: `commit-tree` ignores `commit.gpgSign`, so the flag was removed; see design, Implementation Notes);
   - the fixed identity;
   - `core.hooksPath=/dev/null`.
 - [ ] 1.4 Update the `qgate-git` crate docs (the method list and the "Commands run at the top level" paragraph); verify `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-git --no-deps` builds

@@ -62,7 +62,7 @@ that holds the working tree. The steps:
    modified, deleted and untracked-but-not-ignored files exactly as
    `git add -A` would.
 4. **Write the tree:** `GIT_INDEX_FILE=<private> git write-tree`.
-5. **Write the commit:** `git commit-tree <tree> -p <head> --no-gpg-sign -m
+5. **Write the commit:** `git commit-tree <tree> -p <head> -m
    "qgate working tree"`, with a fixed author and committer (name `qgate`,
    e-mail `qgate@localhost`, date `@0 +0000`) set through `GIT_AUTHOR_*` and
    `GIT_COMMITTER_*`.
@@ -86,8 +86,9 @@ The CLI then passes the commit id as the head to the existing calls.
 - `commit-tree` fails without a configured identity, and an agent's
   sandbox often has none.
 - A fixed date makes the same working tree give the same commit id.
-- `--no-gpg-sign` overrides `commit.gpgSign`, which would otherwise prompt
-  or fail.
+- `commit-tree` is plumbing and ignores `commit.gpgSign` (since git 2.4),
+  so a user who signs every commit gets no prompt and no failure. The
+  porcelain `git commit` would try to sign.
 
 **Alternatives considered:**
 - **A second code path that reads files from disk:** `git diff <merge-base>`
@@ -209,15 +210,22 @@ None. The option is new and the default is unchanged.
 - **The snapshot is its own module**, `crates/qgate-git/src/worktree.rs`,
   as `lib.rs` already has 1,600 lines. It adds an `impl Repository` block
   and reuses the crate's private helpers (`resolve`, `git_command`).
-- **`add.ignoreErrors=false`** joins `core.hooksPath=/dev/null` on every
-  snapshot command. Otherwise a user's `add.ignoreErrors=true` would turn
-  an unreadable file into a file silently missing from the check, against
-  the spec's "Unreadable file in the working tree".
+- **A user's `add.ignoreErrors=true` changes nothing.** With it, `git add`
+  goes on past an unreadable file but still exits non-zero, so the
+  snapshot still fails with `GitError::WorkTree`. An explicit
+  `add.ignoreErrors=false` was tried and removed: no test could tell it
+  apart (task 1.3). The unreadable-file test sets the option, to keep it
+  that way.
 - **The fixed date is `@0 +0000`**, git's raw format for the epoch, so no
   date parsing depends on the locale.
 - **A stale private index is removed before use.** A killed run can leave
   `qgate-index-<pid>-<n>` and its `.lock`, and a later process can get the
   same pid. A leftover `.lock` would otherwise make `git add` fail.
+- **No `--no-gpg-sign`.** The design first passed it to `commit-tree`.
+  Removing it broke no test (task 1.3), because `commit-tree` never signs
+  on configuration; only `git commit` does. It was dead code, so it is
+  gone. The test with `commit.gpgSign=true` stays: it fails if the
+  snapshot ever moves to `git commit`.
 - **The hook test writes its markers to an absolute path.** Git does not
   export `GIT_DIR` to hooks of a plain `.git` repository. The test also
   shows that a plain `git add` does run `post-index-change` there, so the

@@ -16,14 +16,8 @@ use crate::{GitError, Repository, command_error, git_command, spawn_error, stder
 
 /// Configuration for every snapshot command. Git runs the
 /// `post-index-change` hook on every index write, even of a private index,
-/// so hooks are pointed at a directory that holds none. An unreadable file
-/// must stay an error even where `add.ignoreErrors` is set.
-const SNAPSHOT_CONFIG: [&str; 4] = [
-    "-c",
-    "core.hooksPath=/dev/null",
-    "-c",
-    "add.ignoreErrors=false",
-];
+/// so hooks are pointed at a directory that holds none.
+const SNAPSHOT_CONFIG: [&str; 2] = ["-c", "core.hooksPath=/dev/null"];
 
 /// The author and committer of every snapshot. `commit-tree` fails without
 /// an identity, which an agent's sandbox often lacks, and a fixed date
@@ -68,12 +62,12 @@ impl Repository {
             });
         }
         let tree = self.snapshot_checked(&["write-tree"], &index)?;
+        // `commit-tree`, unlike `commit`, ignores `commit.gpgSign`.
         self.snapshot_checked(
             &[
                 "commit-tree",
                 "-p",
                 &head,
-                "--no-gpg-sign",
                 "-m",
                 "qgate working tree",
                 &tree,
@@ -419,6 +413,8 @@ mod tests {
         let repo = TestRepo::new();
         repo.write("src/a.ts", "export const a = 1;\n");
         repo.commit("base");
+        // Even with this, `git add` still fails on the file.
+        repo.git(&["config", "add.ignoreErrors", "true"]);
         repo.write("src/secret.ts", "export const s = 1;\n");
         let secret = repo.dir.join("src/secret.ts");
         std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o000))
