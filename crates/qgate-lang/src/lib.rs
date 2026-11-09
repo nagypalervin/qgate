@@ -1,10 +1,24 @@
 //! Language adapters.
 //!
-//! Each adapter turns source files into a language-neutral model (functions,
-//! imports, spans) that analyzers work on. Parsing will be built on
-//! tree-sitter; see `docs/adr/0001-rust-and-tree-sitter.md`.
+//! Each adapter turns the source text of one file into a language-neutral
+//! [`FileModel`] that analyzers work on, so analyzers never see syntax
+//! trees. Parsing is built on tree-sitter; see
+//! `docs/adr/0001-rust-and-tree-sitter.md`. This crate does no I/O: callers
+//! read files and pick the [`Language`].
 //!
-//! Status: placeholder. The first adapter (TypeScript) lands in milestone M1.
+//! Supported: TypeScript and TSX. The model holds one [`Function`] per
+//! named function unit with its qualified name, line and cyclomatic
+//! complexity. Anonymous functions count towards their nearest named
+//! ancestor; code outside named functions is not measured.
+//!
+//! ```
+//! use qgate_lang::{Language, parse};
+//!
+//! let model = parse(Language::TypeScript, "function f(a, b) { return a && b; }")?;
+//! assert_eq!(model.functions[0].name, "f");
+//! assert_eq!(model.functions[0].cyclomatic, 2);
+//! # Ok::<(), qgate_lang::ParseError>(())
+//! ```
 
 mod model;
 mod typescript;
