@@ -13,7 +13,10 @@ name = "qgate"
 path = "src/main.rs"
 
 [dependencies]
+clap.workspace = true
+qgate-analyzers.workspace = true
 qgate-core.workspace = true
+qgate-lang.workspace = true
 qgate-report.workspace = true
 
 [lints]

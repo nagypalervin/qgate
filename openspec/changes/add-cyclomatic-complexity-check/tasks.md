@@ -28,7 +28,7 @@ and `cargo test --workspace` passing.
 
 ## 3. `qgate check` command (`qgate-cli`), PR 3
 
-- [ ] 3.1 Add `clap` 4.6 with the features from design D6 (reason in the commit message) and move `--help`/`--version` to it; verify `qgate --version` and `qgate --help` behave per spec "Help and version"
+- [x] 3.1 Add `clap` 4.6 with the features from design D6 (reason in the commit message) and move `--help`/`--version` to it; verify `qgate --version` and `qgate --help` behave per spec "Help and version"
 - [ ] 3.2 Write failing end-to-end tests in `crates/qgate-cli/tests/check.rs` (design D9) for every scenario in the `check-command` spec, using small fixture files under `crates/qgate-cli/tests/fixtures/`
 - [ ] 3.3 Implement `qgate check <before> <after>`: read files, choose the language by extension, parse, run `ComplexityAnalyzer`, sort findings by line then rule id, render, and map errors to standard error and exit code 2 (design D7); verify the 3.2 tests pass
 - [ ] 3.4 Update `README.md`: status line, a `qgate check` usage example with sample output, and the C compiler note in "Building"; verify the example output matches what the binary prints for the cited fixture
