@@ -118,14 +118,18 @@ inside a function counts.
 | `import_statement` | the `source` field |
 | `export_statement` with a `source` field | the `source` field |
 | `import_require_clause` (`import x = require("m")`) | its string |
-| `call_expression` whose `function` is `import` or the identifier `require`, with exactly one `string` argument | that argument |
+| `call_expression` whose `function` is `import`, with a `string` first argument (a second argument holds import attributes) | that argument |
+| `call_expression` whose `function` is the identifier `require`, with exactly one `string` argument | that argument |
 
 - **Specifier text:** the string between the outer quotes, as written,
   with no escape decoding, the same rule as property names.
 - **Line:** the line of the string literal, so a multi-line `import { a,
   b } from "x"` points to the line that names the module.
-- **Non-literal arguments:** template strings and identifiers are
-  skipped.
+- **Non-literal arguments:** template strings (with or without
+  substitutions) and identifiers are skipped.
+- **Type positions:** the walk does not enter type subtrees (decision
+  points never sit there), so it scans each skipped subtree for imports
+  separately; `let t: import("./x").T` counts like any other import.
 
 ### D5: Reading `<head>:qgate.toml` in `qgate-git`
 
@@ -210,6 +214,11 @@ findings for them. The two-file form never calls step 1.
 - **[Interim state after PR 2]** A valid `qgate.toml` is read and
   validated but not applied until PR 3. → All three pull requests land
   before the change is archived; there is no release in between.
+- **[Grammar lag]** tree-sitter-typescript 0.23 rejects `export type *
+  from "x"` (TypeScript 5.0) and `export import x = require("y")`. A file
+  using them is `input/unparsable` and gets no architecture findings, like
+  any unparsable file. → Listed in the README in PR 3; a grammar update
+  fixes it.
 - **[Build time]** `syn` and `serde_derive` add compile time to a clean
   build. → They are compiled once and cached in CI. The alternative is a
   hand-written deserializer, which is not worth it.
@@ -223,8 +232,20 @@ None. Without a `qgate.toml`, behaviour is unchanged.
 - **PR 1, imports:**
   - Comments between call arguments are skipped when checking for "exactly
     one string literal", so `require(/* why */ "x")` counts.
-  - An empty specifier (`import ""`) is recorded as written. It resolves to
-    no path and matches no pattern; skipping it would hide a strange file
-    from no one.
+  - An empty specifier (`import ""`) is recorded as written. It matches
+    no pattern, so recording it costs nothing and keeps the rule simple:
+    every import is recorded as written.
   - Imports are recorded in `Walker::enter` before any other handling, so
     a dynamic import inside a bound call or a type wrapper is still found.
+- **PR 1, review round 1:**
+  - `import("x")` in a type position was recorded or dropped depending on
+    where the type stood (`as` type: recorded; `let t:` annotation:
+    dropped), against "wherever they appear" and the decision that
+    type-only imports count. Skipped type subtrees are now scanned for
+    imports.
+  - `import("x", { with: ... })` was dropped by the one-argument rule.
+    For `import()` only the first argument must be a string; `require`
+    keeps the one-argument rule. The spec says so now, with a scenario.
+  - Tests pin comment skipping, the empty specifier, module-level calls
+    (the bound-call path) and the TSX line; the quote stripping is shared
+    with property names (`unquote`).

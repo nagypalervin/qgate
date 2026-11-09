@@ -4,8 +4,9 @@
 //! qualified name and counts its decision points (design D3 of the
 //! `add-cyclomatic-complexity-check` change). Calls bound to a name at
 //! module level or in a class field initializer are handled in the same
-//! walk (design of `analyze-wrapped-functions`). What counts as a decision
-//! point follows the `complexity` rule of `ESLint`.
+//! walk (design of `analyze-wrapped-functions`), and so are the file's
+//! imports (design D4 of `add-forbidden-imports`). What counts as a
+//! decision point follows the `complexity` rule of `ESLint`.
 
 use std::collections::HashSet;
 
@@ -61,6 +62,8 @@ const CONTAINER_KINDS: &[&str] = &[
 
 /// Type-level subtrees: never contain runtime decision points, so the walk
 /// skips them. This keeps conditional types and the like out of the count.
+/// Imports in them (`import("./x").T`) are still recorded, by a separate
+/// scan of the skipped subtree.
 const TYPE_KINDS: &[&str] = &[
     "type_annotation",
     "asserts_annotation",
@@ -172,7 +175,11 @@ impl<'s> Walker<'s> {
         loop {
             let node = cursor.node();
             frames.push(self.enter(node));
-            if !TYPE_KINDS.contains(&node.kind()) && cursor.goto_first_child() {
+            if TYPE_KINDS.contains(&node.kind()) {
+                // Not entered, but `import("./x").T` in a type still
+                // imports a module.
+                self.record_imports_below(node);
+            } else if cursor.goto_first_child() {
                 continue;
             }
             loop {
@@ -413,9 +420,8 @@ impl<'s> Walker<'s> {
     /// their brackets.
     fn property_name(&self, name: Node<'_>) -> String {
         let text = self.text(name);
-        // A string node always starts and ends with its (one-byte) quote.
-        if name.kind() == "string" && text.len() >= 2 {
-            text[1..text.len() - 1].to_owned()
+        if name.kind() == "string" {
+            unquote(&text).to_owned()
         } else {
             text
         }
@@ -433,16 +439,23 @@ impl<'s> Walker<'s> {
     /// `add-forbidden-imports`).
     fn record_import(&mut self, node: Node<'_>) {
         if let Some(source) = import_source(node, self.source) {
-            let text = self.text(source);
-            // A string node always starts and ends with its one-byte quote.
-            let specifier = text
-                .get(1..text.len().saturating_sub(1))
-                .unwrap_or_default()
-                .to_owned();
             self.imports.push(Import {
-                specifier,
+                specifier: unquote(&self.text(source)).to_owned(),
                 line: line_of(source),
             });
+        }
+    }
+
+    /// Record the imports in the subtree below `node`, in source order,
+    /// for a subtree the walk does not enter.
+    fn record_imports_below(&mut self, node: Node<'_>) {
+        let mut pending = named_children(node);
+        pending.reverse();
+        while let Some(next) = pending.pop() {
+            self.record_import(next);
+            let mut children = named_children(next);
+            children.reverse();
+            pending.extend(children);
         }
     }
 }
@@ -517,10 +530,10 @@ fn import_source<'t>(node: Node<'t>, source: &[u8]) -> Option<Node<'t>> {
         }
         "call_expression" => {
             let function = node.child_by_field_name("function")?;
-            let callee = function.kind() == "import"
-                || (function.kind() == "identifier"
-                    && function.utf8_text(source).is_ok_and(|t| t == "require"));
-            if !callee {
+            let is_import = function.kind() == "import";
+            let is_require = function.kind() == "identifier"
+                && function.utf8_text(source).is_ok_and(|t| t == "require");
+            if !is_import && !is_require {
                 return None;
             }
             let arguments = node
@@ -530,12 +543,25 @@ fn import_source<'t>(node: Node<'t>, source: &[u8]) -> Option<Node<'t>> {
                 .into_iter()
                 .filter(|n| n.kind() != "comment");
             match (values.next(), values.next()) {
-                (Some(only), None) if only.kind() == "string" => Some(only),
+                // `import()` may take import attributes as a second
+                // argument; `require` takes exactly one.
+                (Some(first), rest)
+                    if first.kind() == "string" && (is_import || rest.is_none()) =>
+                {
+                    Some(first)
+                }
                 _ => None,
             }
         }
         _ => None,
     }
+}
+
+/// A string literal's text without its outer quotes, as written: a string
+/// node always starts and ends with its one-byte quote. Escapes stay.
+fn unquote(text: &str) -> &str {
+    text.get(1..text.len().saturating_sub(1))
+        .unwrap_or_default()
 }
 
 /// The named children of a node.
@@ -873,6 +899,18 @@ mod tests {
                 // literals, identifiers and two arguments do not count
                 ("../ui/Modal", 19),
                 ("lodash", 20),
+                // type positions, inside and outside skipped type subtrees
+                ("./typed", 30),
+                ("./typeof", 31),
+                ("./asserted", 32),
+                // module level, through the bound-call path
+                ("./top", 35),
+                // import attributes do not hide the module
+                ("./data.json", 36),
+                // a comment between arguments is skipped
+                ("./commented", 39),
+                // an empty specifier is kept as written
+                ("", 40),
             ]
         );
     }
@@ -884,8 +922,13 @@ mod tests {
             "import React from \"react\";\nexport const A = () => <div />;\n",
         )
         .expect("parses");
-        assert_eq!(model.imports.len(), 1);
-        assert_eq!(model.imports[0].specifier, "react");
+        assert_eq!(
+            model.imports,
+            [Import {
+                specifier: "react".to_owned(),
+                line: 1,
+            }]
+        );
     }
 
     #[test]

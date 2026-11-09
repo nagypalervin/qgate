@@ -28,16 +28,23 @@ matches a `to` pattern.
 
 The system SHALL treat as imports of a file: `import` declarations,
 including type-only and side-effect imports; `export ... from`
-declarations; `import x = require(...)`; and calls of `import(...)` and
-`require(...)` whose argument is a string literal, wherever they appear.
-Other forms, such as a dynamic import of a template literal with
-substitutions, SHALL be ignored.
+declarations; `import x = require(...)`; calls of `import(...)` whose
+first argument is a string literal; and calls of `require(...)` whose only
+argument is one; wherever they appear, type positions included. Other
+forms, such as a template literal or an identifier argument, SHALL be
+ignored.
 
 #### Scenario: Every static form
 
 - **GIVEN** a rule that forbids `src/domain/**` to import `src/ui/**`
 - **WHEN** `src/domain/a.ts` adds `import type { T } from "../ui/t";`, `import "../ui/style";`, `export * from "../ui/all";`, `import m = require("../ui/m");`, `const d = await import("../ui/d");` and `const r = require("../ui/r");`
 - **THEN** six `architecture/forbidden-import` findings are reported, for `src/ui/t`, `src/ui/style`, `src/ui/all`, `src/ui/m`, `src/ui/d` and `src/ui/r`
+
+#### Scenario: Type position and import attributes
+
+- **GIVEN** a rule that forbids `src/domain/**` to import `src/ui/**`
+- **WHEN** `src/domain/a.ts` adds `let b: import("../ui/b").B;` and `const j = await import("../ui/j.json", { with: { type: "json" } });`
+- **THEN** findings are reported for `src/ui/b` and `src/ui/j.json`
 
 #### Scenario: Non-literal dynamic import
 

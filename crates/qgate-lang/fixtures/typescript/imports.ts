@@ -25,3 +25,16 @@ async function load(name: string) {
   const two = require("a", "b");
   return [m, x, t, s, i, two];
 }
+
+// Type positions count too, entered by the walk or not.
+let typed: import("./typed").T;
+type Of = typeof import("./typeof");
+const asserted = value as import("./asserted").T;
+
+// Module level: these go through the bound-call path of the walk.
+const top = require("./top");
+const data = await import("./data.json", { with: { type: "json" } });
+
+// Comments between arguments are skipped; an empty specifier is kept.
+const commented = require(/* why */ "./commented");
+import "";
