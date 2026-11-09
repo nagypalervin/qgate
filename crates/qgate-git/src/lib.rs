@@ -37,7 +37,7 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Output, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Output, Stdio};
 
 /// A git repository, identified by its top-level directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,7 +85,9 @@ pub struct ChangedFile {
 /// One regular file of a revision's tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeFile {
-    /// Path from the repository root, `/`-separated.
+    /// Path from the repository root, `/`-separated. Bytes that are not
+    /// UTF-8 are replaced, so two such paths can look alike: use it for
+    /// display and extension checks, and [`TreeFile::id`] for contents.
     pub path: String,
     /// The file's contents, for [`BlobReader::read`] or
     /// [`Repository::read_blob`].
@@ -94,84 +96,163 @@ pub struct TreeFile {
 
 /// Reads many blobs through one long-running `git cat-file --batch`
 /// process (ADR 0002, "Consequences"). Dropping it ends the process.
+///
+/// After an error that leaves the process's answers out of step (an I/O
+/// error, the process ending, or an answer it cannot parse) the reader is
+/// closed, and every later `read` fails at once.
 #[derive(Debug)]
 pub struct BlobReader {
     child: Child,
     stdin: Option<ChildStdin>,
-    stdout: BufReader<ChildStdout>,
+    stdout: Option<BufReader<ChildStdout>>,
+    stderr: Option<ChildStderr>,
 }
 
 /// Arguments of the batch process, for error messages.
 const BATCH_ARGS: [&str; 2] = ["cat-file", "--batch"];
+
+/// What went wrong in one request.
+enum Broken {
+    /// Writing or reading failed, or the answers ended: the process is
+    /// gone or going.
+    Io(std::io::Error),
+    /// An answer that does not fit the protocol.
+    Protocol(String),
+}
 
 impl BlobReader {
     /// The raw contents of a blob.
     ///
     /// # Errors
     ///
-    /// [`GitError::UnexpectedOutput`] if `id` names no object or not a
-    /// blob, or git answers something else; [`GitError::Command`] if the
-    /// process cannot be written to or read from.
+    /// - [`GitError::UnexpectedOutput`] if `id` names no object or not a
+    ///   blob (the reader stays usable), if git answers something else, or
+    ///   if the reader was closed by an earlier error;
+    /// - [`GitError::Command`] with git's exit status and standard error if
+    ///   the process ended or could not be written to or read from.
     pub fn read(&mut self, id: &BlobId) -> Result<Vec<u8>, GitError> {
-        let io = |e: std::io::Error| GitError::Command {
-            args: BATCH_ARGS.iter().map(|&a| a.to_owned()).collect(),
-            status: None,
-            stderr: e.to_string(),
-        };
         let unexpected = |detail: String| GitError::UnexpectedOutput {
             args: BATCH_ARGS.iter().map(|&a| a.to_owned()).collect(),
             detail,
         };
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or_else(|| unexpected("the batch process is closed".to_owned()))?;
-        writeln!(stdin, "{}", id.as_str()).map_err(io)?;
-        stdin.flush().map_err(io)?;
+        if self.stdin.is_none() || self.stdout.is_none() {
+            return Err(unexpected(
+                "the batch process was closed after an earlier error".to_owned(),
+            ));
+        }
+        match self.exchange(id) {
+            Ok(Ok(contents)) => Ok(contents),
+            // Still in step: the next request can go ahead.
+            Ok(Err(detail)) => Err(unexpected(detail)),
+            Err(Broken::Io(error)) => Err(self.fail(&error)),
+            Err(Broken::Protocol(detail)) => {
+                self.close();
+                Err(unexpected(detail))
+            }
+        }
+    }
+
+    /// One request and its answer: the blob, or why `id` is not one.
+    fn exchange(&mut self, id: &BlobId) -> Result<Result<Vec<u8>, String>, Broken> {
+        let (Some(stdin), Some(stdout)) = (self.stdin.as_mut(), self.stdout.as_mut()) else {
+            return Err(Broken::Protocol("closed".to_owned()));
+        };
+        writeln!(stdin, "{}", id.as_str()).map_err(Broken::Io)?;
+        stdin.flush().map_err(Broken::Io)?;
 
         // `<id> <type> <size>`, or `<id> missing`.
         let mut header = String::new();
-        self.stdout.read_line(&mut header).map_err(io)?;
+        if stdout.read_line(&mut header).map_err(Broken::Io)? == 0 {
+            return Err(Broken::Io(ErrorKind::UnexpectedEof.into()));
+        }
         let header = header.trim_end();
         let fields: Vec<&str> = header.split(' ').collect();
-        let size = match fields[..] {
-            [_, "blob", size] => size
-                .parse::<usize>()
-                .map_err(|_| unexpected(format!("bad size in `{header}`")))?,
-            [_, kind, size] => {
-                // Skip the object so the next answer starts cleanly.
-                let size = size.parse::<usize>().unwrap_or(0);
-                let mut skipped = vec![0; size + 1];
-                self.stdout.read_exact(&mut skipped).map_err(io)?;
-                return Err(unexpected(format!(
-                    "`{}` is a {kind}, not a blob",
-                    id.as_str()
-                )));
-            }
-            _ => return Err(unexpected(format!("`{}`: {header}", id.as_str()))),
+        if fields.first() != Some(&id.as_str()) {
+            return Err(Broken::Protocol(format!(
+                "asked for `{}`, got `{header}`",
+                id.as_str()
+            )));
+        }
+        let size_of = |size: &str| {
+            size.parse::<usize>()
+                .map_err(|_| Broken::Protocol(format!("bad size in `{header}`")))
+        };
+        let (kind, size) = match fields[..] {
+            [_, "missing"] => return Ok(Err(format!("`{}` names no object", id.as_str()))),
+            [_, kind, size] => (kind, size_of(size)?),
+            _ => return Err(Broken::Protocol(format!("unexpected answer `{header}`"))),
         };
         let mut contents = vec![0; size + 1];
-        self.stdout.read_exact(&mut contents).map_err(io)?;
+        stdout.read_exact(&mut contents).map_err(Broken::Io)?;
         // Each object ends with a newline that is not part of it.
         if contents.pop() != Some(b'\n') {
-            return Err(unexpected(format!(
+            return Err(Broken::Protocol(format!(
                 "`{}`: no newline after the object",
                 id.as_str()
             )));
         }
-        Ok(contents)
+        if kind == "blob" {
+            Ok(Ok(contents))
+        } else {
+            Ok(Err(format!("`{}` is a {kind}, not a blob", id.as_str())))
+        }
+    }
+
+    /// Close the reader after `error`, wait for the process and report how
+    /// it ended, with what it wrote on standard error.
+    fn fail(&mut self, error: &std::io::Error) -> GitError {
+        self.close();
+        let mut stderr = String::new();
+        if let Some(mut pipe) = self.stderr.take() {
+            // The process ends once stdin and stdout are closed, so this
+            // reaches end of file.
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        let status = self.child.wait().ok().and_then(|s| s.code());
+        let stderr = stderr.trim();
+        GitError::Command {
+            args: BATCH_ARGS.iter().map(|&a| a.to_owned()).collect(),
+            status,
+            stderr: if stderr.is_empty() {
+                error.to_string()
+            } else {
+                stderr.to_owned()
+            },
+        }
+    }
+
+    /// Close both pipes: git exits on end of input, and a write to the
+    /// closed output ends it too, so nothing can block on unread answers.
+    fn close(&mut self) {
+        drop(self.stdin.take());
+        drop(self.stdout.take());
     }
 
     #[cfg(test)]
     fn process_id(&self) -> u32 {
         self.child.id()
     }
+
+    /// Send a request without reading its answer.
+    #[cfg(test)]
+    fn send_only(&mut self, id: &BlobId) {
+        let stdin = self.stdin.as_mut().expect("open");
+        writeln!(stdin, "{}", id.as_str()).expect("write");
+        stdin.flush().expect("flush");
+    }
+
+    #[cfg(test)]
+    fn kill(&mut self) {
+        self.child.kill().expect("kill");
+        let _ = self.child.wait();
+    }
 }
 
 impl Drop for BlobReader {
     fn drop(&mut self) {
-        // Closing stdin makes git exit; wait so no zombie process remains.
-        drop(self.stdin.take());
+        self.close();
+        drop(self.stderr.take());
+        // Wait so no zombie process remains.
         let _ = self.child.wait();
     }
 }
@@ -431,18 +512,20 @@ impl Repository {
         let mut child = git_command(&self.dir, &BATCH_ARGS)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            // Errors come back on stdout (`<id> missing`); nothing on
-            // stderr may block the process.
-            .stderr(Stdio::null())
+            // Read once the process has ended, for the error message. In
+            // batch mode git writes to stderr only when it fails.
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| spawn_error(&self.dir, &BATCH_ARGS, &e))?;
         let stdin = child.stdin.take();
+        let stderr = child.stderr.take();
         let stdout = child.stdout.take().map(BufReader::new);
-        if let Some(stdout) = stdout {
+        if stdout.is_some() {
             Ok(BlobReader {
                 child,
                 stdin,
                 stdout,
+                stderr,
             })
         } else {
             let _ = child.kill();
@@ -1161,6 +1244,117 @@ mod tests {
     }
 
     #[test]
+    fn blob_reader_reads_large_blobs_with_nul_and_newlines() {
+        let repo = TestRepo::new();
+        let large: Vec<u8> = (0..1_500_000u32)
+            .map(|i| match i % 7 {
+                0 => 0,
+                1 => b'\n',
+                _ => b'a' + u8::try_from(i % 26).expect("small"),
+            })
+            .collect();
+        repo.write("large.bin", &large);
+        repo.write("small.ts", "small");
+        let first = repo.commit("blobs");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let mut reader = found.blob_reader().expect("reader");
+        let large_id = blob(&repo, "HEAD", "large.bin");
+        let small_id = blob(&repo, "HEAD", "small.ts");
+        for _ in 0..2 {
+            assert_eq!(reader.read(&large_id).expect("large"), large);
+            assert_eq!(reader.read(&small_id).expect("small"), b"small");
+        }
+        // A commit is not a blob, and the reader stays in step.
+        assert!(matches!(
+            reader.read(&BlobId(first)),
+            Err(GitError::UnexpectedOutput { .. })
+        ));
+        assert_eq!(reader.read(&small_id).expect("small"), b"small");
+    }
+
+    #[test]
+    fn blob_reader_reports_how_git_ended() {
+        let repo = TestRepo::new();
+        repo.write("a.ts", "a");
+        repo.commit("base");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let id = blob(&repo, "HEAD", "a.ts");
+        std::fs::remove_dir_all(repo.dir.join(".git")).expect("remove .git");
+        let mut reader = found.blob_reader().expect("the process starts");
+        match reader.read(&id) {
+            Err(GitError::Command { status, stderr, .. }) => {
+                assert_eq!(status, Some(128));
+                assert!(stderr.contains("not a git repository"), "{stderr}");
+            }
+            other => panic!("expected a command error, got {other:?}"),
+        }
+        // Closed for good.
+        assert!(matches!(
+            reader.read(&id),
+            Err(GitError::UnexpectedOutput { .. })
+        ));
+    }
+
+    #[test]
+    fn an_answer_out_of_step_closes_the_reader() {
+        let repo = TestRepo::new();
+        repo.write("a.ts", "a");
+        repo.commit("base");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let mut reader = found.blob_reader().expect("reader");
+        // git answers `not an id missing`, which does not start with the
+        // id that was asked for.
+        assert!(matches!(
+            reader.read(&BlobId("not an id".to_owned())),
+            Err(GitError::UnexpectedOutput { .. })
+        ));
+        match reader.read(&blob(&repo, "HEAD", "a.ts")) {
+            Err(GitError::UnexpectedOutput { detail, .. }) => {
+                assert!(detail.contains("closed"), "{detail}");
+            }
+            other => panic!("expected the reader to be closed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blob_reader_killed_process() {
+        let repo = TestRepo::new();
+        repo.write("a.ts", "a");
+        repo.commit("base");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let id = blob(&repo, "HEAD", "a.ts");
+        let mut reader = found.blob_reader().expect("reader");
+        reader.kill();
+        // Ended by a signal: no exit status.
+        assert!(matches!(
+            reader.read(&id),
+            Err(GitError::Command { status: None, .. })
+        ));
+    }
+
+    #[test]
+    fn dropping_a_reader_with_an_unread_answer_does_not_hang() {
+        let repo = TestRepo::new();
+        repo.write("large.bin", vec![b'x'; 2_000_000]);
+        repo.commit("base");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let id = blob(&repo, "HEAD", "large.bin");
+        let mut reader = found.blob_reader().expect("reader");
+        reader.send_only(&id);
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            drop(reader);
+            let _ = done.send(());
+        });
+        assert!(
+            finished
+                .recv_timeout(std::time::Duration::from_secs(20))
+                .is_ok(),
+            "dropping the reader hung"
+        );
+    }
+
+    #[test]
     fn blob_reader_ends_its_process_when_dropped() {
         let repo = TestRepo::new();
         repo.write("a.ts", "a");
@@ -1169,7 +1363,8 @@ mod tests {
         let reader = found.blob_reader().expect("reader");
         let pid = reader.process_id();
         drop(reader);
-        // `/proc/<pid>` is gone once the child has been waited for.
+        // `/proc/<pid>` is gone once the child has been waited for; a
+        // zombie would keep it. Linux only on purpose: CI runs on Linux.
         #[cfg(target_os = "linux")]
         assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
         let _ = pid;

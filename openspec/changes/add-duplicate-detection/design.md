@@ -245,11 +245,28 @@ finding, which does not fail a run by default.
 - **PR 2, reading the head tree:**
   - `run` and the batch process share one `git_command` helper (same
     environment, test isolation and spawn errors).
-  - The batch process's stderr goes to `/dev/null`. Its answers, including
-    `<id> missing`, come on stdout, and nothing unread on stderr can block
-    it.
+  - The batch process's stderr is piped and read only after the process
+    has ended, for the error message (corrected at review; it first went to
+    `/dev/null`, which lost git's message when the process failed).
   - An id that names a tree or commit is an error, but its contents are
     read and discarded first, so the next answer starts cleanly; a test
     reads a blob after a tree.
   - `files_at` sorts by path explicitly, although git's tree order already
     agrees with byte order for full paths.
+- **PR 2, review round 1:**
+  - Dropping a reader could hang if an answer was left unread: `wait()`
+    ran while stdout was still open and git was blocked writing. `close`
+    now drops stdin and stdout before waiting, so git exits on end of
+    input or on the closed output.
+  - When the process ends or a pipe fails, `read` waits for it and
+    reports its real exit status and stderr. Before, every case was
+    "failed with a signal: Broken pipe", and git's message was lost.
+  - An answer out of step (one that does not start with the requested id,
+    has a bad size, or lacks the trailing newline) closes the reader, and
+    every later `read` fails at once instead of parsing leftover bytes.
+    `<id> missing` and a non-blob object keep it in step.
+  - Tests: a 1.5 MB blob with NULs and newlines, a commit id, a repository
+    without `.git` (exit 128 and git's message), a killed process, an
+    answer out of step, and a drop with an unread 2 MB answer (with a
+    timeout, so it fails rather than hangs).
+  - `TreeFile.path` documents its lossy UTF-8, like `ChangedFile.path`.
