@@ -46,3 +46,19 @@ jobs:
             crates/qgate-cli/tests/fixtures/old/orders.ts \
             crates/qgate-cli/tests/fixtures/src/orders.ts \
             | grep -F '[complexity/cyclomatic-increase]'
+
+  msrv:
+    # Keep in sync with `rust-version` in Cargo.toml. With `--locked`, a
+    # locked dependency that needs a newer Rust fails here instead of for
+    # users on the minimum version.
+    name: MSRV (Rust 1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.85
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test on the minimum supported Rust version
+        run: cargo test --workspace --locked
