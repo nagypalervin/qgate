@@ -214,13 +214,17 @@ Design principles:
 
 ## Roadmap
 
-| Milestone | Scope |
-|---|---|
-| **M1** | `qgate check`, TypeScript parsing, complexity delta, terminal output |
-| **M2** | Architecture rules (`qgate.toml`), duplication detection |
-| **M3** | GitHub Action, SARIF output, pull request comments |
-| **M4** | Baseline and trends over time |
-| **M5** | MCP server, optional AI summary |
+| Milestone | Scope | Status |
+|---|---|---|
+| **M1** | `qgate check`, TypeScript parsing, complexity delta, git revisions, `--fail-on` | done |
+| **M2** | Architecture rules (`qgate.toml`), duplication detection | in progress |
+| **M3** | Release binaries, GitHub Action, SARIF output, pull request comments | planned |
+| **M4** | MCP server: AI coding agents check their own changes before opening a pull request | planned |
+| **M5** | Change risk from git history: hotspots (code that is both complex and changed often), code changed without its tests | planned |
+| **M6** | Baseline and trends over time, optional AI summary | planned |
+
+The hotspot analysis in M5 builds on published work on behavioral code
+analysis, notably Adam Tornhill's *Your Code as a Crime Scene*.
 
 ## Repository layout
 
