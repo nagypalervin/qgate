@@ -297,9 +297,13 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
     let mut left = Vec::new();
     for file in files {
         let Some(language) = language_of(&file.path) else {
-            // Renamed to a language qgate does not read: its old code left.
+            // Renamed from TypeScript to a language qgate does not read:
+            // its old code left. (JavaScript renamed to JavaScript is
+            // neither compared nor gone.)
             if let (Some(old), Some(id)) = (&file.old_path, &file.before) {
-                left.push((old.clone(), id.clone()));
+                if language_of(old).is_some() {
+                    left.push((old.clone(), id.clone()));
+                }
             }
             continue;
         };

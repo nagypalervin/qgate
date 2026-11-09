@@ -1131,3 +1131,18 @@ fn code_moved_out_of_a_deleted_javascript_file_is_not_a_new_copy() {
     let out = repo.qgate(&["--base", "HEAD~1"]);
     assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
 }
+
+#[test]
+fn a_javascript_rename_does_not_hide_a_new_copy() {
+    // u.ts and util.js hold the helper; the change renames util.js to
+    // util2.js and adds a renamed copy in orders/format.ts.
+    let repo = Repo::new();
+    repo.write("src/utils/date.ts", DATE_HELPER);
+    repo.write("src/util.js", DATE_HELPER);
+    repo.commit("base");
+    repo.git(&["mv", "src/util.js", "src/util2.js"]);
+    repo.write("src/orders/format.ts", RENAMED_COPY);
+    repo.commit("rename and copy");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), COPY_FINDING, "{}", stderr(&out));
+}

@@ -70,10 +70,10 @@ silently. The two-file form SHALL NOT check duplication.
 ### Requirement: Duplicate blocks
 
 A duplicate block SHALL be a run of at least 50 consecutive normalized
-tokens that occurs in two or more files. A block SHALL extend only as far
-as one copy in another file continues it. Repetition within one file (a
-data table, consecutive similar statements, a block pasted twice) SHALL
-NOT be duplication.
+tokens that occurs in two or more files, extending only as far as one copy
+in another file continues it. Repetition within one file (a data table,
+consecutive similar statements, a block pasted twice) SHALL NOT be
+duplication.
 
 #### Scenario: Repetition within one file
 
@@ -90,9 +90,10 @@ NOT be duplication.
 ### Requirement: Only new duplication is reported
 
 A duplicate block SHALL be reported only if the change increased the
-number of files that hold it, and only in files that did not hold it
-before the change, at most as many as it added. When no file held it
-before, the first new one by path SHALL count as the original.
+number of files that hold it, only in files that did not hold it before,
+at most as many as it added, and only if at least 50 of its tokens are
+not covered by duplicated code the file already had. When every file
+that holds it is new, the first by path SHALL count as the original.
 
 #### Scenario: Existing duplication
 
@@ -103,6 +104,12 @@ before, the first new one by path SHALL count as the original.
 #### Scenario: Moved code
 
 - **GIVEN** the change moves a 60-token block from `src/a.ts` into `src/b.ts`, and no other copy exists
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** no `duplication/duplicate-block` finding is reported
+
+#### Scenario: Code written next to shared code
+
+- **GIVEN** `src/a.ts` and `src/u.ts` share a 60-token block, and the change adds a function to `src/a.ts` right above it
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** no `duplication/duplicate-block` finding is reported
 

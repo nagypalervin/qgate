@@ -16,7 +16,7 @@
 //!   increased the number of files that hold it. Unchanged files are the
 //!   same in both revisions, so the changed files decide.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
 use qgate_core::{Finding, Location, Severity};
@@ -138,65 +138,86 @@ impl DuplicationIndex {
         let mut lookup = Lookup::default();
         let mut findings = Vec::new();
         for (file, windows) in self.changed.iter().enumerate() {
+            let old = self.old_duplicates(file, &reported);
             for (first, last) in runs(windows, &reported, file) {
-                findings.extend(self.blocks(file, first, last, &reported, &mut lookup));
+                findings.extend(self.blocks(file, first, last, &reported, &old, &mut lookup));
             }
         }
         findings
     }
 
-    /// The occurrences that the change added and that are reported (design
-    /// D3, step 4), as (changed file, window start): per key, the first
-    /// occurrence in each changed file that did not hold the key before, as
-    /// many as the change added files that hold it.
-    fn reported(&self) -> BTreeSet<(usize, usize)> {
-        let mut reported = BTreeSet::new();
+    /// The keys each changed file newly duplicates (design D3, step 4), as
+    /// (changed file, key): per key that two or more files hold, the
+    /// changed files that did not hold it before, as many as the change
+    /// added files that hold it.
+    fn reported(&self) -> HashSet<(usize, Key)> {
+        let mut reported = HashSet::new();
         for (key, places) in &self.places {
-            let firsts = first_per_file(places);
-            // A fast path: one file holds no copy (the original rule below
-            // would report nothing either).
-            if firsts.len() < 2 {
+            let holding: BTreeSet<usize> = places.iter().map(|p| p.path).collect();
+            if holding.len() < 2 {
                 continue;
             }
-            let changed_holding = firsts
-                .keys()
-                .filter(|&&file| file < self.changed.len())
-                .count();
+            let changed_holding = holding.iter().filter(|&&f| f < self.changed.len()).count();
             // Files the block left (deleted, or edited away) count too.
             let before_files = self.before_files.get(key).copied().unwrap_or(0);
             let mut budget = changed_holding.saturating_sub(before_files);
             if budget == 0 {
                 continue;
             }
-            let mut new: Vec<&Place> = firsts
-                .values()
-                .filter(|p| p.path < self.changed.len() && !self.before.contains(&(p.path, *key)))
+            let mut new: Vec<usize> = holding
+                .iter()
+                .copied()
+                .filter(|&f| f < self.changed.len() && !self.before.contains(&(f, *key)))
                 .collect();
-            new.sort_by_key(|p| &self.paths[p.path]);
-            // With no file holding it before the change, the first new one
-            // (by path) is the original.
-            let skip = usize::from(firsts.len() == new.len());
-            for place in new.into_iter().skip(skip) {
+            new.sort_by_key(|&f| &self.paths[f]);
+            // When every file that holds it now is new, the first by path
+            // is the original.
+            let skip = usize::from(holding.len() == new.len());
+            for file in new.into_iter().skip(skip) {
                 if budget == 0 {
                     break;
                 }
-                reported.insert((place.path, place.start));
+                reported.insert((file, *key));
                 budget -= 1;
             }
         }
         reported
     }
 
+    /// The tokens of a changed file that duplicated code it already had
+    /// covers: every window whose block two or more files hold and that
+    /// is not reported for this file. Only tokens outside them are new
+    /// duplicated code.
+    fn old_duplicates(&self, file: usize, reported: &HashSet<(usize, Key)>) -> Vec<bool> {
+        let windows = &self.changed[file];
+        let len = windows.last().map_or(0, |(_, p)| p.start + MIN_TOKENS);
+        let mut old = vec![false; len];
+        for &(key, place) in windows {
+            if reported.contains(&(file, key)) {
+                continue;
+            }
+            let shared = self.places[&key].iter().any(|p| p.path != file);
+            if shared {
+                for covered in &mut old[place.start..place.start + MIN_TOKENS] {
+                    *covered = true;
+                }
+            }
+        }
+        old
+    }
+
     /// The findings for a run of reported windows `first..=last` of a
     /// changed file. A block extends only as far as one copy in another
     /// file continues it, so each finding names a copy of the whole block;
-    /// where no copy continues, a new block starts.
+    /// where no copy continues, a new block starts. A block is reported
+    /// only if at least [`MIN_TOKENS`] of its tokens are not `old`.
     fn blocks(
         &self,
         file: usize,
         first: usize,
         last: usize,
-        reported: &BTreeSet<(usize, usize)>,
+        reported: &HashSet<(usize, Key)>,
+        old: &[bool],
         lookup: &mut Lookup,
     ) -> Vec<Finding> {
         let windows = &self.changed[file];
@@ -204,14 +225,12 @@ impl DuplicationIndex {
         let mut start = first;
         while start <= last {
             let (key, place) = windows[start];
-            // Copies of the first window: one per file, not reported. This
-            // file's place for the key is the reported one, so the filter
-            // also removes it.
-            let mut copies: Vec<Place> = lookup
-                .firsts(self, key)
+            // Copies of the first window in other files that hold it from
+            // before the change (or as the original).
+            let mut copies: Vec<Place> = self.places[&key]
                 .iter()
                 .copied()
-                .filter(|p| !(p.path < self.changed.len() && reported.contains(&(p.path, p.start))))
+                .filter(|p| p.path != file && !reported.contains(&(p.path, key)))
                 .collect();
             if copies.is_empty() {
                 start += 1;
@@ -233,39 +252,46 @@ impl DuplicationIndex {
                 copies = continuing;
                 end += 1;
             }
-            copies.sort_by_key(|c| (&self.paths[c.path], c.first_line, c.start));
-            let counterpart = copies[0];
             let offset = end - start;
-            let counterpart_last_line = lookup
-                .last_line(
-                    self,
-                    windows[end].0,
-                    counterpart.path,
-                    counterpart.start + offset,
-                )
-                .unwrap_or(counterpart.last_line);
-            let more = match copies.len() - 1 {
-                0 => String::new(),
-                k => format!(", and {k} more"),
-            };
-            findings.push(Finding {
-                rule: RULE.to_owned(),
-                severity: Severity::Warning,
-                message: format!(
-                    "duplicates {}:{}-{} (lines {}-{}, {} tokens{more})",
-                    self.paths[counterpart.path],
-                    counterpart.first_line,
-                    counterpart_last_line,
-                    place.first_line,
-                    windows[end].1.last_line,
-                    offset + MIN_TOKENS,
-                ),
-                location: Location {
-                    path: PathBuf::from(&self.paths[file]),
-                    line: Some(place.first_line),
-                },
-                metric: None,
-            });
+            let tokens = offset + MIN_TOKENS;
+            let new_tokens = old[place.start..place.start + tokens]
+                .iter()
+                .filter(|&&covered| !covered)
+                .count();
+            if new_tokens >= MIN_TOKENS {
+                copies.sort_by_key(|c| (&self.paths[c.path], c.first_line, c.start));
+                let counterpart = copies[0];
+                let counterpart_last_line = lookup
+                    .last_line(
+                        self,
+                        windows[end].0,
+                        counterpart.path,
+                        counterpart.start + offset,
+                    )
+                    .unwrap_or(counterpart.last_line);
+                let other_files: BTreeSet<usize> = copies.iter().map(|c| c.path).collect();
+                let more = match other_files.len() - 1 {
+                    0 => String::new(),
+                    k => format!(", and {k} more"),
+                };
+                findings.push(Finding {
+                    rule: RULE.to_owned(),
+                    severity: Severity::Warning,
+                    message: format!(
+                        "duplicates {}:{}-{} (lines {}-{}, {tokens} tokens{more})",
+                        self.paths[counterpart.path],
+                        counterpart.first_line,
+                        counterpart_last_line,
+                        place.first_line,
+                        windows[end].1.last_line,
+                    ),
+                    location: Location {
+                        path: PathBuf::from(&self.paths[file]),
+                        line: Some(place.first_line),
+                    },
+                    metric: None,
+                });
+            }
             start = end + 1;
         }
         findings
@@ -311,38 +337,14 @@ impl DuplicationIndex {
     }
 }
 
-/// The first place of a key in each file that holds it, by file.
-fn first_per_file(places: &[Place]) -> BTreeMap<usize, Place> {
-    let mut firsts: BTreeMap<usize, Place> = BTreeMap::new();
-    for &place in places {
-        firsts
-            .entry(place.path)
-            .and_modify(|p| {
-                if place.start < p.start {
-                    *p = place;
-                }
-            })
-            .or_insert(place);
-    }
-    firsts
-}
-
-/// Per-key views of the places, built on first use: the first place per
-/// file, and every place by (file, start) to follow a copy window by
-/// window.
+/// Every place of a key by (file, start), built on first use, to follow a
+/// copy window by window.
 #[derive(Default)]
 struct Lookup {
-    firsts: HashMap<Key, Vec<Place>>,
     by_key: HashMap<Key, HashMap<(usize, usize), u32>>,
 }
 
 impl Lookup {
-    fn firsts(&mut self, index: &DuplicationIndex, key: Key) -> &[Place] {
-        self.firsts
-            .entry(key)
-            .or_insert_with(|| first_per_file(&index.places[&key]).into_values().collect())
-    }
-
     fn last_line(
         &mut self,
         index: &DuplicationIndex,
@@ -367,16 +369,17 @@ impl Lookup {
     }
 }
 
-/// Runs of consecutive reported window starts in a changed file, as
-/// indices into its windows: each run is one or more blocks.
+/// Runs of consecutive windows of a changed file whose keys it newly
+/// duplicates, as indices into its windows: each run is one or more
+/// blocks.
 fn runs(
     windows: &[(Key, Place)],
-    reported: &BTreeSet<(usize, usize)>,
+    reported: &HashSet<(usize, Key)>,
     file: usize,
 ) -> Vec<(usize, usize)> {
     let mut runs: Vec<(usize, usize)> = Vec::new();
-    for (i, (_, place)) in windows.iter().enumerate() {
-        if !reported.contains(&(file, place.start)) {
+    for (i, (key, _)) in windows.iter().enumerate() {
+        if !reported.contains(&(file, *key)) {
             continue;
         }
         match runs.last_mut() {
@@ -844,6 +847,155 @@ mod tests {
             []
         );
     }
+    /// `head`, then `body` repeated `n` times, then `tail`.
+    fn table(head: &[&str], body: &[&str], n: usize, tail: &[&str]) -> Vec<String> {
+        let mut out: Vec<String> = head.iter().map(|&t| t.to_owned()).collect();
+        for _ in 0..n {
+            out.extend(body.iter().map(|&t| t.to_owned()));
+        }
+        out.extend(tail.iter().map(|&t| t.to_owned()));
+        out
+    }
+
+    #[test]
+    fn a_copied_table_with_a_head_and_a_tail_is_one_finding() {
+        let t = table(
+            &["export", "const", "$id", "=", "["],
+            &["$lit", ","],
+            256,
+            &["]"],
+        );
+        let found = run(
+            &[("copy.ts", vec![], synthetic(&t))],
+            &[("codes.ts", synthetic(&t))],
+        );
+        assert_eq!(
+            found,
+            [(
+                "copy.ts".to_owned(),
+                1,
+                format!(
+                    "duplicates codes.ts:1-{n} (lines 1-{n}, {n} tokens)",
+                    n = t.len()
+                )
+            )]
+        );
+    }
+
+    #[test]
+    fn an_edit_next_to_shared_code_is_not_a_new_copy() {
+        // a.ts and u.ts share H; u.ts has a `}` before it. The change adds
+        // code ending in `}` above H in a.ts: the window `}` + 49 tokens of
+        // H is new, but only one of its tokens is new code.
+        let h = texts("h", 60);
+        let mut u = texts("z", 10);
+        u.push("}".to_owned());
+        u.extend(h.iter().cloned());
+        let mut after = texts("y", 10);
+        after.push("}".to_owned());
+        after.extend(h.iter().cloned());
+        assert_eq!(
+            run(
+                &[("a.ts", synthetic(&h), synthetic(&after))],
+                &[("u.ts", synthetic(&u))]
+            ),
+            []
+        );
+    }
+
+    #[test]
+    fn moved_code_with_a_new_neighbour_is_not_a_new_copy() {
+        // H leaves b.ts and arrives in c.ts after other code ending in
+        // `}`; a third file has H after a `}` too.
+        let h = texts("h", 60);
+        let mut third = texts("z", 10);
+        third.push("}".to_owned());
+        third.extend(h.iter().cloned());
+        let mut c = texts("y", 10);
+        c.push("}".to_owned());
+        c.extend(h.iter().cloned());
+        assert_eq!(
+            run(
+                &[
+                    ("b.ts", synthetic(&h), vec![]),
+                    ("c.ts", vec![], synthetic(&c))
+                ],
+                &[("thrice.ts", synthetic(&third))],
+            ),
+            []
+        );
+    }
+
+    #[test]
+    fn a_full_copy_after_a_partial_one_in_the_same_file_is_used() {
+        let x = texts("x", 70);
+        let mut u = x[..50].to_vec();
+        u.extend(texts("j", 6));
+        u.extend(x.iter().cloned());
+        assert_eq!(
+            run(
+                &[("new.ts", vec![], synthetic(&x))],
+                &[("u.ts", synthetic(&u))]
+            ),
+            [(
+                "new.ts".to_owned(),
+                1,
+                "duplicates u.ts:57-126 (lines 1-70, 70 tokens)".to_owned()
+            )]
+        );
+        assert_eq!(
+            run(
+                &[("new.ts", vec![], synthetic(&x))],
+                &[("u.ts", synthetic(&u)), ("u2.ts", synthetic(&x))]
+            )[0]
+            .2,
+            "duplicates u.ts:57-126 (lines 1-70, 70 tokens, and 1 more)"
+        );
+    }
+
+    #[test]
+    fn when_every_holder_is_new_the_first_by_path_is_the_original() {
+        // a.ts held the block and is deleted; b.ts and d.ts get it.
+        let block = texts("s", 60);
+        assert_eq!(
+            run(
+                &[
+                    ("a.ts", synthetic(&block), vec![]),
+                    ("b.ts", vec![], synthetic(&block)),
+                    ("d.ts", vec![], synthetic(&block))
+                ],
+                &[],
+            ),
+            [(
+                "d.ts".to_owned(),
+                1,
+                "duplicates b.ts:1-60 (lines 1-60, 60 tokens)".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn a_copy_of_code_from_an_edited_file_is_reported() {
+        // a.ts keeps H and is edited elsewhere; n.ts gets a copy of H.
+        let h = texts("h", 60);
+        let mut after = h.clone();
+        after.push("edit".to_owned());
+        assert_eq!(
+            run(
+                &[
+                    ("a.ts", synthetic(&h), synthetic(&after)),
+                    ("n.ts", vec![], synthetic(&h))
+                ],
+                &[],
+            ),
+            [(
+                "n.ts".to_owned(),
+                1,
+                "duplicates a.ts:1-60 (lines 1-60, 60 tokens)".to_owned()
+            )]
+        );
+    }
+
     #[test]
     fn colliding_hashes_are_told_apart() {
         // Every token hashes alike under the first hash; the second one

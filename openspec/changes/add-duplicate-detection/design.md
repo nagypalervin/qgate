@@ -25,8 +25,10 @@ See proposal.md for why and what.
 - **Read the head tree once,** in one git process, and keep only what the
   findings need: counts and positions of the windows that the changed
   files contain.
-- **Be deterministic:** the same input gives the same bytes. Hashes are
-  fixed (no `RandomState`), maps are ordered or sorted before output.
+- **Be deterministic:** the same input gives the same bytes. Window hashes
+  are fixed (FNV-1a and polynomial bases, not `RandomState`); hash maps
+  are used for lookups only, and what reaches the output is ordered or
+  sorted.
 
 **Non-Goals:**
 
@@ -107,7 +109,8 @@ let findings = index.findings();
    combines the token hashes polynomially, in wrapping `u64` arithmetic
    (FNV-1a for the token text, a fixed odd base for the window). A
    rolling update makes each window O(1).
-2. **`new`.** It hashes every window of the changed files' head versions
+2. **`new`.** *Counting is per file since PR 3 (Implementation Notes,
+   review round 2).* It hashes every window of the changed files' head versions
    (the candidates), counts each candidate's occurrences there, and
    counts its occurrences in their base versions. That gives
    `delta[h] = after - before`.
@@ -182,11 +185,16 @@ The two-file form never builds an index.
   - result: 1.4 s wall time and 21 MB peak memory (three runs, all within
     0.02 s); all 20 copies found.
 
-  - a 400-file change on the same repository: 2.4 s and 308 MB peak
-    (re-measured after review round 2; 20 files: 1.4 s, 21 MB).
+  - a 400-file change on the same repository: 2.5 s and 308 MB peak
+    (re-measured after review round 3; 20 files: 1.4 s, 21 MB);
+  - the reviewer's worst case: 400 new files and 2,000 unchanged ones
+    sharing one 200-token block, 2.9 s in `findings()` alone. The block
+    search costs changed files x files holding a block x block length.
 
-  Memory does not depend on the repository size, because only the
-  changed files' windows are kept (D3), but it is high per changed token:
+  Memory is driven by the changed files, because only their windows are
+  kept (D3); unchanged files add a place for each window they share with
+  them, which grows with the repository for very common code (number
+  tables). It is also high per changed token:
   every token is a `String`, and every window a map entry. Interning
   token texts and compacting the window maps are the follow-ups, with
   caching and parallel parsing, before qgate meets very large pull
@@ -336,8 +344,9 @@ finding, which does not fail a run by default.
   - What "new" means in counts: the number reported for a block is at
     most the number of occurrences the changed files gained in total, so
     code that moved from one changed file to another adds nothing.
-  - The e2e helper `function()` writes `if (c.k0)`, `if (c.k1)`, ... so
-    its generated decisions are not repeated code.
+  - The e2e helper `function()` wrote `if (c.k0)`, `if (c.k1)`, ... for a
+    while; review round 2 made same-file repetition irrelevant, and it is
+    back to `if (c[0])`.
   - Task 3.3: breaking the old/new split per file, the original rule,
     block merging, the overlap rule, the before subtraction, the per-block
     budget and the second hash each fails a test. The member-name and
@@ -387,3 +396,20 @@ finding, which does not fail a run by default.
     and splitting blocks each fail a test. The copy filter for the
     block's own file was redundant (that place is always the reported
     one) and is gone.
+- **PR 3, review round 3 (one question answered by the human):**
+  - An edit next to code another file shares, or moved code with a new
+    neighbour, gave a finding: the window of one new token and 49 shared
+    ones is new to the file. The human chose: a block is reported only if
+    at least 50 of its tokens are new duplicated code, that is, not
+    covered by a window whose block the file already shared with another
+    file (`old_duplicates`). The spec says so, with a scenario.
+  - Reporting is per (changed file, key) instead of per first occurrence,
+    so a copy whose own content repeats (a `switch`, a table with a head)
+    is one block, and a block follows every copy in another file, not
+    only the first place there; "k more" counts files.
+  - "When every file that holds it is new, the first by path is the
+    original" is the spec wording now (it was "when no file held it
+    before"), with a test where the old holder was deleted.
+  - JavaScript renamed to JavaScript no longer counts as code that left.
+  - The two-file test puts the copied block in a neighbouring file, so it
+    shows the form does not look beyond its two files.
