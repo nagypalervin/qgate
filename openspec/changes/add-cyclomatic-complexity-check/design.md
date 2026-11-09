@@ -241,6 +241,22 @@ Nothing to migrate: no released version, no users. The placeholder
   message }` rather than "grammar load failure": it covers both a grammar
   that fails to load and tree-sitter returning no tree. Neither is caused by
   the input.
+- **1.5:** optional calls `f?.()` have no `optional_chain` node in the
+  grammar, only a bare `?.` token under `call_expression`; that token is
+  counted. Member and subscript chains (`a?.b`, `a?.[0]`) are counted by
+  their `optional_chain` node.
+- **1.5:** a class body is a measurement barrier: decision points in class
+  field initializers and static blocks that are not inside a method or a
+  named field function count towards nothing, even when the class is
+  declared inside a function. This is what the spec's "class field
+  initializers that are not functions" requires, and it matches ESLint,
+  which treats initializers and static blocks as their own scopes.
+- **1.5:** the walk is iterative (tree cursor plus a frame stack), not
+  recursive, so deeply nested or generated code cannot overflow the stack.
+- **1.5:** the walk already implements the full naming rules of D3, because
+  naming and unit boundaries are one mechanism. The 1.6 naming tests were
+  therefore written after the code, not before it; they are still derived
+  from the spec scenarios, not from the output.
 
 ### ESLint comparison
 
