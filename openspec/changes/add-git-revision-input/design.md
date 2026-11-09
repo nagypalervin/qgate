@@ -203,3 +203,14 @@ sort key gaining the path, which is constant in that mode.
 
 - **1.2:** `Repository` also exposes `root()`, the work-tree top level.
   The CLI needs it to report where it looked; it adds no behaviour.
+- **1.3:** git commands run in the directory the repository was discovered
+  from, not in `root`: git finds the repository itself, and a top-level
+  path that is not valid UTF-8 never has to round-trip through a `String`.
+- **1.3:** the option-like-revision test also passes without
+  `--end-of-options` (checked by removing it): the appended `^{commit}` and
+  `--verify` already keep `rev-parse` from reading the value as an option,
+  and ref names cannot start with `-`. `--end-of-options` stays as defense
+  in depth; the test pins the observable outcome (unknown revision, no file
+  written).
+- **1.3:** the test helper lives in `src/test_support.rs` (`#[cfg(test)]`),
+  so the later `changed_files` and `read_blob` tests share it.
