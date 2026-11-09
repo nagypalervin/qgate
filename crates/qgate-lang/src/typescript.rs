@@ -475,6 +475,9 @@ impl<'s> Walker<'s> {
             return;
         }
         let kind = node.kind();
+        // `is_named`: the keywords of `predefined_type` are also called
+        // `string` and `number`. They only occur in type positions, which
+        // are muted or never entered, so this is a guard, not a known case.
         if node.is_named() && LITERAL_KINDS.contains(&kind) {
             // One `$lit` per literal, without entering it.
             self.push_token("$lit".to_owned(), node, false);
@@ -627,6 +630,9 @@ const TYPE_ONLY_KINDS: &[&str] = &[
     "import_alias",
     "implements_clause",
     "function_signature",
+    // Class method and constructor overloads; interface members are inside
+    // `TYPE_KINDS` and never entered.
+    "method_signature",
     "abstract_method_signature",
     "index_signature",
     "ambient_declaration",
@@ -659,8 +665,10 @@ fn produces_no_tokens(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
             "as_expression" | "satisfies_expression" => parent
                 .named_child(0)
                 .is_some_and(|operand| operand.id() != node.id()),
-            "non_null_expression" | "variable_declarator" => kind == "!",
-            "optional_parameter" | "public_field_definition" => kind == "?",
+            "non_null_expression" | "variable_declarator" | "public_field_definition" => {
+                kind == "!" || (kind == "?" && parent.kind() == "public_field_definition")
+            }
+            "optional_parameter" | "method_definition" | "method_signature" => kind == "?",
             _ => false,
         }),
     }
@@ -1247,6 +1255,66 @@ mod tests {
         assert_eq!(
             token_texts("export { type W, v };"),
             ["export", "{", ",", "$id", "}"]
+        );
+    }
+
+    #[test]
+    fn class_overloads_and_typescript_markers_produce_no_tokens() {
+        assert_eq!(
+            token_texts(
+                "class A {\n\
+                   constructor(o?: O);\n\
+                   constructor(o?: O) {}\n\
+                   m(a: string): void;\n\
+                   m(a: number): void;\n\
+                   m(a: any) { return a; }\n\
+                   n?() {}\n\
+                   c!: number;\n\
+                   static b?: number;\n\
+                 }\n\
+                 abstract class B { abstract q: number; }"
+            ),
+            [
+                "class",
+                "$id",
+                "{",
+                "constructor",
+                "(",
+                "$id",
+                ")",
+                "{",
+                "}",
+                "m",
+                "(",
+                "$id",
+                ")",
+                "{",
+                "return",
+                "$id",
+                "}",
+                "n",
+                "(",
+                ")",
+                "{",
+                "}",
+                "c",
+                "static",
+                "b",
+                "}",
+                "abstract",
+                "class",
+                "$id",
+                "{",
+                "}"
+            ]
+        );
+    }
+
+    #[test]
+    fn shebang_is_not_a_token() {
+        assert_eq!(
+            token_texts("#!/usr/bin/env node\nrun();\n"),
+            ["$id", "(", ")"]
         );
     }
 

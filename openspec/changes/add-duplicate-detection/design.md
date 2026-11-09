@@ -225,3 +225,20 @@ finding, which does not fail a run by default.
     accepted: it is the same in every copy.
   - Task 3.2 now includes the JS-to-TS rename, also with unreadable
     JavaScript, and the spec states that rule.
+- **PR 1, review round 2:**
+  - Class method and constructor overloads (`method_signature`) are
+    muted; they were the common form of overloads the first round missed.
+  - The definite-assignment `!` on class fields and the optional `?` on
+    class methods are muted too.
+  - Tests now pin abstract fields, optional static fields and the
+    shebang line. The `is_named` guard before literals has a comment: the
+    `string`/`number` keywords it guards against only occur in type
+    positions, which are muted or never entered.
+  - The spec wording now matches the code:
+    - `true`, `null` and the like are kept keywords;
+    - a template or JSX text part between substitutions is one
+      placeholder, so `` `${a}` `` and `` `-${a}` `` differ by that part;
+    - namespaced JSX names are kept.
+  - Known exception: a namespace that holds only types keeps its skeleton
+    (`export namespace $id { }`, five tokens). It is far below the
+    50-token threshold.

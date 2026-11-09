@@ -16,11 +16,13 @@ pub struct FileModel {
     pub tokens: Vec<Token>,
 }
 
-/// One normalized token. Identifiers become `$id` and literals `$lit`;
-/// member names, object keys, keywords, operators and punctuation keep
-/// their text. Comments, imports, `export ... from` and type-level code
-/// produce no tokens, so two copies that differ only in names, values or
-/// types have the same tokens.
+/// One normalized token. Identifiers become `$id`; strings, numbers,
+/// regexes and each text part of a template or JSX text become `$lit`.
+/// Member names, object keys, keywords, operators and punctuation keep
+/// their text. Comments, semicolons, the shebang line, imports,
+/// `export ... from` and type-level code produce no tokens, so two copies
+/// that differ only in names, values, types or semicolons have the same
+/// tokens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     /// The normalized text.

@@ -10,12 +10,13 @@ variables, and names an existing copy so the change can reuse it instead.
 
 ### Requirement: Normalized tokens
 
-The system SHALL compare code as normalized tokens. Comments, semicolons
-and layout SHALL be ignored. Identifiers SHALL become one placeholder and
-each literal another, one per literal whatever its content. Names that are
-not variables SHALL be kept: member names after `.` or `?.`, object keys,
-class and enum member names, JSX attribute names and lowercase JSX element
-names, as SHALL keywords, operators and punctuation.
+The system SHALL compare code as normalized tokens; comments, semicolons
+and layout SHALL be ignored. Identifiers SHALL become one placeholder.
+Strings, numbers and regexes, and each text part of a template or of JSX
+text, SHALL become another, one per literal or part whatever its content.
+Member, key, class and enum member names, JSX attribute and namespaced
+names, lowercase JSX element names, keywords (`true`, `null` included),
+operators and other punctuation SHALL be kept.
 
 #### Scenario: Renamed copy
 

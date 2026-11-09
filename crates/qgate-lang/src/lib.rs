@@ -23,7 +23,7 @@
 //! Finally, the model holds the file's code as normalized [`Token`]s for
 //! finding copies: identifiers become `$id` and literals `$lit`, while
 //! member names, keywords and punctuation keep their text; comments,
-//! imports and type-level code produce none.
+//! semicolons, imports and type-level code produce none.
 //!
 //! ```
 //! use qgate_lang::{Language, parse};
