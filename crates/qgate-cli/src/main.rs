@@ -8,6 +8,7 @@
 //! failed" mode.
 
 use std::fs;
+use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -55,10 +56,7 @@ fn main() -> ExitCode {
 
     if let Some(("check", args)) = matches.subcommand() {
         return match check(args) {
-            Ok(report) => {
-                print!("{report}");
-                ExitCode::SUCCESS
-            }
+            Ok(report) => write_stdout(&report),
             Err(message) => {
                 eprintln!("error: {message}");
                 ExitCode::from(INVALID)
@@ -67,6 +65,23 @@ fn main() -> ExitCode {
     }
     let _ = command.print_help();
     ExitCode::SUCCESS
+}
+
+/// Write the report to standard output. A reader that stops early (as in
+/// `qgate check ... | head`) is not an error: `print!` would panic there.
+fn write_stdout(report: &str) -> ExitCode {
+    let mut stdout = std::io::stdout().lock();
+    match stdout
+        .write_all(report.as_bytes())
+        .and_then(|()| stdout.flush())
+    {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) if e.kind() == ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: cannot write the report: {e}");
+            ExitCode::from(INVALID)
+        }
+    }
 }
 
 /// Run `qgate check` and return the rendered report, or an error message

@@ -352,9 +352,12 @@ spec ambiguity. Decisions:
   rule-id tie-break (checked by removing the sort). The syntax-error
   fixture ends inside an unclosed `if` block; tree-sitter reports the
   missing `}` on the file's last line, line 7, as the spec scenario says.
-- **3.2:** a bad `cargo clippy` result was briefly committed (cb61355,
-  local only) because the check command was not chained with `&&`; the
-  commit was amended before pushing.
+- **PR 3 review (2026-11-09):** the report is written to a locked stdout
+  instead of `print!`, and a broken pipe (`qgate check ... | head`) ends
+  with exit code 0 instead of a panic with 101, as D7's "piping findings is
+  safe" promises; an end-to-end test overflows the pipe buffer and closes
+  the reader. The unused `qgate-core` dependency of `qgate-cli` is dropped.
+  Task 3.5 was unticked until the smoke step had passed on the PR.
 
 ### ESLint comparison
 

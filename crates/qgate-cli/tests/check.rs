@@ -95,6 +95,44 @@ fn output_is_byte_identical_across_runs() {
     assert_eq!(first.stdout, second.stdout);
 }
 
+#[test]
+fn closed_output_pipe_is_not_a_crash() {
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    // Enough findings to overflow any pipe buffer, so qgate is still
+    // writing when the reader goes away (like `qgate check ... | head -n 1`).
+    let dir = std::env::temp_dir().join(format!("qgate-pipe-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let big = dir.join("big.ts");
+    let mut source = std::fs::File::create(&big).expect("create big.ts");
+    for i in 0..3_000 {
+        write!(source, "function f{i}(c: boolean[]): number {{ ").expect("write");
+        for j in 0..11 {
+            write!(source, "if (c[{j}]) {{ return {j}; }} ").expect("write");
+        }
+        writeln!(source, "return -1; }}").expect("write");
+    }
+    drop(source);
+
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_qgate"))
+        .args([
+            "check".as_ref(),
+            fixtures.join("same.ts").as_os_str(),
+            big.as_os_str(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("qgate starts");
+    drop(child.stdout.take());
+    let out = child.wait_with_output().expect("qgate finishes");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+}
+
 // Requirement: Findings do not change the exit code
 
 #[test]
