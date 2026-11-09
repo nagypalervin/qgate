@@ -140,8 +140,29 @@ impl Repository {
     /// [`GitError::NoMergeBase`] if they share no history, or another
     /// [`GitError`] if git fails.
     pub fn changed_files(&self, base: &str, head: &str) -> Result<Vec<ChangedFile>, GitError> {
-        let (_merge_base, _head) = self.merge_base_of(base, head)?;
-        Err(not_implemented())
+        let (merge_base, head) = self.merge_base_of(base, head)?;
+        let args = [
+            "diff",
+            "--raw",
+            "-z",
+            "-M",
+            "--no-abbrev",
+            "--no-ext-diff",
+            "--no-textconv",
+            &merge_base,
+            &head,
+        ];
+        let out = self.git(&args)?;
+        if !out.status.success() {
+            return Err(command_error(&args, &out));
+        }
+        let mut files = parse_raw_diff(&out.stdout).map_err(|detail| GitError::Command {
+            args: args.iter().map(|&a| a.to_owned()).collect(),
+            status: out.status.code(),
+            stderr: format!("unexpected `git diff --raw` output: {detail}"),
+        })?;
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(files)
     }
 
     /// The raw contents of a blob.
@@ -200,6 +221,64 @@ impl Repository {
             _ => Err(command_error(&args, &out)),
         }
     }
+}
+
+/// Modes of regular files; everything else (symlinks `120000`, submodules
+/// `160000`) is skipped.
+const REGULAR_MODES: [&str; 2] = ["100644", "100755"];
+
+/// Parse `git diff --raw -z` output into the changed regular files.
+///
+/// Each record is `:<old-mode> <new-mode> <old-id> <new-id> <status>`,
+/// NUL, path, NUL; renames and copies (`R<score>`, `C<score>`) carry the
+/// old path and then the new path.
+fn parse_raw_diff(raw: &[u8]) -> Result<Vec<ChangedFile>, String> {
+    let mut fields = raw.split(|&b| b == 0);
+    let mut files = Vec::new();
+    while let Some(header) = fields.next() {
+        if header.is_empty() {
+            break;
+        }
+        let header = String::from_utf8_lossy(header);
+        let parts: Vec<&str> = header
+            .strip_prefix(':')
+            .ok_or_else(|| format!("record does not start with `:`: {header}"))?
+            .split(' ')
+            .collect();
+        let [old_mode, new_mode, old_id, new_id, status] = parts[..] else {
+            return Err(format!("expected 5 fields: {header}"));
+        };
+        let mut path = || {
+            fields
+                .next()
+                .map(|p| String::from_utf8_lossy(p).into_owned())
+                .ok_or_else(|| format!("missing path after {header}"))
+        };
+        let (old_path, path) = match status.chars().next() {
+            Some('R' | 'C') => {
+                let old = path()?;
+                (Some(old), path()?)
+            }
+            _ => (None, path()?),
+        };
+
+        let regular = |mode: &str| REGULAR_MODES.contains(&mode);
+        let before = match status.chars().next() {
+            Some('A') if regular(new_mode) => None,
+            Some('M' | 'R' | 'C') if regular(old_mode) && regular(new_mode) => {
+                Some(BlobId(old_id.to_owned()))
+            }
+            // Deleted, type change, symlink, submodule, unmerged: skipped.
+            _ => continue,
+        };
+        files.push(ChangedFile {
+            path,
+            old_path,
+            before,
+            after: BlobId(new_id.to_owned()),
+        });
+    }
+    Ok(files)
 }
 
 /// Run `git` with `args` in `dir`. Prompts are disabled, so a command can
@@ -329,6 +408,159 @@ mod tests {
                 head: "other".to_owned()
             })
         );
+    }
+
+    /// Blob id of `path` at `revision`, as git reports it.
+    fn blob(repo: &TestRepo, revision: &str, path: &str) -> BlobId {
+        BlobId(repo.git(&["rev-parse", &format!("{revision}:{path}")]))
+    }
+
+    fn changes(repo: &TestRepo, base: &str, head: &str) -> Vec<ChangedFile> {
+        Repository::discover(&repo.dir)
+            .expect("a repository")
+            .changed_files(base, head)
+            .expect("changed files")
+    }
+
+    #[test]
+    fn modified_added_deleted_and_renamed_files() {
+        let repo = TestRepo::new();
+        repo.write("src/mod.ts", "export const a = 1;\n");
+        repo.write("src/gone.ts", "export const g = 1;\n");
+        repo.write(
+            "src/old.ts",
+            "export function f() {\n  return 1;\n}\n// padding\n// padding\n",
+        );
+        repo.write("src/util.js", "module.exports = { a: 1, b: 2, c: 3 };\n");
+        repo.commit("base");
+        repo.write("src/mod.ts", "export const a = 2;\n");
+        repo.write("src/added.ts", "export const n = 1;\n");
+        std::fs::remove_file(repo.dir.join("src/gone.ts")).expect("delete");
+        repo.git(&["mv", "src/old.ts", "src/new.ts"]);
+        repo.write(
+            "src/new.ts",
+            "export function f() {\n  return 2;\n}\n// padding\n// padding\n",
+        );
+        repo.git(&["mv", "src/util.js", "src/util.ts"]);
+        repo.commit("head");
+
+        assert_eq!(
+            changes(&repo, "HEAD~1", "HEAD"),
+            vec![
+                ChangedFile {
+                    path: "src/added.ts".to_owned(),
+                    old_path: None,
+                    before: None,
+                    after: blob(&repo, "HEAD", "src/added.ts"),
+                },
+                ChangedFile {
+                    path: "src/mod.ts".to_owned(),
+                    old_path: None,
+                    before: Some(blob(&repo, "HEAD~1", "src/mod.ts")),
+                    after: blob(&repo, "HEAD", "src/mod.ts"),
+                },
+                // renamed and modified: compared with the old path
+                ChangedFile {
+                    path: "src/new.ts".to_owned(),
+                    old_path: Some("src/old.ts".to_owned()),
+                    before: Some(blob(&repo, "HEAD~1", "src/old.ts")),
+                    after: blob(&repo, "HEAD", "src/new.ts"),
+                },
+                // renamed from an unsupported extension: still a rename here;
+                // the CLI decides how to treat it
+                ChangedFile {
+                    path: "src/util.ts".to_owned(),
+                    old_path: Some("src/util.js".to_owned()),
+                    before: Some(blob(&repo, "HEAD~1", "src/util.js")),
+                    after: blob(&repo, "HEAD", "src/util.ts"),
+                },
+                // src/gone.ts is deleted: not reported
+            ]
+        );
+    }
+
+    #[test]
+    fn no_changes() {
+        let repo = TestRepo::new();
+        repo.write("a.ts", "x");
+        repo.commit("only");
+        assert_eq!(changes(&repo, "HEAD", "HEAD"), vec![]);
+    }
+
+    #[test]
+    fn changes_on_base_after_the_fork_are_not_reported() {
+        let repo = TestRepo::new();
+        repo.write("a.ts", "v1");
+        repo.commit("fork point");
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        repo.write("b.ts", "feature");
+        repo.commit("feature work");
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("a.ts", "v2 on main");
+        repo.commit("main work");
+        let paths: Vec<String> = changes(&repo, "main", "feature")
+            .into_iter()
+            .map(|c| c.path)
+            .collect();
+        assert_eq!(paths, ["b.ts"]);
+    }
+
+    #[test]
+    fn executable_files_are_regular_files() {
+        let repo = TestRepo::new();
+        repo.write("run.ts", "v1");
+        repo.commit("base");
+        repo.write("run.ts", "v2");
+        repo.git(&["update-index", "--chmod=+x", "run.ts"]);
+        repo.git(&["commit", "-q", "-m", "executable"]);
+        let paths: Vec<String> = changes(&repo, "HEAD~1", "HEAD")
+            .into_iter()
+            .map(|c| c.path)
+            .collect();
+        assert_eq!(paths, ["run.ts"]);
+    }
+
+    #[test]
+    fn submodule_entries_are_skipped() {
+        let repo = TestRepo::new();
+        let first = repo.commit("base");
+        // A gitlink entry without a second repository (design D5).
+        repo.git(&[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{first},vendor/lib"),
+        ]);
+        repo.git(&["commit", "-q", "-m", "submodule"]);
+        assert_eq!(changes(&repo, "HEAD~1", "HEAD"), vec![]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_and_type_changes_are_skipped() {
+        let repo = TestRepo::new();
+        repo.write("target.ts", "x");
+        repo.write("became-link.ts", "a regular file first");
+        repo.commit("base");
+        std::os::unix::fs::symlink("target.ts", repo.dir.join("link.ts")).expect("symlink");
+        std::fs::remove_file(repo.dir.join("became-link.ts")).expect("delete");
+        std::os::unix::fs::symlink("target.ts", repo.dir.join("became-link.ts")).expect("symlink");
+        repo.commit("links");
+        assert_eq!(changes(&repo, "HEAD~1", "HEAD"), vec![]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn non_utf8_paths_are_reported_lossily() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let repo = TestRepo::new();
+        repo.commit("base");
+        let name = std::ffi::OsStr::from_bytes(b"bad-\xff.ts");
+        std::fs::write(repo.dir.join(name), "x").expect("write");
+        repo.commit("odd name");
+        let found = changes(&repo, "HEAD~1", "HEAD");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].path, "bad-\u{fffd}.ts");
     }
 
     #[test]

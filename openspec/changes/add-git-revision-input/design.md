@@ -214,3 +214,13 @@ sort key gaining the path, which is constant in that mode.
   written).
 - **1.3:** the test helper lives in `src/test_support.rs` (`#[cfg(test)]`),
   so the later `changed_files` and `read_blob` tests share it.
+- **1.4:** the diff also passes `--no-abbrev`, missing from the D3 table:
+  without it `--raw` prints abbreviated blob ids, which `cat-file` would
+  have to expand again and which could become ambiguous.
+- **1.4:** a record is kept only if its new mode is a regular file mode
+  (`100644`, `100755`) and, for modifications and renames, its old mode is
+  too; everything else (deleted, `T`, symlinks, gitlinks, unmerged) is
+  skipped in one place. `C` (copy) is handled like `R` for robustness,
+  although `-M` alone never reports copies.
+- **1.4:** results are sorted by head path in code instead of relying on
+  git's output order, which for renames follows the old path.
