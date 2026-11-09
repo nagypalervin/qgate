@@ -32,7 +32,7 @@ one per line.
 
 #### Scenario: Pull request branch
 
-- **GIVEN** a repository where branch `feature` made `f` in `src/a.ts` more complex than on `main`
+- **GIVEN** a repository where branch `feature` made `f` in `src/a.ts` more complex than on `main`, from 2 to 4 (a Warning)
 - **WHEN** the user runs `qgate check --base main --head feature`
 - **THEN** standard output contains one `complexity/cyclomatic-increase` line for `src/a.ts`
 - **AND** the exit code is 0
@@ -106,16 +106,64 @@ byte-identical output.
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** the finding for `src-x.ts` is printed first, because `-` sorts before `/`
 
-### Requirement: Findings do not change the exit code
+### Requirement: Failing on findings
 
-In this version the system SHALL exit with code 0 whenever the analysis ran,
-regardless of the number or severity of findings.
+When the analysis ran, the system SHALL exit with code 1 if at least one
+finding has a severity at or above the level given by `--fail-on`, and with
+code 0 otherwise. The levels are `error` (the default), `warning` and
+`never`, which never fails on findings. Exit code 2 for a check that could
+not run takes precedence. Standard output SHALL be the same whatever the
+level.
 
 #### Scenario: Error finding
 
 - **GIVEN** inputs that produce a finding with severity Error
-- **WHEN** the user runs `qgate check`
+- **WHEN** the user runs `qgate check` without `--fail-on`
+- **THEN** the exit code is 1
+
+#### Scenario: Warnings pass by default
+
+- **GIVEN** inputs that produce only Warning findings
+- **WHEN** the user runs `qgate check` without `--fail-on`
 - **THEN** the exit code is 0
+
+#### Scenario: Failing on warnings
+
+- **GIVEN** inputs that produce only Warning findings
+- **WHEN** the user runs `qgate check --fail-on warning`
+- **THEN** the exit code is 1
+
+#### Scenario: Never failing
+
+- **GIVEN** inputs that produce a finding with severity Error
+- **WHEN** the user runs `qgate check --fail-on never`
+- **THEN** the exit code is 0
+- **AND** standard output is the same as without `--fail-on never`
+
+#### Scenario: Unparsable file in revision mode
+
+- **GIVEN** revision mode reports only an `input/unparsable` finding
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** the exit code is 0
+- **AND** with `--fail-on warning` the exit code is 1
+
+#### Scenario: Errors that stop the check win
+
+- **WHEN** the user runs `qgate check --base no-such-branch --fail-on warning`
+- **THEN** the exit code is 2
+
+#### Scenario: Summary of a failing run
+
+- **GIVEN** inputs that produce two findings with severity Error and one with severity Warning
+- **WHEN** the user runs `qgate check`
+- **THEN** standard error ends with the line `qgate: failing: 2 findings at or above "error" (see --fail-on)`
+- **AND** standard output lists all three findings
+
+#### Scenario: A passing run prints no summary
+
+- **GIVEN** inputs that produce only Warning findings
+- **WHEN** the user runs `qgate check`
+- **THEN** standard error is empty
 
 ### Requirement: Supported input files
 
@@ -126,7 +174,7 @@ if their extensions differ, as long as both are in this set.
 
 #### Scenario: TSX input
 
-- **WHEN** the user runs `qgate check before.tsx after.tsx` on valid TSX files
+- **WHEN** the user runs `qgate check before.tsx after.tsx` on valid TSX files that produce no Error finding
 - **THEN** the analysis runs and the exit code is 0
 
 #### Scenario: Unsupported extension
@@ -167,8 +215,9 @@ revision mode such a file is reported as a finding instead (see the
 
 The system SHALL treat as a usage error a `check` command that has neither
 exactly two file arguments nor `--base`, that has both file arguments and
-`--base`, that has `--head` without `--base`, or that has an unknown
-argument: print a usage message to standard error and exit with code 2.
+`--base`, that has `--head` without `--base`, that has a `--fail-on` value
+other than `error`, `warning` or `never`, or that has an unknown argument:
+print a usage message to standard error and exit with code 2.
 
 #### Scenario: One argument
 
@@ -186,6 +235,12 @@ argument: print a usage message to standard error and exit with code 2.
 
 - **WHEN** the user runs `qgate check --head feature`
 - **THEN** standard error shows a usage error
+- **AND** the exit code is 2
+
+#### Scenario: Unknown fail-on level
+
+- **WHEN** the user runs `qgate check a.ts b.ts --fail-on info`
+- **THEN** standard error names the allowed values `error`, `warning` and `never`
 - **AND** the exit code is 2
 
 ### Requirement: Help and version
