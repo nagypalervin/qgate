@@ -1,0 +1,40 @@
+// Fixture: findings must come out sorted by line, then rule id.
+
+
+
+
+
+
+
+
+function grows(c: boolean[]): number { if (c[0]) { return 0; } return -1; }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+function sameLineGrows(c: boolean[]): number { if (c[0]) { return 0; } return -1; }

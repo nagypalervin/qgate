@@ -334,6 +334,28 @@ spec ambiguity. Decisions:
   that boundary fails a test. The duplicate-suffix shift was put to the
   human, who accepted it as a known limitation.
 
+#### PR 3: `qgate check`
+
+- **3.1:** `qgate` without arguments still prints the help with exit code 0,
+  as the hand-rolled CLI did; the spec does not cover it. Help and version
+  come through clap's error path with exit code 0, so `main` never calls
+  `process::exit`.
+- **3.3:** error messages follow D7: `error: <path>: <reason>`, with
+  `<path>:<line>` for syntax errors. Unsupported extensions are rejected
+  before the file is read, and the before file is fully loaded before the
+  after file, so the first problem in argument order is reported.
+- **3.3:** the CLI depends on `qgate-lang` directly (to pick the
+  `Language` and map `ParseError`); that follows the allowed direction
+  `cli -> lang`.
+- **3.2/3.3:** the sorting test has an increase and a new function on the
+  same line, with the new one first in the source, so it fails without the
+  rule-id tie-break (checked by removing the sort). The syntax-error
+  fixture ends inside an unclosed `if` block; tree-sitter reports the
+  missing `}` on the file's last line, line 7, as the spec scenario says.
+- **3.2:** a bad `cargo clippy` result was briefly committed (cb61355,
+  local only) because the check command was not chained with `&&`; the
+  commit was amended before pushing.
+
 ### ESLint comparison
 
 Run on 2026-11-09 with ESLint 9.39.5, `typescript-eslint` 8.72.1 parser,

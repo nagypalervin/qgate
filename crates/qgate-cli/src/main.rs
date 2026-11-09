@@ -7,10 +7,15 @@
 //! for an invalid invocation or input. `1` is reserved for a future "check
 //! failed" mode.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Arg, Command, value_parser};
+use clap::{Arg, ArgMatches, Command, value_parser};
+use qgate_analyzers::complexity::ComplexityAnalyzer;
+use qgate_analyzers::{Analyzer, FileChange};
+use qgate_lang::{FileModel, Language, ParseError};
+use qgate_report::render_text;
 
 /// Exit code for invalid invocations and inputs.
 const INVALID: u8 = 2;
@@ -48,10 +53,58 @@ fn main() -> ExitCode {
         }
     };
 
-    if let Some(("check", _)) = matches.subcommand() {
-        eprintln!("error: `qgate check` is not implemented yet");
-        return ExitCode::from(INVALID);
+    if let Some(("check", args)) = matches.subcommand() {
+        return match check(args) {
+            Ok(report) => {
+                print!("{report}");
+                ExitCode::SUCCESS
+            }
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::from(INVALID)
+            }
+        };
     }
     let _ = command.print_help();
     ExitCode::SUCCESS
+}
+
+/// Run `qgate check` and return the rendered report, or an error message
+/// for standard error. Nothing is printed here, so a failure leaves standard
+/// output empty.
+fn check(args: &ArgMatches) -> Result<String, String> {
+    let path = |name: &str| {
+        args.get_one::<PathBuf>(name)
+            .ok_or_else(|| format!("missing <{name}>"))
+    };
+    let (before_path, after_path) = (path("before")?, path("after")?);
+    let change = FileChange {
+        path: after_path.clone(),
+        before: load(before_path)?,
+        after: load(after_path)?,
+    };
+
+    let mut findings = ComplexityAnalyzer.analyze(&change);
+    // Sorted across analyzers so the same input always gives the same bytes.
+    findings.sort_by(|a, b| (a.location.line, &a.rule).cmp(&(b.location.line, &b.rule)));
+    Ok(render_text(&findings))
+}
+
+/// Pick the language from the extension, read and parse one input file.
+fn load(path: &Path) -> Result<FileModel, String> {
+    let shown = path.display();
+    let language = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .and_then(Language::from_extension)
+        .ok_or_else(|| {
+            format!("{shown}: unsupported file type (expected .ts, .mts, .cts or .tsx)")
+        })?;
+    let source = fs::read_to_string(path).map_err(|e| format!("{shown}: {e}"))?;
+    qgate_lang::parse(language, &source).map_err(|e| match e {
+        ParseError::Syntax { line } => {
+            format!("{shown}:{line}: syntax error (or syntax the parser does not support yet)")
+        }
+        ParseError::Parser { message } => format!("{shown}: parser failure: {message}"),
+    })
 }
