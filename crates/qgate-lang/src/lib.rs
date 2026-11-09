@@ -6,6 +6,23 @@
 //!
 //! Status: placeholder. The first adapter (TypeScript) lands in milestone M1.
 
+mod model;
+mod typescript;
+
+pub use model::{FileModel, Function, ParseError};
+
+/// Parse `source`, written in `language`, into a [`FileModel`].
+///
+/// # Errors
+///
+/// Returns [`ParseError::Syntax`] if the source contains a syntax error,
+/// and [`ParseError::Parser`] if the parser itself fails.
+pub fn parse(language: Language, source: &str) -> Result<FileModel, ParseError> {
+    match language {
+        Language::TypeScript | Language::Tsx => typescript::parse(language, source),
+    }
+}
+
 /// A language qgate knows how to analyze.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
@@ -42,6 +59,13 @@ mod tests {
     #[test]
     fn recognizes_tsx() {
         assert_eq!(Language::from_extension("tsx"), Some(Language::Tsx));
+    }
+
+    #[test]
+    fn both_grammars_load() {
+        for language in [Language::TypeScript, Language::Tsx] {
+            assert_eq!(parse(language, ""), Ok(FileModel::default()));
+        }
     }
 
     #[test]

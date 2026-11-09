@@ -233,6 +233,15 @@ Nothing to migrate: no released version, no users. The placeholder
 
 <!-- Decisions made during apply are recorded here, per CLAUDE.md. -->
 
+- **1.2:** `tree-sitter` keeps its default features. `regex` is a
+  non-optional dependency of tree-sitter (for its query API, which qgate
+  does not use); `default-features = false` would only drop regex's `std`
+  and `perf` features, not the crate.
+- **1.3:** the non-syntax error case of `ParseError` is named `Parser {
+  message }` rather than "grammar load failure": it covers both a grammar
+  that fails to load and tree-sitter returning no tree. Neither is caused by
+  the input.
+
 ### ESLint comparison
 
 <!-- Filled in during apply (D10). -->
