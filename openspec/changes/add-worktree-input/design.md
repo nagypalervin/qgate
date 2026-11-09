@@ -50,17 +50,19 @@ that holds the working tree. The steps:
 
 1. **Find the head commit.** Resolve `HEAD` as a commit. If that fails,
    the result is `UnknownRevision("HEAD")`.
-2. **Make a private index.** Get a unique path in the git directory from
-   `git rev-parse --git-path qgate-index-<pid>-<n>`, so linked work trees
-   and a relocated `GIT_DIR` are respected. Copy the index git would use
-   there, from `git rev-parse --git-path index`, which honours an exported
-   `GIT_INDEX_FILE`. If there is no index, run `git read-tree <head>` into
-   the private one instead.
+2. **Make a private index.** `git rev-parse --git-path index --git-path
+   qgate-index` gives both the index git would use (honouring an exported
+   `GIT_INDEX_FILE` and linked work trees) and a stem in the git directory.
+   The private index is `<stem>-<pid>-<nanoseconds>-<n>`, created with
+   `create_new`, so it is never shared with another process, not even one
+   with the same pid in another container. A name whose `.lock` exists is
+   skipped, and nothing this process did not create is ever deleted. The
+   real index is copied into it; if there is none, `git read-tree <head>`
+   fills it instead.
 3. **Stage everything into the private index.** Run
-   `GIT_INDEX_FILE=<private> git add -A` from the top level, with hooks
-   disabled (D2). This stages
-   modified, deleted and untracked-but-not-ignored files exactly as
-   `git add -A` would.
+   `GIT_INDEX_FILE=<private> git add -A` from the top level, with hooks and
+   the split index off (D2). This stages modified, deleted and
+   untracked-but-not-ignored files exactly as `git add -A` would.
 4. **Write the tree:** `GIT_INDEX_FILE=<private> git write-tree`.
 5. **Write the commit:** `git commit-tree <tree> -p <head> -m
    "qgate working tree"`, with a fixed author and committer (name `qgate`,
@@ -100,10 +102,11 @@ The CLI then passes the commit id as the head to the existing calls.
 - **`git stash create`:** it ignores untracked files. It also records the
   index as a second parent and runs in the user's index context. Rejected.
 - **A temporary index outside the git directory** (system temp dir). It
-  works for a plain index. With `core.splitIndex`, git keeps the shared
-  index part (`sharedindex.<id>`) next to the index file, so a copy
-  elsewhere would lose it. Keeping the copy in the git directory avoids the
-  question.
+  would work: git finds a split index's shared part in the git directory
+  either way. The copy stays in the git directory because it belongs to
+  the repository, sits on the same file system as the index, and is never
+  visible in the work tree. (The design first claimed a split index
+  required this; review round 1 showed it does not.)
 
 ### D2. Nothing reaches refs, the index or hooks
 
@@ -114,29 +117,50 @@ The CLI then passes the commit id as the head to the existing calls.
   even a private one. Every snapshot command therefore runs with
   `-c core.hooksPath=/dev/null`, a directory that holds no hooks, on Linux
   and macOS alike.
-- **`core.fsmonitor` still runs.** A configured file-system monitor is a
-  query that git asks which files changed, not a hook. Disabling it would
-  only make `git add -A` slower.
+- **`core.fsmonitor` still runs.** githooks(5) lists the
+  `fsmonitor-watchman` hook, but it only answers which files changed;
+  disabling it would make `git add -A` slower and change nothing else. The
+  spec names it as the one exception.
+- **No split index:** with `core.splitIndex=true`, writing the private
+  index can create a new `sharedindex.<id>` in the git directory, which
+  outlives the private index. Every snapshot command runs with
+  `-c core.splitIndex=false`, so the private index is written as one plain
+  file and no shared index is created (found in review round 1).
 - **The real index is only read**, by a plain file copy. Git replaces an
   index by renaming `index.lock` over it, so a copy sees either the old or
   the new file, never half of each.
 - **What is written:**
   - the private index, which is removed;
   - loose objects (blobs, trees, one commit) that no ref reaches. Git
-    prunes those after `gc.pruneExpire`, two weeks by default.
-- **Filters still run:** `git add -A` runs configured clean filters
-  (e.g. Git LFS), so the snapshot holds what a commit would hold.
+    prunes those after `gc.pruneExpire`, two weeks by default;
+  - whatever a clean filter stores for the files it cleans, such as Git
+    LFS under `.git/lfs/objects/`.
+- **Filters still run:** `git add -A` runs configured clean filters and
+  line-ending conversion, so the snapshot holds what a commit would hold,
+  not the raw bytes on disk. The spec says "as git would stage it".
 
 ### D3. Error messages name `HEAD`, not the snapshot id
 
 - **CLI side:** `check_revisions` gets a head *label* next to the head
-  revision. For `--worktree` the label is `HEAD` and the revision is the
-  snapshot id. `git_message` uses the label, so "no merge base between
-  `other` and `HEAD`" reads as the spec requires.
+  revision. For `--worktree` the revision is the snapshot id, and the CLI
+  rewrites the three errors the spec names:
+  - `NoMergeBase` names `HEAD` as the head, so it reads "`other` and `HEAD`
+    have no merge base";
+  - `NotARegularFile` for `qgate.toml` names "the working tree", because
+    the file is a regular file in `HEAD`;
+  - `UnknownRevision("HEAD")` from the snapshot gets no fetch hint, even
+    with `--base HEAD`.
+
+  `GitError::Command` still prints the arguments git got, which may hold a
+  full id, as it does for resolved revisions today. The spec limits "never
+  an internal id" to the three errors above.
 - **Git side:** errors raised inside the snapshot are mapped as follows:
   - an unknown `HEAD` becomes `UnknownRevision("HEAD")`;
-  - a failing `git add -A` becomes a new `GitError::WorkTree { stderr }`.
-    The CLI prints it as "cannot read the working tree: <git's message>".
+  - a failing `git add -A`, a failed copy of the index, or no free private
+    index name becomes `GitError::WorkTree { detail }`. It prints as
+    "cannot take a snapshot of the working tree: <detail>". An unreadable
+    file is the usual cause, and git's message names it. A full disk or an
+    unwritable object store gives the same prefix with git's own reason.
 
 ### D4. CLI shape
 
@@ -194,7 +218,8 @@ The CLI then passes the commit id as the head to the existing calls.
 - **[Risk] A crash or kill between steps 2 and 6 leaves a
   `qgate-index-*` file in the git directory.** → It is invisible to git
   and to the user, holds no data that is not in the work tree, and the
-  next run uses a new name. This is too minor for the README.
+  next run uses a new name. qgate never deletes it, because it cannot know
+  that no other process still uses it. This is too minor for the README.
 
 ## Migration Plan
 
@@ -218,9 +243,35 @@ None. The option is new and the default is unchanged.
   that way.
 - **The fixed date is `@0 +0000`**, git's raw format for the epoch, so no
   date parsing depends on the locale.
-- **A stale private index is removed before use.** A killed run can leave
-  `qgate-index-<pid>-<n>` and its `.lock`, and a later process can get the
-  same pid. A leftover `.lock` would otherwise make `git add` fail.
+- **Review round 1** (reviewer subagent, PR 1):
+  - **Split index:** a snapshot with `core.splitIndex=true` left a new
+    `sharedindex.*` behind. Fixed with `core.splitIndex=false` (D2), and
+    guarded by a test with a split index.
+  - **Fixed date:** the determinism test could not see a missing date,
+    because two snapshots within one second match anyway. The test now
+    checks the commit's `author` and `committer` lines too. Removing the
+    dates fails it.
+  - **Missing tests:**
+    - a linked work tree (the copy would fail if the index path were
+      guessed as `.git/index`);
+    - a missing index (the `read-tree` fallback);
+    - `assume-unchanged`.
+
+    Each is now tested and mutation-checked.
+  - **Private index name:** it was `<pid>-<n>`, and the code deleted any
+    stale file of that name first. Two containers sharing a repository can
+    have the same pid. It is now reserved with `create_new` and includes
+    the nanoseconds, and nothing qgate did not create is deleted.
+  - **Spec wording:**
+    - "as git would stage it" (filters apply);
+    - the file-system monitor as the one hook that may run;
+    - a clean filter's store as allowed leftovers;
+    - "never an internal id" limited to the errors D3 handles.
+
+    New scenarios cover these: files git does not look at, split index,
+    `--base HEAD` without commits, and `qgate.toml` not a regular file.
+  - **`GitError::WorkTree`** covers every failed snapshot, so its message is
+    now "cannot take a snapshot of the working tree", not "cannot read".
 - **No `--no-gpg-sign`.** The design first passed it to `commit-tree`.
   Removing it broke no test (task 1.3), because `commit-tree` never signs
   on configuration; only `git commit` does. It was dead code, so it is

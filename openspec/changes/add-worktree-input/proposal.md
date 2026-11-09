@@ -98,6 +98,8 @@ tree as that head, so their text does not change.
 
 - **`qgate-git`:**
   - one new public method that snapshots the working tree into a commit id;
+  - a new public error variant, `GitError::WorkTree`, for a snapshot that
+    cannot be taken;
   - the existing methods take the id like any revision.
 
   No new dependency, still only the `git` command (ADR 0002).

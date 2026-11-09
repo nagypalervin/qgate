@@ -13,7 +13,7 @@ Commit messages and PR bodies are written to files first.
 
 ## 1. Working tree snapshot in qgate-git (PR 1)
 
-- [x] 1.1 Write failing tests in `crates/qgate-git/src/lib.rs`, using `TestRepo`, for design D1 and D2:
+- [x] 1.1 Write failing tests in `crates/qgate-git/src/worktree.rs` (the snapshot's own module, see design Implementation Notes), using `TestRepo`, for design D1 and D2:
   - **Content:** `worktree_snapshot` followed by `changes(base, snapshot)` reports:
     - an unstaged edit;
     - a staged-then-edited file, with its disk contents;
@@ -55,16 +55,22 @@ Commit messages and PR bodies are written to files first.
     - The disk version wins;
     - File moved without git;
     - Deleted from disk;
-    - Clean working tree.
+    - Files git does not look at.
   - **"The working tree replaces the head everywhere":**
     - Copy of an uncommitted file;
-    - Only the uncommitted changes.
+    - Only the uncommitted changes;
+    - Clean working tree.
   - **"Checking the working tree changes nothing":**
     - Staged changes stay staged;
     - No commit appears;
     - Hooks do not run.
+
+    "Split index" is covered in `qgate-git` (review round 1), where the
+    configuration is set up directly.
   - **"Working tree errors":**
     - Repository without commits;
+    - Base HEAD in a repository without commits;
+    - qgate.toml is not a regular file on disk;
     - Unrelated histories, whose message names `HEAD`;
     - Unreadable file (skipped as root).
   - **`configuration`:**

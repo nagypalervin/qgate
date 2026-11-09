@@ -7,17 +7,31 @@
 //! were; the only trace is unreachable objects, which `git gc` prunes.
 
 use std::ffi::OsStr;
+use std::fs::OpenOptions;
 use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{GitError, Repository, command_error, git_command, spawn_error, stderr_of, stdout_of};
 
-/// Configuration for every snapshot command. Git runs the
-/// `post-index-change` hook on every index write, even of a private index,
-/// so hooks are pointed at a directory that holds none.
-const SNAPSHOT_CONFIG: [&str; 2] = ["-c", "core.hooksPath=/dev/null"];
+/// Configuration for every snapshot command:
+///
+/// - Git runs the `post-index-change` hook on every index write, even of a
+///   private index, so hooks are pointed at a directory that holds none.
+/// - With `core.splitIndex`, writing the private index can create a new
+///   `sharedindex.*` file in the git directory, which would outlive the
+///   private index; it is written as one plain file instead.
+const SNAPSHOT_CONFIG: [&str; 4] = [
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.splitIndex=false",
+];
+
+/// How many names [`PrivateIndex::reserve`] tries before giving up.
+const RESERVE_ATTEMPTS: usize = 100;
 
 /// The author and committer of every snapshot. `commit-tree` fails without
 /// an identity, which an agent's sandbox often lacks, and a fixed date
@@ -111,19 +125,20 @@ impl PrivateIndex {
     /// A private index holding what the index git would use holds, or
     /// `head`'s tree if there is no index yet.
     fn create(repo: &Repository, head: &str) -> Result<Self, GitError> {
-        let name = format!(
-            "qgate-index-{}-{}",
-            std::process::id(),
-            NEXT_INDEX.fetch_add(1, Ordering::Relaxed)
-        );
-        // `--git-path index` follows `GIT_INDEX_FILE` and linked work trees.
-        let args = ["rev-parse", "--git-path", "index", "--git-path", &name];
+        // `--git-path` follows `GIT_INDEX_FILE` and linked work trees.
+        let args = [
+            "rev-parse",
+            "--git-path",
+            "index",
+            "--git-path",
+            "qgate-index",
+        ];
         let out = repo.git(&args)?;
         if !out.status.success() {
             return Err(command_error(&args, &out));
         }
         let mut lines = out.stdout.split(|&b| b == b'\n').filter(|l| !l.is_empty());
-        let (Some(real), Some(private)) = (lines.next(), lines.next()) else {
+        let (Some(real), Some(stem)) = (lines.next(), lines.next()) else {
             return Err(GitError::UnexpectedOutput {
                 args: args.iter().map(|&a| a.to_owned()).collect(),
                 detail: String::from_utf8_lossy(&out.stdout).trim().to_owned(),
@@ -134,12 +149,7 @@ impl PrivateIndex {
             std::path::absolute(&path).unwrap_or(path)
         };
         let real = absolute(real);
-        // The guard exists before the file, so every way out removes it.
-        let index = Self {
-            path: absolute(private),
-        };
-        // A run that was killed may have left these under the same name.
-        index.remove();
+        let index = Self::reserve(absolute(stem).as_os_str())?;
         match std::fs::copy(&real, &index.path) {
             Ok(_) => {}
             Err(e) if e.kind() == ErrorKind::NotFound => {
@@ -154,12 +164,48 @@ impl PrivateIndex {
         Ok(index)
     }
 
+    /// A new, empty file named `<stem>-<pid>-<nanoseconds>-<n>`. It is
+    /// created exclusively, so no other process uses the same name, not
+    /// even one with the same pid in another container that shares the
+    /// repository; a name whose lock file exists is skipped. Nothing is
+    /// ever deleted that this process did not create.
+    fn reserve(stem: &OsStr) -> Result<Self, GitError> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos());
+        for _ in 0..RESERVE_ATTEMPTS {
+            let mut name = stem.to_os_string();
+            name.push(format!(
+                "-{}-{nanos}-{}",
+                std::process::id(),
+                NEXT_INDEX.fetch_add(1, Ordering::Relaxed)
+            ));
+            let path = PathBuf::from(name);
+            if Path::new(&lock_of(&path)).exists() {
+                continue;
+            }
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(_) => return Ok(Self { path }),
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
+                Err(e) => {
+                    return Err(GitError::WorkTree {
+                        detail: format!("cannot create {}: {e}", path.display()),
+                    });
+                }
+            }
+        }
+        Err(GitError::WorkTree {
+            detail: format!(
+                "no free name for a private index next to {}",
+                Path::new(stem).display()
+            ),
+        })
+    }
+
     /// Remove the private index and its lock file, if they exist.
     fn remove(&self) {
-        let mut lock = self.path.clone().into_os_string();
-        lock.push(".lock");
         let _ = std::fs::remove_file(&self.path);
-        let _ = std::fs::remove_file(lock);
+        let _ = std::fs::remove_file(lock_of(&self.path));
     }
 }
 
@@ -167,6 +213,13 @@ impl Drop for PrivateIndex {
     fn drop(&mut self) {
         self.remove();
     }
+}
+
+/// The lock file git writes next to an index while it updates it.
+fn lock_of(path: &Path) -> std::ffi::OsString {
+    let mut lock = path.as_os_str().to_os_string();
+    lock.push(".lock");
+    lock
 }
 
 /// A path git printed, byte for byte where the platform allows.
@@ -240,6 +293,7 @@ mod tests {
         let moved = "export function f() {\n  return 1;\n}\n// one\n// two\n";
         repo.write("src/old.ts", moved);
         repo.write("src/sparse.ts", "export const p = 1;\n");
+        repo.write("src/assumed.ts", "export const u = 1;\n");
         repo.commit("base");
 
         // Unstaged edit.
@@ -258,6 +312,8 @@ mod tests {
         // Changed on disk, but git does not look at it.
         repo.git(&["update-index", "--skip-worktree", "src/sparse.ts"]);
         repo.write("src/sparse.ts", "export const p = 2;\n");
+        repo.git(&["update-index", "--assume-unchanged", "src/assumed.ts"]);
+        repo.write("src/assumed.ts", "export const u = 2;\n");
 
         let snapshot = snapshot(&repo);
         let Changes { changed, deleted } = repository(&repo)
@@ -335,7 +391,129 @@ mod tests {
         repo.write("src/a.ts", "export const a = 2;\n");
         repo.write("src/b.ts", "export const b = 1;\n");
 
-        assert_eq!(snapshot(&repo), snapshot(&repo));
+        let first = snapshot(&repo);
+        assert_eq!(snapshot(&repo), first);
+        // The same id on any day: the date is fixed, not just the same second.
+        let commit = repo.git(&["cat-file", "commit", &first]);
+        assert!(
+            commit.contains("\nauthor qgate <qgate@localhost> 0 +0000\n"),
+            "{commit}"
+        );
+        assert!(
+            commit.contains("\ncommitter qgate <qgate@localhost> 0 +0000\n"),
+            "{commit}"
+        );
+    }
+
+    #[test]
+    fn snapshot_in_a_linked_worktree() {
+        let repo = TestRepo::new();
+        repo.write("src/a.ts", "export const a = 1;\n");
+        repo.commit("base");
+        let linked = crate::test_support::scratch_dir("linked");
+        std::fs::remove_dir(&linked).expect("an empty directory to replace");
+        repo.git(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            linked.to_str().expect("UTF-8"),
+        ]);
+        std::fs::write(linked.join("src/a.ts"), "export const a = 2;\n").expect("edit");
+        std::fs::write(linked.join("b.ts"), "export const b = 1;\n").expect("add");
+
+        let in_linked = Repository::discover(&linked).expect("a repository");
+        let taken = in_linked.worktree_snapshot().expect("a snapshot");
+        let paths: Vec<String> = in_linked
+            .changed_files("HEAD", &taken)
+            .expect("changes")
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+
+        assert_eq!(paths, vec!["b.ts", "src/a.ts"]);
+        // The main work tree's snapshot does not see the linked one's edits.
+        assert_eq!(
+            repository(&repo)
+                .changed_files("HEAD", &snapshot(&repo))
+                .expect("changes"),
+            vec![]
+        );
+        repo.git(&[
+            "worktree",
+            "remove",
+            "--force",
+            linked.to_str().expect("UTF-8"),
+        ]);
+    }
+
+    #[test]
+    fn snapshot_without_an_index_starts_from_head() {
+        let repo = TestRepo::new();
+        repo.write("src/a.ts", "export const a = 1;\n");
+        repo.write("src/b.ts", "export const b = 1;\n");
+        repo.commit("base");
+        std::fs::remove_file(repo.dir.join(".git/index")).expect("remove the index");
+        repo.write("src/b.ts", "export const b = 2;\n");
+
+        let snapshot = snapshot(&repo);
+        let paths: Vec<String> = repository(&repo)
+            .changed_files("HEAD", &snapshot)
+            .expect("changes")
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+
+        assert_eq!(paths, vec!["src/b.ts"]);
+        assert!(
+            !repo.dir.join(".git/index").exists(),
+            "an index was created"
+        );
+    }
+
+    #[test]
+    fn snapshot_with_a_split_index_leaves_no_shared_index() {
+        let repo = TestRepo::new();
+        repo.git(&["config", "core.splitIndex", "true"]);
+        for i in 0..20 {
+            repo.write(&format!("src/f{i}.ts"), format!("export const f = {i};\n"));
+        }
+        repo.commit("base");
+        // More than splitIndex.maxPercentChange (20%) of the entries change.
+        for i in 0..15 {
+            repo.write(&format!("src/f{i}.ts"), format!("export const f = -{i};\n"));
+        }
+        for i in 0..10 {
+            repo.write(&format!("src/n{i}.ts"), format!("export const n = {i};\n"));
+        }
+        let shared = || {
+            let mut names: Vec<String> = std::fs::read_dir(repo.dir.join(".git"))
+                .expect("the git directory")
+                .map(|e| {
+                    e.expect("an entry")
+                        .file_name()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .filter(|name| name.starts_with("sharedindex."))
+                .collect();
+            names.sort();
+            names
+        };
+        let before = shared();
+        assert!(!before.is_empty(), "the repository has no split index");
+
+        let snapshot = snapshot(&repo);
+
+        assert_eq!(shared(), before);
+        assert_eq!(
+            repository(&repo)
+                .changed_files("HEAD", &snapshot)
+                .expect("changes")
+                .len(),
+            25
+        );
     }
 
     #[test]

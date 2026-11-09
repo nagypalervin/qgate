@@ -369,10 +369,11 @@ pub enum GitError {
         /// The revision as the caller gave it.
         revision: String,
     },
-    /// Git could not read the working tree into a snapshot, for example
-    /// because a file that is not ignored cannot be read.
+    /// No snapshot of the working tree could be taken: most often a file
+    /// that is not ignored cannot be read, but also a failed copy of the
+    /// index or a `git add` that cannot write objects.
     WorkTree {
-        /// What went wrong, with git's own message.
+        /// What went wrong, with git's own message where there is one.
         detail: String,
     },
     /// Any other failure of a git command.
@@ -405,7 +406,9 @@ impl fmt::Display for GitError {
                     args.join(" ")
                 )
             }
-            Self::WorkTree { detail } => write!(f, "cannot read the working tree: {detail}"),
+            Self::WorkTree { detail } => {
+                write!(f, "cannot take a snapshot of the working tree: {detail}")
+            }
             Self::Command {
                 args,
                 status,

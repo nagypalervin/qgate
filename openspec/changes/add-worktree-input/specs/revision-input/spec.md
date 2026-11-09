@@ -3,11 +3,11 @@
 ### Requirement: Working tree as head
 
 With `--worktree`, the system SHALL use the working tree as the head
-revision: every file with the contents it has on disk, staged or not, plus
-the untracked files that git's ignore rules do not exclude. A tracked file
-missing from disk SHALL count as deleted. Files the index marks
-`skip-worktree` or `assume-unchanged` SHALL count as unchanged, as git
-status shows them. The before side SHALL be the merge base of `--base` and
+revision: every file as git would stage it from disk (after filters such as
+line-ending conversion), staged or not, plus the untracked files that git's
+ignore rules do not exclude. A tracked file missing from disk SHALL count as
+deleted; files the index marks `skip-worktree` or `assume-unchanged` SHALL
+count as unchanged. The before side SHALL be the merge base of `--base` and
 `HEAD`.
 
 #### Scenario: Uncommitted edit
@@ -59,6 +59,12 @@ status shows them. The before side SHALL be the merge base of `--base` and
 - **WHEN** the user runs `qgate check --base main --worktree`
 - **THEN** no finding is reported for `src/legacy.ts`
 
+#### Scenario: Files git does not look at
+
+- **GIVEN** `src/a.ts` is marked `assume-unchanged` in the index, and `f` in it was made more complex on disk
+- **WHEN** the user runs `qgate check --base main --worktree`
+- **THEN** no finding is reported for `src/a.ts`
+
 ### Requirement: The working tree replaces the head everywhere
 
 With `--worktree`, everything this and the other capabilities say about the
@@ -87,9 +93,11 @@ against.
 ### Requirement: Checking the working tree changes nothing
 
 A check with `--worktree` SHALL NOT change the index (what is staged), `HEAD`,
-branches or other refs, the stash, the reflog or any file in the working
-tree, and SHALL NOT leave a file behind in the repository, apart from
-objects in git's object store that no ref reaches. It SHALL NOT run git hooks.
+refs, the stash, the reflog or any file in the working tree. It SHALL leave
+nothing behind but storage for the snapshot's contents: objects no ref
+reaches and, under a clean filter such as Git LFS, that filter's store. It
+SHALL NOT run git hooks, apart from a configured file-system monitor that
+git asks which files changed.
 
 #### Scenario: Staged changes stay staged
 
@@ -109,13 +117,20 @@ objects in git's object store that no ref reaches. It SHALL NOT run git hooks.
 - **WHEN** the user runs `qgate check --base main --worktree`
 - **THEN** neither file exists after the check
 
+#### Scenario: Split index
+
+- **GIVEN** the repository uses `core.splitIndex`, and most tracked files changed on disk
+- **WHEN** the user runs `qgate check --base main --worktree`
+- **THEN** the git directory holds the same `sharedindex.*` files as before the check
+
 ### Requirement: Working tree errors
 
 With `--worktree`, besides the errors of "Git errors", the system SHALL
 report on standard error, print nothing to standard output and exit with
-code 2 when `HEAD` names no commit, or when git cannot read the working
-tree. Error messages SHALL name the head as `HEAD` or the working tree,
-never by an internal id.
+code 2 when `HEAD` names no commit, or when no snapshot of the working tree
+can be taken. Messages about an unknown `HEAD`, a missing merge base or a
+`qgate.toml` that is not a regular file SHALL name the head as `HEAD` or
+the working tree, never by an internal id.
 
 #### Scenario: Repository without commits
 
@@ -126,11 +141,26 @@ never by an internal id.
 - **AND** standard output is empty
 - **AND** the exit code is 2
 
+#### Scenario: Base HEAD in a repository without commits
+
+- **GIVEN** a repository that has no commit yet and an untracked `src/a.ts`
+- **WHEN** the user runs `qgate check --base HEAD --worktree`
+- **THEN** standard error names `HEAD` as an unknown revision
+- **AND** it does not suggest fetching the base
+- **AND** the exit code is 2
+
+#### Scenario: qgate.toml is not a regular file on disk
+
+- **GIVEN** `qgate.toml` is a regular file in `HEAD`, and a directory on disk
+- **WHEN** the user runs `qgate check --base main --worktree`
+- **THEN** standard error says that `qgate.toml` is not a regular file in the working tree
+- **AND** the exit code is 2
+
 #### Scenario: Unreadable file in the working tree
 
 - **GIVEN** an untracked, not ignored `src/secret.ts` that the user cannot read
 - **WHEN** the user runs `qgate check --base main --worktree`
-- **THEN** standard error says that the working tree could not be read, with git's message naming `src/secret.ts`
+- **THEN** standard error says that no snapshot of the working tree could be taken, with git's message naming `src/secret.ts`
 - **AND** standard output is empty
 - **AND** the exit code is 2
 
