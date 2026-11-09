@@ -121,6 +121,18 @@ other files and exit with code 0.
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** the output contains `warning src/a.ts  file not analyzed: not valid UTF-8  [input/unparsable]`
 
+#### Scenario: Base version not valid UTF-8
+
+- **GIVEN** the merge-base version of `src/a.ts` is not valid UTF-8 and the head version is valid
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** the output contains `warning src/a.ts  file not analyzed: the base version is not valid UTF-8  [input/unparsable]`
+
+#### Scenario: Both versions broken
+
+- **GIVEN** both versions of `src/a.ts` have syntax errors, the head version first on line 7
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** the only finding for `src/a.ts` is the `input/unparsable` finding for line 7 of the head version
+
 ### Requirement: Git errors
 
 The system SHALL report the following as an error on standard error, print
@@ -133,6 +145,13 @@ commit, or the two revisions have no merge base.
 - **WHEN** the user runs `qgate check --base no-such-branch`
 - **THEN** standard error names `no-such-branch` as an unknown revision
 - **AND** it suggests fetching the base, for example with `fetch-depth: 0` in GitHub Actions
+- **AND** the exit code is 2
+
+#### Scenario: Unknown head revision
+
+- **WHEN** the user runs `qgate check --base main --head no-such-branch`
+- **THEN** standard error names `no-such-branch` as an unknown revision
+- **AND** it does not suggest fetching the base
 - **AND** the exit code is 2
 
 #### Scenario: Not a repository

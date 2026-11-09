@@ -273,3 +273,61 @@ The reviewer subagent found one blocker and several real gaps. Decisions:
 - Not changed: "`git` cannot be run" has no crate-level test, because the
   `PATH` of the code under test cannot be changed without `unsafe`
   `set_var`; the CLI tests in PR 2 can run the binary with an empty `PATH`.
+
+#### PR 2: `qgate check --base`
+
+- **2.1:** `check` keeps one subcommand with an overridden usage that shows
+  both forms; clap enforces `--base` vs the files and `--head` needing
+  `--base`, and "neither form" is a clap `MissingRequiredArgument` error
+  built from the same subcommand, so it prints the same usage. `--head` has
+  no clap default (a default would trip `requires`); the code falls back to
+  `HEAD`.
+- **2.2:** the CLI tests repeat the small temporary-repository helper of
+  `qgate-git` (an integration test cannot use another crate's
+  `#[cfg(test)]` code), including the isolation from repository variables
+  and config; the qgate binary inherits it, so the git it starts is
+  isolated too. "git cannot be run" is tested by running the binary with an
+  empty `PATH`.
+- **2.3:** the before side is parsed with the language of the old path,
+  so a `.ts` -> `.tsx` rename parses each side with its own grammar; a
+  base version that is not valid UTF-8 gets its own message
+  (`the base version is not valid UTF-8`). A `ParseError::Parser` (not
+  caused by the input) stays an error for the whole run, as in the two-file
+  mode. The head is checked before the base, so a file broken on both sides
+  is reported with the head's line.
+- **2.3:** the shared sort `(path, line, rule)` replaces the two-file
+  `(line, rule)` sort; the path is constant there, so its output is
+  unchanged. Two mutations were checked: parsing a `.js` rename as
+  TypeScript and dropping the path from the sort each fail a test.
+- **2.3:** `qgate-cli` depends on `qgate-core` again (for the
+  `input/unparsable` finding), after PR 3 of the previous change had dropped
+  it as unused.
+- **2.4:** the README commands were run as written with the built binary
+  on the `PATH`: `qgate check --base main` (with and without `--head`) in a
+  temporary repository, the CI line against a full clone (`origin/main`),
+  and a `--depth 1` clone, which fails with the shallow-clone hint. The CI
+  snippet itself is YAML-checked only; qgate has no release binary to
+  install in a workflow yet (M3), which the README says.
+
+#### Changes after the PR 2 review (2026-11-09)
+
+- **Sort order (asked, human chose git's order):** paths now compare as
+  byte strings, as `git diff` and `sort` order them (`src-x.ts` before
+  `src/a.ts`), instead of component-wise `PathBuf` order. Spec "Deterministic
+  output order" says so, with a scenario and a test.
+- **Base side not valid UTF-8, and both sides broken:** behaviour existed
+  but was untested and only in these notes; both now have spec scenarios and
+  end-to-end tests.
+- **Shallow-clone hint** only for an unknown `--base` that does not start
+  with `-`: an unknown `--head` or an option-like value was sent the wrong
+  way. Spec scenario "Unknown head revision" added.
+- **README:** install step (`cargo install --locked --path
+  crates/qgate-cli`, verified into a scratch `--root`), the complete list of
+  exit-code-2 cases, and the CI snippet marked as `on: pull_request` with
+  the base ref passed through `env:` (GitHub's hardening advice) and run
+  against a full clone.
+- **Test isolation** now also clears `GIT_TEMPLATE_DIR`, so a developer's
+  template hooks are not copied into test repositories.
+- The reason for the `qgate-core` and `qgate-git` dependencies of
+  `qgate-cli`, missing from commit aab1748, is given in the review-fix
+  commit message.

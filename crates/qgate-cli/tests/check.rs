@@ -213,6 +213,40 @@ fn one_argument() {
 }
 
 #[test]
+fn no_arguments() {
+    let out = qgate(&["check"]);
+    assert!(stderr(&out).contains("Usage"), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn files_and_revisions_together() {
+    let out = qgate(&["check", "same.ts", "same.ts", "--base", "main"]);
+    assert!(stderr(&out).contains("--base"), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "");
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn head_without_base() {
+    let out = qgate(&["check", "--head", "feature"]);
+    assert!(stderr(&out).contains("--base"), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "");
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn help_shows_both_forms() {
+    let out = qgate(&["check", "--help"]);
+    assert!(
+        stdout(&out).contains("qgate check <before> <after>"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(stdout(&out).contains("qgate check --base <rev> [--head <rev>]"));
+}
+
+#[test]
 fn three_arguments() {
     let out = qgate(&["check", "same.ts", "same.ts", "same.ts"]);
     assert!(stderr(&out).contains("Usage"), "{}", stderr(&out));
