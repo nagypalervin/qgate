@@ -11,7 +11,7 @@
 ## Try it
 
 Install it from a clone of this repository (release binaries come with
-M3):
+M4):
 
 ```sh
 cargo install --locked --path crates/qgate-cli
@@ -171,7 +171,7 @@ The job fails when the pull request adds an Error finding. Use
 `--fail-on warning` for a stricter gate, or `--fail-on never` to report
 without failing the job.
 
-qgate has no release binaries yet (planned for M3); until then, install
+qgate has no release binaries yet (planned for M4); until then, install
 it with `cargo install` as above.
 
 ## Why
@@ -218,8 +218,8 @@ Design principles:
 |---|---|---|
 | **M1** | `qgate check`, TypeScript parsing, complexity delta, git revisions, `--fail-on` | done |
 | **M2** | Architecture rules (`qgate.toml`), duplication detection | done |
-| **M3** | Release binaries, GitHub Action, SARIF output, pull request comments | planned |
-| **M4** | MCP server: AI coding agents check their own changes before opening a pull request | planned |
+| **M3** | Checking while coding: the working tree as head, JSON output, hooks for AI coding agents and git, an MCP server, so agents check their own changes before opening a pull request | planned |
+| **M4** | CI integration: release binaries, GitHub Action, Azure DevOps Pipelines, pull request comments, SARIF output | planned |
 | **M5** | Change risk from git history: hotspots (code that is both complex and changed often), code changed without its tests | planned |
 | **M6** | Baseline and trends over time, optional AI summary | planned |
 
