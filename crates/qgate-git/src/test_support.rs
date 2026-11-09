@@ -1,41 +1,82 @@
 //! Throwaway git repositories for tests (design D5).
 //!
-//! Every git command the helper runs is isolated from the developer's own
-//! configuration and uses fixed identities and dates, so results do not
-//! depend on the machine.
+//! Every git command, the helper's and the code under test's (through
+//! [`isolate`]), runs isolated from the developer's configuration and
+//! repository variables; commits use fixed identities and dates, so results
+//! do not depend on the machine.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+/// Variables that point git at another repository or inject configuration.
+/// Git sets several of them for hooks, so `cargo test` run from a hook
+/// would otherwise write into the outer repository.
+const REPOSITORY_VARIABLES: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+];
+
+/// Isolate a git command from the developer's environment: no repository
+/// variables, an empty global config, no system config, and no repository
+/// discovery above the temp directory.
+pub(crate) fn isolate(command: &mut Command) {
+    for variable in REPOSITORY_VARIABLES {
+        command.env_remove(variable);
+    }
+    command
+        .env("GIT_CONFIG_GLOBAL", empty_config())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CEILING_DIRECTORIES", canonical(&std::env::temp_dir()));
+}
+
+/// An empty file to use as global git config, shared by all tests.
+fn empty_config() -> &'static Path {
+    static CONFIG: OnceLock<PathBuf> = OnceLock::new();
+    CONFIG.get_or_init(|| {
+        let path =
+            std::env::temp_dir().join(format!("qgate-git-empty-{}.gitconfig", std::process::id()));
+        std::fs::write(&path, "").expect("write empty git config");
+        path
+    })
+}
 
 /// A repository in a fresh temporary directory, removed on drop.
 pub(crate) struct TestRepo {
     /// The work tree.
     pub(crate) dir: PathBuf,
-    /// An empty file used as global git config.
-    config: PathBuf,
 }
 
 impl TestRepo {
     /// `git init` on branch `main` in a new temporary directory.
     pub(crate) fn new() -> Self {
-        let dir = scratch_dir("repo");
-        let config = dir.with_extension("gitconfig");
-        std::fs::write(&config, "").expect("write empty git config");
-        let repo = Self { dir, config };
+        let repo = Self {
+            dir: scratch_dir("repo"),
+        };
         repo.git(&["init", "-q", "-b", "main"]);
         repo
     }
 
     /// Run git in the work tree; panics on failure; returns stdout.
     pub(crate) fn git(&self, args: &[&str]) -> String {
-        let out = Command::new("git")
+        let mut command = Command::new("git");
+        isolate(&mut command);
+        let out = command
             .args(args)
             .current_dir(&self.dir)
-            .env("GIT_CONFIG_GLOBAL", &self.config)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_AUTHOR_NAME", "Test")
             .env("GIT_AUTHOR_EMAIL", "test@example.com")
             .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
@@ -72,7 +113,6 @@ impl TestRepo {
 impl Drop for TestRepo {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
-        let _ = std::fs::remove_file(&self.config);
     }
 }
 

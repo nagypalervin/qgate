@@ -21,9 +21,12 @@ decided.
 - Put all git access in a new **`qgate-git`** crate. It depends on nothing
   in the workspace, returns plain data (paths, blob ids, bytes) and errors,
   and never prints. Dependency direction: `cli -> git`.
-- Pass user-supplied revisions only to `git rev-parse --verify
-  --end-of-options`; every later command receives full commit ids, so a
-  revision can never act as an option.
+- Reject user-supplied revisions that start with `-` (no ref name or
+  revision syntax does), pass the rest only to `git rev-parse --verify`,
+  and give every later command full commit ids, so a revision can never
+  act as an option.
+- Run every git command at the top level of the work tree, so settings
+  such as `diff.relative` cannot narrow what qgate sees.
 
 ## Reasons
 
@@ -40,8 +43,11 @@ decided.
 
 ## Consequences
 
-- Revision mode and its tests need `git` on the `PATH` (2.24 or newer for
-  `--end-of-options`).
+- Revision mode and its tests need `git` on the `PATH`. No recent git
+  feature is required; the tests use `git init -b`, which needs git 2.28.
+  (`--end-of-options` was considered and dropped: `rev-parse` only accepts
+  it from git 2.30, and older versions would then report every revision as
+  unknown.)
 - One process per git call. Fine for pull-request-sized changes.
 - Revisit when per-call process cost matters, for example an MCP server
   (M5) answering many small queries: first move blob reads to one long-lived

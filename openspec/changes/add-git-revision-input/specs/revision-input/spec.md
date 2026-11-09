@@ -48,14 +48,21 @@ the repository count, regardless of the current directory.
 
 ### Requirement: Added files
 
-An added file SHALL be compared against an empty before version, so that
-every function in it counts as new.
+An added file, and a regular file that replaced a symbolic link or a
+submodule at the same path, SHALL be compared against an empty before
+version, so that every function in it counts as new.
 
 #### Scenario: New file with a complex function
 
 - **GIVEN** the head adds `src/new.ts` with one function of complexity 12 and one of complexity 3
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** one `complexity/cyclomatic-new` Warning is reported, for the function of complexity 12
+
+#### Scenario: Symbolic link replaced by a file
+
+- **GIVEN** `src/link.ts` was a symbolic link on `main`, and the head replaces it with a regular file containing a function of complexity 12
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** one `complexity/cyclomatic-new` Warning is reported for `src/link.ts`
 
 ### Requirement: Renamed files
 
@@ -77,8 +84,9 @@ supported extension, the file SHALL be treated as added.
 
 ### Requirement: Skipped changes
 
-The system SHALL skip deleted files, symbolic links, submodules and changes
-of file type without a finding or a message.
+The system SHALL skip deleted files, symbolic links, submodules and
+regular files that became a symbolic link or a submodule, without a finding
+or a message.
 
 #### Scenario: Deleted file
 

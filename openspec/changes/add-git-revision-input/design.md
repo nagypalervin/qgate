@@ -19,8 +19,8 @@ Current state that shapes the approach:
   errors and never print; dependency direction `cli -> report, analyzers ->
   lang -> core`; a structural change needs an ADR; few transitive
   dependencies.
-- `git` 2.43 locally, recent git on GitHub runners. `--end-of-options` needs
-  git 2.24 or newer (2019).
+- `git` 2.43 locally, recent git on GitHub runners. No recent git feature
+  is required at run time (see the PR 1 review notes).
 
 ## Goals / Non-Goals
 
@@ -103,8 +103,8 @@ then read images and lock files only to throw them away.
 
 | Step | Command | Why |
 |---|---|---|
-| repository | `git -C <dir> rev-parse --show-toplevel` | failure = not a repository |
-| resolve | `git rev-parse --verify --quiet --end-of-options <rev>^{commit}` | revisions can never become options; result is a full commit id |
+| repository | `git rev-parse --show-cdup --show-toplevel` (in `<dir>`) | failure = not a repository; later commands run in `<dir>/<cdup>` |
+| resolve | reject `<rev>` starting with `-`, then `git rev-parse --verify --quiet <rev>^{commit}` | revisions can never become options; result is a full commit id |
 | merge base | `git merge-base <base-id> <head-id>` | exit 1 with no output = no merge base |
 | diff | `git diff --raw -z -M --no-ext-diff --no-textconv <mb-id> <head-id>` | NUL-separated, modes and blob ids included, renames detected |
 | read | `git cat-file blob <blob-id>` | raw bytes, no textconv, no path round-trip |
@@ -174,9 +174,9 @@ then read images and lock files only to throw them away.
 
 ## Risks / Trade-offs
 
-- [git missing or too old (no `--end-of-options` before 2.24)] →
-  `GitNotFound` has its own error message; an old git fails `rev-parse`, and
-  the error message shows git's stderr. Not worth a version probe.
+- [git missing] → `GitNotFound` has its own error message. No feature
+  newer than long-standing `rev-parse`, `merge-base`, `diff --raw` and
+  `cat-file` is used, so no version probe is needed.
 - [Shallow CI clones make the base unknown] → the error message says how to
   fix it; the README shows `fetch-depth: 0`.
 - [One process per blob is slow on very large changes] → fine for pull
@@ -185,9 +185,10 @@ then read images and lock files only to throw them away.
   limitation (proposal); `-M` keeps git's default threshold, so qgate agrees
   with what `git diff` shows the user.
 - [User git config could change diff output] → `--raw -z` output is not
-  affected by color, pager, external diff, textconv or `diff.noprefix`, and
-  `-M` overrides `diff.renames`. Tests isolate themselves from user config
-  (D5).
+  affected by color, pager, external diff, textconv or `diff.noprefix`;
+  `-M` overrides `diff.renames`; running at the top level neutralizes
+  `diff.relative` (which the first version missed, see the PR 1 review
+  notes). In tests the code under test is isolated as well (D5).
 - [Error detection by exit code, not by parsing localized messages] →
   `rev-parse --verify --quiet` and `merge-base` signal by exit code; other
   failures surface git's stderr verbatim in `GitError::Command`.
@@ -206,12 +207,15 @@ sort key gaining the path, which is constant in that mode.
 - **1.3:** git commands run in the directory the repository was discovered
   from, not in `root`: git finds the repository itself, and a top-level
   path that is not valid UTF-8 never has to round-trip through a `String`.
+  *Superseded at the PR 1 review:* this let `diff.relative` narrow the diff.
 - **1.3:** the option-like-revision test also passes without
   `--end-of-options` (checked by removing it): the appended `^{commit}` and
   `--verify` already keep `rev-parse` from reading the value as an option,
   and ref names cannot start with `-`. `--end-of-options` stays as defense
   in depth; the test pins the observable outcome (unknown revision, no file
   written).
+  *Superseded at the PR 1 review:* `--end-of-options` was replaced by
+  rejecting revisions that start with `-`.
 - **1.3:** the test helper lives in `src/test_support.rs` (`#[cfg(test)]`),
   so the later `changed_files` and `read_blob` tests share it.
 - **1.4:** the diff also passes `--no-abbrev`, missing from the D3 table:
@@ -227,3 +231,45 @@ sort key gaining the path, which is constant in that mode.
 - **1.6:** the crate example is a `no_run` doctest rather than a plain
   code block: it cannot create a repository, but it is still compiled, so
   the documented API cannot drift.
+
+#### Changes after the PR 1 review (2026-11-09)
+
+The reviewer subagent found one blocker and several real gaps. Decisions:
+
+- **`diff.relative` (blocker):** with `diff.relative=true` (git 2.28+) and a
+  run from a subdirectory, `git diff` listed only that subdirectory, with
+  paths relative to it. Commands now run at the top level, reached as the
+  discovery directory plus `rev-parse --show-cdup` (only `../` parts, so no
+  lossy path round-trip). A test sets `diff.relative` in the repository's
+  own config and runs from a subdirectory.
+- **Git version and revisions as options:** `rev-parse` accepts
+  `--end-of-options` only from git 2.30 (not 2.24 as written), and on older
+  git every revision would have been "unknown". Revisions starting with `-`
+  (or empty) are now rejected by qgate itself; no ref name or revision
+  syntax starts with `-`. `--end-of-options` is dropped; ADR 0002 updated.
+  No option injection was ever shown: probing `--default=HEAD`, `--glob=*`,
+  `--all`, `--since=...` and others with the `^{commit}` suffix all failed
+  to resolve. The test now checks four option-like values for base and head
+  and that the work tree gains no entries; like before, it cannot fail on
+  current git even without the guard, which stays as explicit defense.
+- **Test isolation:** the fixtures did not clear `GIT_DIR`,
+  `GIT_INDEX_FILE` and similar variables (set by git for hooks), and the code
+  under test used the developer's own config. `test_support::isolate` now
+  clears repository variables, uses an empty global config, no system config
+  and `GIT_CEILING_DIRECTORIES` = temp dir, for the fixtures and, through a
+  `#[cfg(test)]` hook in `run`, for the code under test. Verified by running
+  the tests with `GIT_INDEX_FILE` and `GIT_DIR` set: nothing is written
+  outside the temporary repositories.
+- **Missing directory:** spawning in a directory that does not exist also
+  fails with `NotFound`; it is now `NotARepository`, not "git is not
+  installed".
+- **Parser errors** have their own `GitError::UnexpectedOutput` instead of
+  a `Command` error that read "failed with 0".
+- **Type change to a regular file (asked, human chose "treat as added"):**
+  a regular file that replaced a symlink or submodule is analyzed as added;
+  spec "Added files" and "Skipped changes" updated, with a scenario.
+- **Reviewer prompt (asked, human approved):** `.claude/agents/reviewer.md`
+  now states the `cli -> git` dependency edge.
+- Not changed: "`git` cannot be run" has no crate-level test, because the
+  `PATH` of the code under test cannot be changed without `unsafe`
+  `set_var`; the CLI tests in PR 2 can run the binary with an empty `PATH`.
