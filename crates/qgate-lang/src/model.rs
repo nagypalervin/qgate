@@ -27,8 +27,9 @@ pub struct Function {
 /// Why a source file could not be turned into a [`FileModel`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
-    /// The source contains a syntax error. Counting a partially parsed
-    /// file could silently distort the results, so it is refused.
+    /// The source contains a syntax error, or syntax newer than the
+    /// grammar supports. Counting a partially parsed file could silently
+    /// distort the results, so it is refused.
     Syntax {
         /// 1-based line of the first syntax error.
         line: u32,
@@ -44,7 +45,13 @@ pub enum ParseError {
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Syntax { line } => write!(f, "syntax error on line {line}"),
+            // The grammar can lag behind the language, so valid code with
+            // very new syntax lands here too; the message must not claim
+            // the user's code is certainly wrong.
+            Self::Syntax { line } => write!(
+                f,
+                "syntax error on line {line} (or syntax the parser does not support yet)"
+            ),
             Self::Parser { message } => write!(f, "parser failure: {message}"),
         }
     }

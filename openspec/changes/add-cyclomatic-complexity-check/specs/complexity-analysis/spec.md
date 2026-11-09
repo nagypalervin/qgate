@@ -69,6 +69,11 @@ getter and setter that has a body, and every object literal method.
 - **WHEN** a class has a constructor, a method, a getter and a setter
 - **THEN** each of the four is measured separately
 
+#### Scenario: Generators
+
+- **WHEN** the file contains `function* gen(a) { if (a) { yield 1; } }`, `const g = function* () {};` and `class C { *items() {} }`
+- **THEN** the units are `gen` with complexity 2, `g` and `C.items`
+
 ### Requirement: Named nested functions are separate units
 
 A named function inside another function SHALL be measured on its own, and
@@ -105,12 +110,25 @@ named ancestor.
 - **WHEN** the file is analyzed
 - **THEN** no function unit is found
 
+#### Scenario: Class field initializer and static block
+
+- **GIVEN** `function make() { return class { n = a ?? 0; static { if (b) {} } }; }`
+- **WHEN** the file is analyzed
+- **THEN** `make` has complexity 1
+
+#### Scenario: Function wrapped in a call at module level
+
+- **GIVEN** a file whose only code is `export const GET = withAuth(async (req) => { if (a) {} });`
+- **WHEN** the file is analyzed
+- **THEN** no function unit is found
+
 ### Requirement: Qualified function names
 
 Each function unit SHALL have a qualified name made of the names of its
-named ancestors and its own name, joined by `.`. A function is named by its
-declaration, by the variable, class field or object property it is assigned
-to in its definition, or as `default` when it is an unnamed default export.
+named ancestors and its own name, joined by `.`. A function, class or
+object literal is named by the variable, class field or object property it
+is assigned to in its definition, otherwise by its own declared name, or as
+`default` when it is an unnamed default export.
 
 #### Scenario: Names in a class and an object
 
@@ -123,17 +141,71 @@ to in its definition, or as `default` when it is an unnamed default export.
 - **WHEN** the file contains `export default function () { if (a) {} }`
 - **THEN** the unit is named `default`
 
+#### Scenario: Unnamed default-exported object and class
+
+- **WHEN** one file contains `export default { load() {} };` and another `export default class { m() {} }`
+- **THEN** the units are named `default.load` and `default.m`
+
+#### Scenario: Named function expression passed as an argument
+
+- **WHEN** the file contains `call(function onDone() { if (a) {} });` inside no other named function
+- **THEN** the unit is named `onDone`
+
+#### Scenario: Binding wins over the own name
+
+- **WHEN** the file contains `const bound = function ownName() {};`
+- **THEN** the unit is named `bound`
+
+### Requirement: Type wrappers do not hide the binding
+
+Parentheses, `as` and `satisfies` expressions and non-null assertions
+between a function, class or object literal and the variable, class field
+or object property it is assigned to SHALL NOT change its name.
+
+#### Scenario: Object with satisfies and as const
+
+- **WHEN** the file contains `const config = { load() {} } satisfies Config;` and `const other = { load() {} } as const;`
+- **THEN** the units are named `config.load` and `other.load`
+
+#### Scenario: Parenthesized arrow function with satisfies
+
+- **WHEN** the file contains `const h = (async () => { if (a) {} }) satisfies Handler;`
+- **THEN** the unit is named `h` with complexity 2
+
 ### Requirement: Duplicate names
 
 When several units in one file would get the same qualified name, the
 system SHALL keep the first one in source order as is and suffix the later
-ones with `#2`, `#3` and so on.
+ones with `#2`, `#3` and so on, skipping any suffixed name that is already
+taken. The suffix is part of the unit's name for its nested units.
 
 #### Scenario: Static and instance method with the same name
 
 - **GIVEN** a class `A` with `static create() {}` followed by `create() {}`
 - **WHEN** the file is analyzed
 - **THEN** the units are named `A.create` and `A.create#2`
+
+#### Scenario: Suffix already taken
+
+- **WHEN** the file contains `const o = { "x#2"() {}, x() {}, x() {} };`
+- **THEN** the units are named `o.x#2`, `o.x` and `o.x#3`
+
+#### Scenario: Nested units of a duplicate
+
+- **GIVEN** `class A { static f() { function g() {} } f() { function g() {} } }`
+- **WHEN** the file is analyzed
+- **THEN** the units are named `A.f`, `A.f.g`, `A.f#2` and `A.f#2.g`
+
+### Requirement: Property names
+
+A property name SHALL be used as written in the source, except that the
+quotes around a string key are removed; escape sequences inside it are kept
+as written. Computed names keep their brackets.
+
+#### Scenario: Quoted and computed keys
+
+- **WHEN** the file contains `const o = { "load-data"() {}, 'it\'s'() {}, [key]() {} };`
+- **THEN** the units are named `o.load-data`, `o.it\'s` and `o.[key]`
 
 ### Requirement: Overload signatures are ignored
 

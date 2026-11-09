@@ -223,6 +223,11 @@ either.
 - [A file with a single syntax error cannot be checked at all] → this
   favors correctness over coverage; revisit if it turns out annoying on
   work-in-progress code.
+- [The pinned grammar lags behind TypeScript: valid code with very new
+  syntax (e.g. variance annotations `interface I<in out T>` with grammar
+  0.23) is refused as a syntax error] → the error message says "or syntax
+  the parser does not support yet" instead of claiming the code is wrong;
+  grammar upgrades are the fix, guarded by the fixtures.
 
 ## Migration Plan
 
@@ -257,6 +262,50 @@ Nothing to migrate: no released version, no users. The placeholder
   naming and unit boundaries are one mechanism. The 1.6 naming tests were
   therefore written after the code, not before it; they are still derived
   from the spec scenarios, not from the output.
+- **1.4/1.5:** the decision-point test was written first and observed to
+  fail (empty model) before the walk existed; test and code were committed
+  together so that every commit on the branch builds and passes.
+- **1.2 (build-time dependencies):** besides `cc`, tree-sitter's build
+  script pulls in `serde_json` and its dependencies (`indexmap`,
+  `hashbrown`, `foldhash`, `itoa`, `serde_core`, `zmij`). They run only at
+  build time and do not end up in the binary.
+
+#### Changes after the PR 1 review (2026-11-09)
+
+The reviewer subagent found one real naming bug, untested behaviour and one
+spec ambiguity. Decisions:
+
+- **Type wrappers (asked, human chose "look through"):** parentheses,
+  `as`, `satisfies` and `!` between a definition and its binding no longer
+  hide the name. Before, `const h = (async () => {...}) satisfies H` was not
+  measured at all and `const config = {...} satisfies Config` produced
+  `load` instead of `config.load`. New spec requirement "Type wrappers do not
+  hide the binding".
+- **Functions wrapped in a call at module level (asked, human chose "out of
+  scope"):** `export const GET = withAuth(async () => {...})` stays
+  unmeasured in this change; listed by name in the proposal's Out of scope
+  and pinned by a spec scenario and fixture. A follow-up change handles it.
+- **Third ESLint difference (asked, human approved):** see "ESLint
+  comparison" below. Task 1.8 said to stop and ask; this was done only at
+  the review, after the fact.
+- **Duplicate suffixes are now assigned during the walk**, not after it:
+  a suffix skips names that are already taken (a literal key `"x#2"` no
+  longer collides with a generated `x#2`), and nested units inherit it
+  (`A.f#2.g`, not `A.f.g#2`). Spec "Duplicate names" now says both.
+- **Property names** drop exactly one pair of outer quotes; escapes stay as
+  written (`'it\'s'` gives `it\'s`). Before, all leading and trailing quotes
+  were trimmed. New spec requirement "Property names".
+- **Naming rules made explicit in the spec:** a named function expression
+  passed as an argument is named by its own name; a binding wins over the own
+  name; unnamed default-exported objects and classes give `default.<member>`.
+- **Grammar lag:** see the new entry under Risks; the `ParseError::Syntax`
+  message changed accordingly.
+- **Fixtures (D9 deviation):** D9 planned one fixture per topic. The first
+  three fixtures each cover several topics (`naming.ts` holds most naming
+  rules); the review added single-topic fixtures for generators, wrappers,
+  module-level code, static blocks, default exports, duplicates and property
+  names. Every node kind in `FUNCTION_KINDS` and every decision-point kind
+  now has a fixture.
 
 ### ESLint comparison
 
@@ -283,3 +332,12 @@ which the spec already requires and the 1.5 note above describes:
    own scope ("Class field initializer has a complexity of ..."); qgate does
    not measure them (spec: "Code outside named functions is not measured").
    A field whose value is a function (`handle = () => {}`) is a unit in both.
+
+The human approved this third kind on 2026-11-09, at the PR 1 review.
+
+**Second run** (same versions, after the review) over the fixtures the
+review added: `generators.ts`, `wrappers.ts`, `default_object.ts`,
+`default_class.ts`, `duplicates.ts` and `property_names.ts` match ESLint for
+every unit (ESLint names differ only where qgate adds a prefix or a
+duplicate suffix). `module_level.ts` and `static_block.ts` show only the
+expected kinds 2 and 3.

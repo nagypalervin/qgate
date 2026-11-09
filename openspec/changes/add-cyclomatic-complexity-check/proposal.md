@@ -61,6 +61,11 @@ crates their first real shape before more analyzers depend on it.
   `complexity/cyclomatic-new`.
 - Module-level code (statements outside any function), including anonymous
   callbacks with no named ancestor, such as `describe`/`it` blocks in tests.
+- Functions wrapped in a call at module level, such as
+  `export const GET = withAuth(async (req) => {...})` or
+  `export const Button = memo(() => {...})`. They have no named ancestor, so
+  they are not measured. Common in Next.js and React code; decided at PR 1
+  review (2026-11-09) to handle them in a separate follow-up change.
 - Cognitive complexity.
 - Languages other than TypeScript.
 

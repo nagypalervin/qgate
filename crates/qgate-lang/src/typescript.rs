@@ -5,7 +5,7 @@
 //! `add-cyclomatic-complexity-check` change). What counts as a decision
 //! point follows the `complexity` rule of `ESLint`.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 use tree_sitter::{Node, Parser};
 
@@ -71,6 +71,15 @@ const TYPE_KINDS: &[&str] = &[
     "conditional_type",
 ];
 
+/// Expressions that wrap a value without changing what it is bound to:
+/// `(f)`, `f as T`, `f satisfies T`, `f!`.
+const WRAPPER_KINDS: &[&str] = &[
+    "parenthesized_expression",
+    "as_expression",
+    "satisfies_expression",
+    "non_null_expression",
+];
+
 /// Decision points that count once per node, whatever their content.
 const DECISION_KINDS: &[&str] = &[
     "if_statement",
@@ -103,6 +112,8 @@ struct Walker<'s> {
     scopes: Vec<Option<usize>>,
     /// Units in source order (by start position).
     functions: Vec<Function>,
+    /// Qualified names already given to a unit.
+    taken: HashSet<String>,
 }
 
 impl<'s> Walker<'s> {
@@ -112,6 +123,7 @@ impl<'s> Walker<'s> {
             segments: Vec::new(),
             scopes: Vec::new(),
             functions: Vec::new(),
+            taken: HashSet::new(),
         }
     }
 
@@ -148,9 +160,12 @@ impl<'s> Walker<'s> {
             // Anonymous functions open nothing: their decision points go to
             // the enclosing unit.
             if let Some((name, line)) = self.name_of(node) {
-                self.segments.push(name);
+                let segment = self.unique_segment(&name);
+                self.segments.push(segment);
+                let qualified = self.segments.join(".");
+                self.taken.insert(qualified.clone());
                 self.functions.push(Function {
-                    name: self.segments.join("."),
+                    name: qualified,
                     line,
                     cyclomatic: 1,
                 });
@@ -172,6 +187,24 @@ impl<'s> Walker<'s> {
             }
         }
         frame
+    }
+
+    /// `name`, or `name#2`, `name#3`, ... if the qualified name it would
+    /// produce is already taken. Nested units inherit the suffix because it
+    /// is part of the segment.
+    fn unique_segment(&self, name: &str) -> String {
+        let qualify = |segment: &str| {
+            let mut parts = self.segments.clone();
+            parts.push(segment.to_owned());
+            parts.join(".")
+        };
+        let mut segment = name.to_owned();
+        let mut n = 2;
+        while self.taken.contains(&qualify(&segment)) {
+            segment = format!("{name}#{n}");
+            n += 1;
+        }
+        segment
     }
 
     fn leave(&mut self, frame: &Frame) {
@@ -215,12 +248,19 @@ impl<'s> Walker<'s> {
     }
 
     /// Name from the variable, class field or object property the node is
-    /// the value of, or `default` for an unnamed default export.
+    /// the value of, or `default` for an unnamed default export. Type
+    /// wrappers in between (`as`, `satisfies`, parentheses, `!`) are looked
+    /// through.
     fn binding_name(&self, node: Node<'_>) -> Option<(String, u32)> {
-        let parent = node.parent()?;
+        let mut value = node;
+        let mut parent = node.parent()?;
+        while WRAPPER_KINDS.contains(&parent.kind()) {
+            value = parent;
+            parent = parent.parent()?;
+        }
         let is_value = parent
             .child_by_field_name("value")
-            .is_some_and(|v| v.id() == node.id());
+            .is_some_and(|v| v.id() == value.id());
         if !is_value {
             return None;
         }
@@ -258,12 +298,14 @@ impl<'s> Walker<'s> {
         }
     }
 
-    /// Property names as written, except that quotes around string keys
-    /// are dropped. Computed names keep their brackets.
+    /// Property names as written, except that the outer quotes of a
+    /// string key are dropped. Escapes stay as written; computed names keep
+    /// their brackets.
     fn property_name(&self, name: Node<'_>) -> String {
         let text = self.text(name);
-        if name.kind() == "string" {
-            text.trim_matches(|c| c == '"' || c == '\'').to_owned()
+        // A string node always starts and ends with its (one-byte) quote.
+        if name.kind() == "string" && text.len() >= 2 {
+            text[1..text.len() - 1].to_owned()
         } else {
             text
         }
@@ -273,16 +315,7 @@ impl<'s> Walker<'s> {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
     }
 
-    /// The units, with `#2`, `#3`, ... appended to repeated names.
-    fn finish(mut self) -> Vec<Function> {
-        let mut seen: HashMap<String, u32> = HashMap::new();
-        for function in &mut self.functions {
-            let count = seen.entry(function.name.clone()).or_insert(0);
-            *count += 1;
-            if *count > 1 {
-                function.name = format!("{}#{count}", function.name);
-            }
-        }
+    fn finish(self) -> Vec<Function> {
         self.functions
     }
 }
@@ -411,6 +444,91 @@ mod tests {
                 ("Reader.read", 102, 2),
                 // describe/it callbacks and the top-level if: not measured
                 ("default", 121, 2),
+            ])
+        );
+    }
+
+    /// Shorthand for a TypeScript fixture's `(name, line, cyclomatic)`.
+    fn ts_units(source: &str) -> Vec<(String, u32, u32)> {
+        units(Language::TypeScript, source)
+    }
+
+    #[test]
+    fn generators_are_units() {
+        assert_eq!(
+            ts_units(include_str!("../fixtures/typescript/generators.ts")),
+            triples(&[("gen", 3, 2), ("g", 9, 1), ("C.items", 12, 1)])
+        );
+    }
+
+    #[test]
+    fn type_wrappers_do_not_hide_the_binding() {
+        assert_eq!(
+            ts_units(include_str!("../fixtures/typescript/wrappers.ts")),
+            triples(&[
+                ("config.load", 4, 1),
+                ("other.load", 8, 1),
+                ("h", 11, 2),
+                ("nonNull", 17, 1),
+                ("Widget.render", 20, 1),
+            ])
+        );
+    }
+
+    #[test]
+    fn code_without_named_ancestor_is_not_measured() {
+        assert_eq!(
+            ts_units(include_str!("../fixtures/typescript/module_level.ts")),
+            triples(&[])
+        );
+    }
+
+    #[test]
+    fn field_initializers_and_static_blocks_are_barriers() {
+        assert_eq!(
+            ts_units(include_str!("../fixtures/typescript/static_block.ts")),
+            triples(&[("make", 3, 1)])
+        );
+    }
+
+    #[test]
+    fn unnamed_default_exported_object_and_class() {
+        assert_eq!(
+            ts_units(include_str!("../fixtures/typescript/default_object.ts")),
+            triples(&[("default.load", 2, 2)])
+        );
+        assert_eq!(
+            ts_units(include_str!("../fixtures/typescript/default_class.ts")),
+            triples(&[("default.m", 2, 1)])
+        );
+    }
+
+    #[test]
+    fn duplicate_names_are_unique_and_propagate() {
+        assert_eq!(
+            ts_units(include_str!("../fixtures/typescript/duplicates.ts")),
+            triples(&[
+                ("o.x#2", 4, 1),
+                ("o.x", 5, 1),
+                // #2 is taken by the literal key above
+                ("o.x#3", 6, 1),
+                ("A.f", 10, 1),
+                ("A.f.g", 11, 1),
+                ("A.f#2", 13, 1),
+                ("A.f#2.g", 14, 1),
+            ])
+        );
+    }
+
+    #[test]
+    fn property_names_drop_only_the_outer_quotes() {
+        assert_eq!(
+            ts_units(include_str!("../fixtures/typescript/property_names.ts")),
+            triples(&[
+                ("o.load-data", 2, 1),
+                ("o.it\\'s", 3, 1),
+                ("o.[key]", 4, 1),
+                ("o.'quoted'", 5, 1),
             ])
         );
     }
