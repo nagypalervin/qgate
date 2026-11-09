@@ -172,7 +172,10 @@ impl PrivateIndex {
                 // behind, and `std::fs::copy` keeps the source's (often
                 // days-old) time on some platforms.
                 std::io::copy(&mut source, &mut file).map_err(copy_error)?;
-                file.set_modified(SystemTime::now()).map_err(copy_error)?;
+                // Writing through the handle already dates it now; this
+                // makes it explicit. A file system that cannot set times
+                // must not stop the check, so a failure is ignored.
+                let _ = file.set_modified(SystemTime::now());
             }
             Err(e) if e.kind() == ErrorKind::NotFound => {
                 drop(file);

@@ -316,9 +316,15 @@ None. The option is new and the default is unchanged.
     result. The copy now goes through the reserved handle with
     `std::io::copy`, and the file is dated now with `set_modified`. A test
     dates the real index two days back and checks that the private index
-    is fresh and survives `remove_stale`. On Linux, where CI runs, the
-    copy is fresh even without `set_modified`. A mutation that dates the
-    copy like its source, as macOS does, fails the test.
+    is fresh and survives `remove_stale`. A mutation that dates the copy
+    like its source, as macOS does, fails the test.
+  - **What CI cannot see (verification review):** on Linux, the only CI
+    platform, `std::fs::copy` dates the copy now too. A later change back
+    to `fs::copy` would pass every test and bring the macOS and Windows
+    bug back. Until a macOS job exists, the comment at the copy is the
+    guard. A failing `set_modified` is ignored: writing through the
+    handle already dated the file, and a file system that cannot set
+    times must not stop the check.
   - **Docs:** `reserve`'s doc and D1 step 2 still said nothing another run
     created is deleted; both now point to the age-based removal.
 - **No `--no-gpg-sign`.** The design first passed it to `commit-tree`.
