@@ -153,7 +153,8 @@ impl Repository {
     /// # Errors
     ///
     /// [`GitError::NotARepository`] if `dir` is not inside a work tree,
-    /// [`GitError::GitNotFound`] if `git` cannot be run.
+    /// [`GitError::GitNotFound`] if `git` cannot be run,
+    /// [`GitError::UnexpectedOutput`] if git's answer cannot be read.
     pub fn discover(dir: &Path) -> Result<Self, GitError> {
         if !dir.is_dir() {
             return Err(GitError::NotARepository {
@@ -650,6 +651,31 @@ mod tests {
         ]);
         repo.git(&["commit", "-q", "-m", "submodule"]);
         assert_eq!(changes(&repo, "HEAD~1", "HEAD"), vec![]);
+    }
+
+    #[test]
+    fn regular_file_replacing_a_submodule_is_added() {
+        let repo = TestRepo::new();
+        let first = repo.commit("base");
+        repo.git(&[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{first},vendor.ts"),
+        ]);
+        repo.git(&["commit", "-q", "-m", "submodule"]);
+        repo.git(&["rm", "-q", "--cached", "vendor.ts"]);
+        repo.write("vendor.ts", "now a regular file");
+        repo.commit("file replaces submodule");
+        assert_eq!(
+            changes(&repo, "HEAD~1", "HEAD"),
+            vec![ChangedFile {
+                path: "vendor.ts".to_owned(),
+                old_path: None,
+                before: None,
+                after: blob(&repo, "HEAD", "vendor.ts"),
+            }]
+        );
     }
 
     #[cfg(unix)]

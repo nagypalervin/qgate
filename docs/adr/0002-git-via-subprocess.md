@@ -43,8 +43,10 @@ decided.
 
 ## Consequences
 
-- Revision mode and its tests need `git` on the `PATH`. No recent git
-  feature is required; the tests use `git init -b`, which needs git 2.28.
+- Revision mode needs `git` on the `PATH`; no recent git feature is
+  required. The tests need git 2.32 or newer: they isolate themselves from
+  the developer's configuration with `GIT_CONFIG_GLOBAL`, which older git
+  ignores.
   (`--end-of-options` was considered and dropped: `rev-parse` only accepts
   it from git 2.30, and older versions would then report every revision as
   unknown.)

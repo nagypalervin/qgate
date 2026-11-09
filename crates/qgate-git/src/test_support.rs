@@ -43,12 +43,13 @@ pub(crate) fn isolate(command: &mut Command) {
         .env("GIT_CEILING_DIRECTORIES", canonical(&std::env::temp_dir()));
 }
 
-/// An empty file to use as global git config, shared by all tests.
+/// An empty file to use as global git config. One fixed file shared by
+/// every test run, so repeated runs do not leave one file each behind; all
+/// writers write the same empty content.
 fn empty_config() -> &'static Path {
     static CONFIG: OnceLock<PathBuf> = OnceLock::new();
     CONFIG.get_or_init(|| {
-        let path =
-            std::env::temp_dir().join(format!("qgate-git-empty-{}.gitconfig", std::process::id()));
+        let path = std::env::temp_dir().join("qgate-git-empty.gitconfig");
         std::fs::write(&path, "").expect("write empty git config");
         path
     })
