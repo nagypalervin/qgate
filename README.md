@@ -3,8 +3,9 @@
 **Detects where your codebase starts to break under fast, AI-assisted development.**
 
 > Status: early. `qgate check` compares TypeScript code between two git
-> revisions (or two files) for cyclomatic complexity; more analyzers and
-> CI integration follow the [roadmap](#roadmap) below.
+> revisions (or two files) for cyclomatic complexity and, with a
+> [`qgate.toml`](#architecture-rules-qgatetoml), forbidden imports; more
+> analyzers and CI integration follow the [roadmap](#roadmap) below.
 
 ## Try it
 
@@ -40,12 +41,13 @@ cargo run -q -p qgate-cli -- check \
 error   crates/qgate-cli/tests/fixtures/src/orders.ts:42  OrderService.process: cyclomatic complexity 3 -> 9 (+6)  [complexity/cyclomatic-increase]
 ```
 
-qgate reports, per function:
+qgate reports:
 
 | Rule | Reported when | Warning | Error |
 |---|---|---|---|
 | `complexity/cyclomatic-increase` | an existing function got more complex | +1 to +4 | +5 or more |
 | `complexity/cyclomatic-new` | a new function is already complex (new files count as new) | 11 to 20 | above 20 |
+| `architecture/forbidden-import` | `--base` mode only: a change adds an import that a rule in `qgate.toml` forbids (see below) | - | always |
 | `input/unparsable` | `--base` mode only: a changed file has a syntax error, syntax the parser does not support yet, or is not UTF-8; it is skipped | always | - |
 
 Exit codes:
@@ -64,6 +66,48 @@ Exit codes:
 (findings never fail it; only a check that could not run does). The
 example above has an Error finding, so it exits with `1`; add
 `--fail-on never` to only see the report.
+
+### Architecture rules (`qgate.toml`)
+
+Put a `qgate.toml` at the repository root to forbid imports between parts
+of your code:
+
+```toml
+[[architecture.forbid]]
+name = "domain-is-pure"
+from = ["src/domain/**"]
+to   = ["src/ui/**", "src/infra/**", "react"]
+```
+
+A change that adds `import { Button } from "../ui/Button";` to
+`src/domain/order.ts` then fails with:
+
+```
+error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden by "domain-is-pure"  [architecture/forbidden-import]
+```
+
+- **Only new imports are reported.** An import the file already had in the
+  base revision does not fail the check, so you can add a rule to a
+  codebase that still breaks it. Moving a file within `from` reports
+  nothing; moving it into `from` reports its forbidden imports.
+- **Patterns** are globs relative to the repository root: `*` and `?` stay
+  within one directory, `**` spans directories. A pattern without glob
+  characters also matches everything below it (`react` matches
+  `react/jsx-runtime`, not `react-dom`), and `dir/**` also matches `dir`.
+- **`from`** matches the importing file's path. **`to`** matches the import
+  target: a relative import (`./`, `../`) resolved to a path from the root,
+  without extension (`src/ui/Button`); anything else as written
+  (`react`, `@/ui/Button`). So prefer directory patterns, and list path
+  aliases too: `to = ["src/ui/**", "@/ui/**"]`.
+- **Every import counts**, `import type` and `import("...")` in a type
+  included; dynamic imports and `require` count with a string literal.
+- **The file is read from the revision being checked** (`--head`, by default
+  `HEAD`), not from the working tree. A missing `qgate.toml` means no
+  rules; an invalid one (unknown keys included) fails with exit code `2`.
+  The two-file form ignores it.
+- **Not yet supported:** tsconfig `paths`, and files the TypeScript grammar
+  cannot parse yet (`export type * from`, `import("./x").Foo<T>`), which
+  are reported as `input/unparsable` instead.
 
 ### In CI
 

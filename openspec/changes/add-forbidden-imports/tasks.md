@@ -31,7 +31,7 @@ and `cargo test --workspace` passing; the pre-commit hook enforces it.
 - [x] 3.2 Add `qgate-analyzers::architecture` with `globset` (design D3, D7) and fixture-based tests (a before/after pair per case) for "Forbid rules", "Import targets", "Patterns", "Only new violations are reported" and "Forbidden import finding", plus `PatternError` for an invalid pattern; verify they pass
 - [x] 3.3 Run the analyzer in revision mode (design D8, step 3) with end-to-end tests in `revisions.rs` for "Domain importing the UI" (exit code 1), "Rules come from the head revision", "Moved into the domain", "Rule added in the same change", "Invalid pattern" and "Syntax error in a file with a forbidden import"; verify they pass
 - [x] 3.4 Check that the tests bite: break, one at a time, the base subtraction, the old path for renamed files, the `/**` directory match, the glob-less prefix match, the relative resolution and the type-only import form, and confirm a test fails for each
-- [ ] 3.5 Update `README.md`:
+- [x] 3.5 Update `README.md`:
   - the `architecture/forbidden-import` row in the rules table;
   - a `qgate.toml` section with the example rule, the pattern rules, aliases, directory patterns, and the head-revision rule;
   - the `qgate-analyzers` crate docs ("Available").

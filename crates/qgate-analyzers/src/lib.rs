@@ -8,10 +8,10 @@
 //!
 //! - [`complexity`]: per-function cyclomatic complexity increase, and new
 //!   functions that are already complex.
+//! - [`architecture`]: imports a change introduces against a forbid rule.
 //!
 //! Planned:
 //!
-//! - `architecture`: forbidden dependencies between layers (M2)
 //! - `duplication`: near-duplicate blocks introduced by a change (M2)
 //! - `tests`: changed code without changed tests, coverage drop (M3)
 //!
