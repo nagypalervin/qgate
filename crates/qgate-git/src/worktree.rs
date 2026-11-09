@@ -7,7 +7,7 @@
 //! were; the only trace is unreachable objects, which `git gc` prunes.
 
 use std::ffi::OsStr;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Output;
@@ -161,27 +161,36 @@ impl PrivateIndex {
         let real = absolute(real);
         let stem = absolute(stem);
         remove_stale(&stem);
-        let index = Self::reserve(stem.as_os_str())?;
-        match std::fs::copy(&real, &index.path) {
-            Ok(_) => {}
+        let (index, mut file) = Self::reserve(stem.as_os_str())?;
+        let copy_error = |e: std::io::Error| GitError::WorkTree {
+            detail: format!("cannot copy the index {}: {e}", real.display()),
+        };
+        match File::open(&real) {
+            Ok(mut source) => {
+                // Copied through the reserved handle, and dated now: the age
+                // is how `remove_stale` tells a copy in use from one left
+                // behind, and `std::fs::copy` keeps the source's (often
+                // days-old) time on some platforms.
+                std::io::copy(&mut source, &mut file).map_err(copy_error)?;
+                file.set_modified(SystemTime::now()).map_err(copy_error)?;
+            }
             Err(e) if e.kind() == ErrorKind::NotFound => {
+                drop(file);
+                // `read-tree` writes a new file, dated now.
                 repo.snapshot_checked(&["read-tree", head], &index)?;
             }
-            Err(e) => {
-                return Err(GitError::WorkTree {
-                    detail: format!("cannot copy the index {}: {e}", real.display()),
-                });
-            }
+            Err(e) => return Err(copy_error(e)),
         }
         Ok(index)
     }
 
-    /// A new, empty file named `<stem>-<pid>-<nanoseconds>-<n>`. It is
-    /// created exclusively, so no other process uses the same name, not
-    /// even one with the same pid in another container that shares the
-    /// repository; a name whose lock file exists is skipped. Nothing is
-    /// ever deleted that this process did not create.
-    fn reserve(stem: &OsStr) -> Result<Self, GitError> {
+    /// A new, empty file named `<stem>-<pid>-<nanoseconds>-<n>`, with its
+    /// open handle. It is created exclusively, so no other process uses the
+    /// same name, not even one with the same pid in another container that
+    /// shares the repository; a name whose lock file exists is skipped.
+    /// Another run's private index is only ever removed by
+    /// [`remove_stale`], once it is a day old.
+    fn reserve(stem: &OsStr) -> Result<(Self, File), GitError> {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.subsec_nanos());
@@ -197,7 +206,7 @@ impl PrivateIndex {
                 continue;
             }
             match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(_) => return Ok(Self { path }),
+                Ok(file) => return Ok((Self { path }, file)),
                 Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
                 Err(e) => {
                     return Err(GitError::WorkTree {
@@ -505,6 +514,33 @@ mod tests {
             vec![]
         );
         repo.git(&["worktree", "remove", "--force", linked_arg]);
+    }
+
+    #[test]
+    fn private_index_is_dated_now_even_when_the_index_is_old() {
+        let repo = TestRepo::new();
+        repo.write("src/a.ts", "export const a = 1;\n");
+        repo.commit("base");
+        let two_days_ago = SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60);
+        File::options()
+            .write(true)
+            .open(repo.dir.join(".git/index"))
+            .and_then(|f| f.set_modified(two_days_ago))
+            .expect("date the index two days back");
+        let head = repo.git(&["rev-parse", "HEAD"]);
+
+        let index = PrivateIndex::create(&repository(&repo), &head).expect("a private index");
+
+        let modified = std::fs::metadata(&index.path)
+            .and_then(|m| m.modified())
+            .expect("the private index's time");
+        let age = SystemTime::now()
+            .duration_since(modified)
+            .unwrap_or(Duration::ZERO);
+        assert!(age < Duration::from_secs(60 * 60), "dated {age:?} ago");
+        // So another run's clean-up leaves it alone.
+        remove_stale(&index.path.with_file_name("qgate-index"));
+        assert!(index.path.exists());
     }
 
     #[test]

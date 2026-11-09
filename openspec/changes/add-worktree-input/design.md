@@ -56,9 +56,10 @@ that holds the working tree. The steps:
    The private index is `<stem>-<pid>-<nanoseconds>-<n>`, created with
    `create_new`, so it is never shared with another process, not even one
    with the same pid in another container. A name whose `.lock` exists is
-   skipped, and nothing this process did not create is ever deleted. The
-   real index is copied into it; if there is none, `git read-tree <head>`
-   fills it instead.
+   skipped. Another run's private index is only removed once it is a day
+   old (step 6). The real index is copied into it through the reserved
+   handle, and the copy is dated now, so its age always says when this run
+   started; if there is no index, `git read-tree <head>` fills it instead.
 3. **Stage everything into the private index.** Run
    `GIT_INDEX_FILE=<private> git add -A` from the top level, with hooks and
    the split index off (D2). This stages modified, deleted and
@@ -304,6 +305,22 @@ None. The option is new and the default is unchanged.
     - `worktree_snapshot` now names the file-system monitor exception;
     - "Files git does not look at" covers both index bits;
     - tasks 1.1, 1.3 and 2.3 match what was done.
+  - Round 1's "nothing qgate did not create is deleted" no longer holds:
+    stale copies of other runs are removed by age.
+- **Review round 3:**
+  - **Copies kept the index's age (blocker):** `std::fs::copy` keeps the
+    source's modification time on macOS (`fcopyfile`) and Windows. A copy
+    of an index last written days ago looked stale at once, and a
+    concurrent check could delete it mid-snapshot. git then reads a missing
+    `GIT_INDEX_FILE` as an empty index, which silently gives a wrong
+    result. The copy now goes through the reserved handle with
+    `std::io::copy`, and the file is dated now with `set_modified`. A test
+    dates the real index two days back and checks that the private index
+    is fresh and survives `remove_stale`. On Linux, where CI runs, the
+    copy is fresh even without `set_modified`. A mutation that dates the
+    copy like its source, as macOS does, fails the test.
+  - **Docs:** `reserve`'s doc and D1 step 2 still said nothing another run
+    created is deleted; both now point to the age-based removal.
 - **No `--no-gpg-sign`.** The design first passed it to `commit-tree`.
   Removing it broke no test (task 1.3), because `commit-tree` never signs
   on configuration; only `git commit` does. It was dead code, so it is
