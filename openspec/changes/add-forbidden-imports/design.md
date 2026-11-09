@@ -257,3 +257,7 @@ None. Without a `qgate.toml`, behaviour is unchanged.
   - Tests pin comment skipping, the empty specifier, module-level calls
     (the bound-call path) and the TSX line; the quote stripping is shared
     with property names (`unquote`).
+- **PR 2, `file_at`:** besides `--literal-pathspecs`, the entry's path
+  must equal the requested path exactly, so a pattern can never select
+  another file even if a git version treated the argument as one. A test
+  shows that `*.toml`, `qgate.tom?` and `:(glob)*.toml` find nothing.
