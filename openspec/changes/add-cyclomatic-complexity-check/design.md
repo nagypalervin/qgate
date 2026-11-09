@@ -260,4 +260,26 @@ Nothing to migrate: no released version, no users. The placeholder
 
 ### ESLint comparison
 
-<!-- Filled in during apply (D10). -->
+Run on 2026-11-09 with ESLint 9.39.5, `typescript-eslint` 8.72.1 parser,
+`complexity: ["error", { max: 0 }]` (classic variant), over copies of the
+three valid `qgate-lang` fixtures. Not part of CI.
+
+**Summing rule:** an anonymous function's own base of 1 is not a decision
+point, so it adds `eslint - 1` to its named ancestor.
+
+| Fixture | Units | Equal | Equal after summing | Expected differences |
+|---|---|---|---|---|
+| `decision_points.ts` | 16 | 16 | - | none |
+| `component.tsx` | 2 | 1 (`Greeting` 2) | 1 (`List`: 1 + (2 - 1) = 2) | none |
+| `naming.ts` | 23 | 20 | 3 (`Cart.total`, `process`: 1 + (2 - 1) = 2; `bound`: ESLint names it `ownName`, same value 2) | ESLint also reports 3 class field initializers (lines 12, 38, 82) and 2 module-level `describe`/`it` arrows (lines 109, 110); qgate measures neither |
+
+No unexpected difference. The decision-point counts, including optional
+chaining and default values, match ESLint exactly.
+
+D10 listed two expected kinds of difference; the run showed a third one,
+which the spec already requires and the 1.5 note above describes:
+
+3. Class field initializers and static blocks: ESLint measures each as its
+   own scope ("Class field initializer has a complexity of ..."); qgate does
+   not measure them (spec: "Code outside named functions is not measured").
+   A field whose value is a function (`handle = () => {}`) is a unit in both.
