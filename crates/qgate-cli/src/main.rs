@@ -238,6 +238,9 @@ fn check(args: &ArgMatches) -> Result<Vec<Finding>, String> {
     let (before_path, after_path) = (path("before")?, path("after")?);
     let change = FileChange {
         path: after_path.clone(),
+        // Two files are compared as one file; the architecture rules,
+        // which would care about a rename, do not run in this form.
+        old_path: None,
         before: load(before_path)?,
         after: load(after_path)?,
     };
@@ -362,6 +365,7 @@ fn file_change(
 
     Ok(Ok(FileChange {
         path: PathBuf::from(&file.path),
+        old_path: file.old_path.as_ref().map(PathBuf::from),
         before,
         after,
     }))

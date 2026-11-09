@@ -131,6 +131,7 @@ mod tests {
     fn run(before: &str, after: &str) -> Vec<Finding> {
         let change = FileChange {
             path: PathBuf::from(PATH),
+            old_path: None,
             before: parse(Language::TypeScript, before).expect("before parses"),
             after: parse(Language::TypeScript, after).expect("after parses"),
         };

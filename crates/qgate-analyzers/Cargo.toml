@@ -9,6 +9,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+globset.workspace = true
 qgate-core.workspace = true
 qgate-lang.workspace = true
 

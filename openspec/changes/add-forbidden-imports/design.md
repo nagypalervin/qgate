@@ -282,3 +282,13 @@ None. Without a `qgate.toml`, behaviour is unchanged.
   - `run` removes `GIT_*_PATHSPECS` from git's environment: git refuses
     `--literal-pathspecs` next to another global pathspec setting, which
     made every revision-mode run fail for users who export one.
+- **PR 3, `globset` version:** `globset` 0.4.20 and later declare Rust
+  1.88. The workspace's MSRV-aware resolver (`resolver = "3"`) therefore
+  locks 0.4.19, which declares no MSRV. The whole workspace was built with
+  Rust 1.85.1 (`cargo +1.85 build --workspace --locked`) to confirm it.
+  Lock additions: `globset` and `bstr`; the regex crates were already
+  there.
+- **PR 3, targets:** a relative specifier that resolves to the repository
+  root itself (`import ".."` from `src/a.ts`) has no target, like one that
+  leaves the root. Backslashes in a path are turned into `/` before
+  matching, so a path is always matched in git's form.
