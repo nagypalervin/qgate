@@ -67,7 +67,14 @@ None.
 - `check-command`:
   - "Findings do not change the exit code" is renamed to "Failing on
     findings", and its content is replaced by the `--fail-on` behaviour;
-  - "Invalid invocation" adds an unknown `--fail-on` value.
+  - "Invalid invocation" adds an unknown `--fail-on` value;
+  - "Compare two git revisions" and "Supported input files": scenarios
+    that expect exit code 0 now say their findings are Warnings (added
+    after review).
+- `revision-input`: "Unparsable files are reported, not fatal" no longer
+  fixes the exit code at 0; the `input/unparsable` Warning counts for
+  `--fail-on` like any other (added after review: the requirement
+  contradicted "Unparsable file in revision mode").
 
 ## Impact
 
@@ -103,3 +110,14 @@ None.
 - **Fixture `fail/`:** two functions grow by +6 (Error) and one by +1
   (Warning), for the summary scenario. Revision-mode tests build their
   inputs in temporary repositories as before.
+- **Review round 1:**
+  - `revision-input` still fixed the exit code of an unparsable file at 0,
+    which contradicted this change; it gets a MODIFIED delta. Two
+    `check-command` scenarios that expect exit 0 now state that their
+    findings are Warnings.
+  - The usage lines show `[--fail-on <level>]`, so a usage error in CI
+    points at the opt-out. The help text covers `never`, and the default
+    lives in one constant.
+  - Commit `d5d2d1d` changes the default before the CI smoke step is
+    updated, so CI fails on that single commit. Fixing it would mean
+    rewriting the pushed branch; it is left as is.

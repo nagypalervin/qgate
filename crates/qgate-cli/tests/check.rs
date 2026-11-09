@@ -378,9 +378,11 @@ fn head_without_base() {
 fn unknown_fail_on_level() {
     let out = qgate(&["check", "same.ts", "same.ts", "--fail-on", "info"]);
     let err = stderr(&out);
-    for level in ["error", "warning", "never"] {
-        assert!(err.contains(level), "{err}");
-    }
+    assert!(err.contains("info"), "{err}");
+    assert!(
+        err.contains("[possible values: error, warning, never]"),
+        "{err}"
+    );
     assert_eq!(stdout(&out), "");
     assert_eq!(out.status.code(), Some(2));
 }
@@ -394,6 +396,7 @@ fn help_shows_both_forms() {
         stdout(&out)
     );
     assert!(stdout(&out).contains("qgate check --base <rev> [--head <rev>]"));
+    assert!(stdout(&out).contains("[--fail-on <level>]"));
 }
 
 #[test]

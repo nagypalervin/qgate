@@ -39,6 +39,9 @@ const UNPARSABLE_RULE: &str = "input/unparsable";
 const SHALLOW_CLONE_HINT: &str = "if this is a shallow clone, fetch the base first \
      (in GitHub Actions: actions/checkout with fetch-depth: 0)";
 
+/// The `--fail-on` level when the option is not given.
+const DEFAULT_FAIL_ON: FailOn = FailOn::Error;
+
 /// Which findings fail the run: the value of `--fail-on`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FailOn {
@@ -98,7 +101,8 @@ fn check_command() -> Command {
     Command::new("check")
         .about("Report what got worse between two versions of TypeScript code")
         .override_usage(
-            "qgate check <before> <after>\n       qgate check --base <rev> [--head <rev>]",
+            "qgate check <before> <after> [--fail-on <level>]\n       \
+             qgate check --base <rev> [--head <rev>] [--fail-on <level>]",
         )
         .arg(
             Arg::new("before")
@@ -131,9 +135,12 @@ fn check_command() -> Command {
             Arg::new("fail-on")
                 .long("fail-on")
                 .value_name("level")
-                .help("Exit with 1 when a finding has this severity or higher")
+                .help(
+                    "Exit with 1 on a finding at or above this level \
+                     (never: only a check that cannot run fails)",
+                )
                 .value_parser(value_parser!(FailOn))
-                .default_value("error"),
+                .default_value(DEFAULT_FAIL_ON.name()),
         )
 }
 
@@ -170,7 +177,7 @@ fn main() -> ExitCode {
         let fail_on = args
             .get_one::<FailOn>("fail-on")
             .copied()
-            .unwrap_or(FailOn::Error);
+            .unwrap_or(DEFAULT_FAIL_ON);
         return match result.and_then(|findings| {
             write_stdout(&render_text(&findings))?;
             Ok(findings)

@@ -66,6 +66,46 @@ level.
 - **WHEN** the user runs `qgate check`
 - **THEN** standard error is empty
 
+### Requirement: Compare two git revisions
+
+The system SHALL provide `qgate check --base <rev> [--head <rev>]`, with
+`--head` defaulting to `HEAD`, that analyzes the files changed between the
+two revisions in the git repository containing the current directory (see
+the `revision-input` capability) and prints every finding to standard output,
+one per line.
+
+#### Scenario: Pull request branch
+
+- **GIVEN** a repository where branch `feature` made `f` in `src/a.ts` more complex than on `main`, from 2 to 4 (a Warning)
+- **WHEN** the user runs `qgate check --base main --head feature`
+- **THEN** standard output contains one `complexity/cyclomatic-increase` line for `src/a.ts`
+- **AND** the exit code is 0
+
+#### Scenario: Head defaults to HEAD
+
+- **GIVEN** the checked-out branch made `f` in `src/a.ts` more complex than on `main`
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** the output is the same as for `qgate check --base main --head HEAD`
+
+### Requirement: Supported input files
+
+In the two-file mode the system SHALL accept files with the extensions
+`.ts`, `.mts`, `.cts` and `.tsx`, and SHALL reject any other file with an
+error naming the file and exit code 2. The two files SHALL be accepted even
+if their extensions differ, as long as both are in this set.
+
+#### Scenario: TSX input
+
+- **WHEN** the user runs `qgate check before.tsx after.tsx` on valid TSX files that produce no Error finding
+- **THEN** the analysis runs and the exit code is 0
+
+#### Scenario: Unsupported extension
+
+- **WHEN** the user runs `qgate check before.js after.js`
+- **THEN** standard error contains an error that names `before.js` as an unsupported file type
+- **AND** standard output is empty
+- **AND** the exit code is 2
+
 ### Requirement: Invalid invocation
 
 The system SHALL treat as a usage error a `check` command that has neither
