@@ -390,13 +390,14 @@ fn unknown_fail_on_level() {
 #[test]
 fn help_shows_both_forms() {
     let out = qgate(&["check", "--help"]);
-    assert!(
-        stdout(&out).contains("qgate check <before> <after>"),
-        "{}",
-        stdout(&out)
-    );
-    assert!(stdout(&out).contains("qgate check --base <rev> [--head <rev>]"));
-    assert!(stdout(&out).contains("[--fail-on <level>]"));
+    let help = stdout(&out);
+    // Both forms name --fail-on, so a usage error shows the opt-out.
+    for form in [
+        "qgate check <before> <after> [--fail-on <level>]\n",
+        "qgate check --base <rev> [--head <rev>] [--fail-on <level>]\n",
+    ] {
+        assert!(help.contains(form), "{help}");
+    }
 }
 
 #[test]
