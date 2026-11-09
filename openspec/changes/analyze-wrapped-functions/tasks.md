@@ -18,7 +18,7 @@ during apply go into `design.md`. Every task ends with `cargo fmt --all`,
 
 ## 3. End to end
 
-- [ ] 3.1 Add a two-file end-to-end test in `crates/qgate-cli/tests/check.rs` (fixture `wrapped/before.ts` and `wrapped/after.ts`) where `export const GET = withAuth(async () => {...})` grows from 2 to 4; verify the output is `warning wrapped/after.ts:<line>  GET: cyclomatic complexity 2 -> 4 (+2)  [complexity/cyclomatic-increase]` and the exit code is 0
+- [x] 3.1 Add a two-file end-to-end test in `crates/qgate-cli/tests/check.rs` (fixture `wrapped/before.ts` and `wrapped/after.ts`) where `export const GET = withAuth(async () => {...})` grows from 2 to 4; verify the output is `warning wrapped/after.ts:<line>  GET: cyclomatic complexity 2 -> 4 (+2)  [complexity/cyclomatic-increase]` and the exit code is 0
 
 ## Workflow follow-up
 
