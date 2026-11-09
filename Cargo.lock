@@ -121,6 +121,7 @@ version = "0.0.1"
 dependencies = [
  "clap",
  "qgate-analyzers",
+ "qgate-config",
  "qgate-core",
  "qgate-git",
  "qgate-lang",

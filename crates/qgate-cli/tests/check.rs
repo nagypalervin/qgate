@@ -427,6 +427,24 @@ fn unknown_argument() {
     assert_eq!(out.status.code(), Some(2));
 }
 
+// configuration: The two-file form ignores the configuration
+
+#[test]
+fn invalid_qgate_toml_next_to_two_files() {
+    let dir = std::env::temp_dir().join(format!("qgate-config-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    std::fs::write(dir.join("qgate.toml"), "not toml at all [").expect("write");
+    let same = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/same.ts");
+    let out = Command::new(env!("CARGO_BIN_EXE_qgate"))
+        .args(["check".as_ref(), same.as_os_str(), same.as_os_str()])
+        .current_dir(&dir)
+        .output()
+        .expect("qgate runs");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(0));
+}
+
 // Requirement: Help and version
 
 #[test]

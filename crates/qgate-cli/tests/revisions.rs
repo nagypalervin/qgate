@@ -627,3 +627,119 @@ fn revision_that_looks_like_an_option() {
     assert!(!target.exists(), "git treated the revision as an option");
     assert_eq!(out.status.code(), Some(2));
 }
+
+// configuration: qgate.toml from the head revision
+
+/// A valid forbid rule.
+const RULE: &str = "[[architecture.forbid]]\nname = \"domain-is-pure\"\n\
+                    from = [\"src/domain/**\"]\nto = [\"src/ui/**\"]\n";
+
+/// A repository whose last commit makes `f` in `src/a.ts` go from 2 to 4
+/// and sets `qgate.toml` to `config`.
+fn repo_with_config(config: &str) -> Repo {
+    let repo = Repo::new();
+    repo.write("src/a.ts", function("f", 1));
+    repo.commit("base");
+    repo.write("src/a.ts", function("f", 3));
+    repo.write("qgate.toml", config);
+    repo.commit("head");
+    repo
+}
+
+/// `qgate check --base HEAD~1` fails with exit code 2, empty standard
+/// output and an error that names `qgate.toml` and each of `expected`.
+fn assert_invalid(repo: &Repo, expected: &[&str]) {
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    let err = stderr(&out);
+    assert!(err.contains("qgate.toml"), "{err}");
+    for part in expected {
+        assert!(err.contains(part), "missing {part:?} in: {err}");
+    }
+    assert_eq!(stdout(&out), "");
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn repository_without_qgate_toml() {
+    let repo = feature_repo();
+    let out = repo.qgate(&["--base", "main", "--head", "feature"]);
+    assert_eq!(stdout(&out), F_INCREASE, "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn valid_configuration_is_accepted() {
+    let repo = repo_with_config(RULE);
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), F_INCREASE, "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn configuration_syntax_error() {
+    let repo = repo_with_config(
+        "[[architecture.forbid]]\nfrom = [\"a\"]\nname = \"domain-is-pure\nto = [\"b\"]\n",
+    );
+    assert_invalid(&repo, &["qgate.toml: line 3"]);
+}
+
+#[test]
+fn misspelled_configuration_table() {
+    let repo = repo_with_config("[[architecture.forbd]]\nname = \"x\"\n");
+    assert_invalid(&repo, &["forbd"]);
+}
+
+#[test]
+fn duplicate_rule_name() {
+    let repo = repo_with_config(&format!("{RULE}{RULE}"));
+    assert_invalid(&repo, &["duplicate", "domain-is-pure"]);
+}
+
+#[test]
+fn empty_pattern_list() {
+    let repo = repo_with_config(&RULE.replace("to = [\"src/ui/**\"]", "to = []"));
+    assert_invalid(&repo, &["domain-is-pure", "`to` is empty"]);
+}
+
+#[test]
+fn configuration_that_is_not_a_regular_file() {
+    let repo = Repo::new();
+    repo.write("src/a.ts", function("f", 1));
+    repo.commit("base");
+    repo.write("qgate.toml/inner", RULE);
+    repo.commit("head");
+    assert_invalid(&repo, &["not a regular file"]);
+}
+
+#[test]
+fn uncommitted_configuration_is_ignored() {
+    let repo = feature_repo();
+    repo.git(&["checkout", "-q", "feature"]);
+    // Neither revision has qgate.toml; an invalid one in the working tree
+    // would fail the run if it were read.
+    repo.write("qgate.toml", "not toml at all [");
+    let out = repo.qgate(&["--base", "main"]);
+    assert_eq!(stdout(&out), F_INCREASE, "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn configuration_comes_from_the_head_revision() {
+    let repo = feature_repo();
+    // `feature` gets an invalid qgate.toml; `main` stays checked out.
+    repo.git(&["checkout", "-q", "feature"]);
+    repo.write("qgate.toml", "[[architecture.forbd]]\n");
+    repo.commit("break the configuration");
+    repo.git(&["checkout", "-q", "main"]);
+    let out = repo.qgate(&["--base", "main", "--head", "feature"]);
+    assert!(stderr(&out).contains("forbd"), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(2));
+    // The base revision's configuration is not read.
+    let fixed = repo_with_config(RULE);
+    fixed.write("qgate.toml", "broken [");
+    fixed.git(&["commit", "-q", "-am", "break it"]);
+    fixed.write("qgate.toml", RULE);
+    fixed.git(&["commit", "-q", "-am", "fix it"]);
+    let out = fixed.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+}
