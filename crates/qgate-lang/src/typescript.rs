@@ -326,6 +326,70 @@ mod tests {
             .collect()
     }
 
+    /// Parse a fixture and return `(name, line, cyclomatic)` triples.
+    fn units(language: Language, source: &str) -> Vec<(String, u32, u32)> {
+        parse(language, source)
+            .expect("fixture parses")
+            .functions
+            .into_iter()
+            .map(|f| (f.name, f.line, f.cyclomatic))
+            .collect()
+    }
+
+    fn triples(items: &[(&str, u32, u32)]) -> Vec<(String, u32, u32)> {
+        items
+            .iter()
+            .map(|&(n, l, c)| (n.to_owned(), l, c))
+            .collect()
+    }
+
+    #[test]
+    fn naming_and_unit_boundaries() {
+        let actual = units(
+            Language::TypeScript,
+            include_str!("../fixtures/typescript/naming.ts"),
+        );
+        assert_eq!(
+            actual,
+            triples(&[
+                ("Cart.constructor", 6, 1),
+                // the ?? sits in an anonymous callback: counts towards total
+                ("Cart.total", 8, 2),
+                ("Cart.handle", 12, 2),
+                ("Cart.get size", 18, 1),
+                ("Cart.set size", 22, 2),
+                // static and instance method with the same name
+                ("Cart.create", 28, 1),
+                ("Cart.create#2", 32, 1),
+                ("Cart.[Symbol.iterator]", 34, 1),
+                ("Cart.#secret", 36, 1),
+                // `count = this.items?.length ?? 0` is a field initializer:
+                // not measured
+                ("api.load", 42, 1),
+                ("api.save", 43, 2),
+                ("api.load-data", 46, 1),
+                ("api.nested.deep", 48, 1),
+                ("outer", 52, 2),
+                ("outer.inner", 56, 3),
+                ("process", 66, 2),
+                // named after the binding, not `ownName`
+                ("bound", 70, 2),
+                // a named function expression passed as an argument
+                ("callbackWithName", 74, 2),
+                // the field initializer `flag ?? false` does not leak
+                // into factory
+                ("factory", 80, 1),
+                ("factory.Widget.render", 83, 2),
+                // overload signatures are not units
+                ("parse", 91, 2),
+                // abstract and overload signatures are not units
+                ("Reader.read", 102, 2),
+                // describe/it callbacks and the top-level if: not measured
+                ("default", 121, 2),
+            ])
+        );
+    }
+
     fn expected(pairs: &[(&str, u32)]) -> Vec<(String, u32)> {
         pairs.iter().map(|&(n, c)| (n.to_owned(), c)).collect()
     }
