@@ -44,6 +44,13 @@ impl Analyzer for ComplexityAnalyzer {
             .iter()
             .map(|f| (f.name.as_str(), f.cyclomatic))
             .collect();
+        // Matching relies on qgate-lang's guarantee that names are unique
+        // within a file; a collision would silently drop a function.
+        debug_assert_eq!(
+            before.len(),
+            change.before.functions.len(),
+            "function names in a FileModel must be unique"
+        );
 
         change
             .after
@@ -210,7 +217,9 @@ mod tests {
             vec![
                 // atTen (10) is not reported
                 new(Severity::Warning, "atEleven", 21, 11),
-                new(Severity::Error, "atTwentyOne", 35, 21),
+                // 20 is the largest value that is still a warning
+                new(Severity::Warning, "atTwenty", 35, 20),
+                new(Severity::Error, "atTwentyOne", 58, 21),
             ]
         );
     }
