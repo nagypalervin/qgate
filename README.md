@@ -190,6 +190,78 @@ repository's hooks only after you trust the folder. `claude -p` and SDK
 sessions run them without asking, so do not run those on repositories
 you do not trust; a repository can configure any command as a hook.
 
+### With an MCP client
+
+`qgate mcp` is an [MCP](https://modelcontextprotocol.io) server with one
+tool, `check`. Any coding agent with an MCP client can call it whenever
+the agent decides to: in the middle of a task, before it commits, or for
+the whole branch before it opens a pull request.
+
+For **Claude Code**, add this to `.mcp.json` in your repository and
+commit it. `claude mcp add --scope project qgate -- qgate mcp` writes
+an equivalent entry.
+
+```json
+{
+  "mcpServers": {
+    "qgate": { "command": "qgate", "args": ["mcp"] }
+  }
+}
+```
+
+For **VS Code with GitHub Copilot**, add this to `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "qgate": { "type": "stdio", "command": "qgate", "args": ["mcp"] }
+  }
+}
+```
+
+For **other clients**, start `qgate mcp` as a stdio server in the
+repository.
+
+The server checks the repository it was started in. Claude Code starts
+it in the project, and VS Code in the workspace folder. If your client
+starts it elsewhere, set the working directory in the client's entry
+(`"cwd"` in both files above), or let the agent pass `directory`.
+
+`check` takes three optional arguments:
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `base` | `HEAD` | The revision to compare against. `HEAD` checks the uncommitted work. `main` checks the whole branch. |
+| `head` | the working tree | A revision to check instead of the working tree, uncommitted and untracked files included. |
+| `directory` | where the server started | The repository to check, absolute or relative to that directory. |
+
+It returns the [JSON report](#json-output), the same one
+`qgate check --base <base> --worktree --format json` prints. It always
+holds every finding, at every severity. `summary.failing` counts the
+findings at the server's `--fail-on` level, `error` by default. A team
+sets the level once, in the entry's arguments, for example
+`"args": ["mcp", "--fail-on", "warning"]`.
+
+If the check cannot run, the tool returns an error that the agent
+reads, and the server keeps running. This happens for a directory
+outside a repository, an unknown revision or an invalid `qgate.toml`.
+The server changes nothing in the repository.
+
+**The hook or the server?** They work well together:
+- **The [hook](#with-claude-code)** runs at the end of every Claude Code
+  turn, whether the agent thinks of it or not.
+- **The server** works with any MCP client, and lets the agent check
+  when it wants and against what it wants.
+
+The server speaks MCP revision 2026-07-28 and, for clients that start
+with a handshake, 2025-11-25 and 2025-06-18.
+
+**A note on trust:** a repository's `.mcp.json` or `.vscode/mcp.json`
+names a command that runs on your machine. Claude Code asks before it
+starts a project's MCP server. VS Code starts a workspace's servers only
+once you trust the workspace. Check what an entry runs before you
+approve it.
+
 ### JSON output
 
 `--format json` writes one JSON object on a single line to standard

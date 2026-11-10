@@ -371,6 +371,36 @@ Decisions made during apply:
   The task names seven checks. "The result" covers two mutations: the
   dropped text block and the failing findings only.
 
+- **The README was tried by hand (task 3.1).** In a temporary
+  repository, the built binary was first on the `PATH`, with an
+  uncommitted `f` going from 2 to 9.
+  - `claude mcp add --scope project qgate -- qgate mcp` writes
+    `.mcp.json` with `"type": "stdio"` and an empty `env` besides the
+    README's keys. The README calls it "an equivalent entry".
+  - A `tools/call` piped into `qgate mcp` returned the finding.
+  - `--fail-on warning` with an unknown base returned the tool error
+    that names `nope`.
+  - `directory` worked from outside the repository.
+  - The text block equals `qgate check --base HEAD --worktree --format json`.
+- **VS Code trust.** VS Code's documentation says that a workspace's
+  `.vscode/mcp.json` follows Workspace Trust: in Restricted Mode its
+  servers do not start. The README's trust note says so.
+- **Hand check with Claude Code (task 3.2), 2026-11-10.**
+  - **Setup:** Claude Code 2.1.319, with `claude -p` and an
+    `--mcp-config` whose command was
+    `sh -c 'tee <log> | target/debug/qgate mcp'`. The temporary
+    repository had one uncommitted finding.
+  - **The client sent:** `server/discover`, `tools/list` and
+    `tools/call`, each with `_meta` declaring 2026-07-28. So the current
+    era was used.
+  - **The model** called `check` with an absolute `directory` (the
+    project), not with empty arguments. It answered: "qgate found one
+    failing finding in your uncommitted work: in `src/a.ts:1`, the
+    cyclomatic complexity of function `f` went from 2 to 9, and the team
+    treats that as an error."
+  - **The repository:** `git status --porcelain` was unchanged
+    afterwards.
+
 ## Risks / Trade-offs
 
 - **[The 2026-07-28 revision is four months old, and clients differ in
