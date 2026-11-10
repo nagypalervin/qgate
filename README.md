@@ -164,7 +164,7 @@ Keep in mind:
   commit. Use `--base main` if you let the agent commit.
 - **Your own uncommitted work counts too.** An Error in it sends the
   agent back even after a turn that only answered a question. Commit or
-  stash first, or use `--fail-on never` while you edit next to the agent.
+  stash your work before you hand over to the agent.
 - **Another Stop hook uses up the round too.** Once any Stop hook has
   sent the agent back in a turn, qgate shows its findings to you instead
   of sending the agent back again.
