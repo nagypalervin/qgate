@@ -468,6 +468,40 @@ Decisions and results recorded during apply.
   8. **`/usr/local/bin` may not exist on Apple Silicon Macs.** →
      `sudo install -d /usr/local/bin` first.
 
+- **The first release, task 3.1, 2026-11-10.**
+  - **The tag:** Ervin pushed the annotated tag `v0.1.0` on the
+    merge of PR 2 (`fdca116`).
+  - **The run:** `Release` run 42893078803 passed every job, `publish`
+    included. The `version` job logged "the tag v0.1.0 matches the
+    workspace version 0.1.0".
+  - **The draft:** `qgate 0.1.0`, a draft and not a prerelease, the
+    only release for the tag. It held the six archives and
+    `SHA256SUMS`, with GitHub's generated notes listing PRs #1 to #11.
+  - **The agent's check of the draft:**
+    - it downloaded the seven files with `gh release download`, since
+      draft assets have no public URL;
+    - `sha256sum --check` reported all six `OK`, and `SHA256SUMS` was
+      byte-identical to a local computation;
+    - each archive had the specified layout;
+    - the `aarch64-unknown-linux-musl` binary was statically linked,
+      printed `qgate 0.1.0`, and in a scratch repository reported
+      `f: cyclomatic complexity 2 -> 9 (+7)` with exit code 1.
+  - **The same build as the rehearsal:** its BuildID equals the one
+    from the PR 2 rehearsal (`cd1e8723...`). So the tag built the
+    same binary as the rehearsal.
+  - **Publishing:** Ervin published the draft at 20:22 UTC.
+    `releases/latest` then pointed at `v0.1.0`.
+  - **The README commands against the public URLs:**
+    - the Linux block for `aarch64-unknown-linux-musl` installed
+      `~/.local/bin/qgate`, which printed `qgate 0.1.0`;
+    - the CI block's commands for `x86_64-unknown-linux-musl`
+      downloaded the archive, checked it and unpacked it. `file`
+      reported it `static-pie linked`. An x64 binary cannot run on this
+      arm64 machine.
+  - **Not checked by hand:** the macOS and Windows install blocks. The
+    reviewer ran the macOS checksum line and checked the PowerShell
+    comparison, and the binaries were tested on their runners.
+
 ## Risks / Trade-offs
 
 - **[GitHub retires `macos-15-intel`, the last x64 macOS image]** →
