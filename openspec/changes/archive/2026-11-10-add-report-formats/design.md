@@ -222,6 +222,79 @@ mechanical, and the compiler finds them all.
   - the related order reversed;
   - each copy's own window end used instead of the whole block.
 
+- **PR 2: the renderer (tasks 2.1, 2.2).**
+  - `qgate-report` depends on `serde` (for the derive) as well as
+    `serde_json`. Neither adds a crate to `Cargo.lock`.
+  - The JSON severity names are spelled out in the renderer, not taken
+    from `Severity`'s `Display`, so a change to the text output cannot
+    change a public JSON value.
+  - `ReportSummary` is `Copy` and passed by value.
+  - `serde_json` cannot fail on these types; `render_json` documents
+    that it never panics in practice rather than returning a `Result`
+    every caller would have to handle.
+- **PR 2: the schema and its test helper (task 2.3).**
+  - The schema also uses `minItems` (a `related` array is never empty)
+    and `anyOf` (a `metric` has `before` or `after`), because the spec
+    promises both. The helper supports these two keywords as well, ten
+    in all (`anyOf` replaced `minProperties` in review, see below).
+  - The helper treats `integer` more strictly than JSON Schema: `1.0`
+    is not an integer there, because qgate promises integers without a
+    fraction. A standard validator accepts more, never less.
+  - The schema was also checked once, by hand, with a full Draft 2020-12
+    implementation (Python `jsonschema`): the metaschema accepts it, and
+    it accepts and rejects the same sample reports as the helper. This
+    is not part of CI.
+  - The end-to-end tests share the temporary-repository helpers, so
+    they moved from `revisions.rs` to `tests/support/mod.rs`, unchanged
+    except for `pub`. The schema helper is `tests/support/schema.rs`,
+    and its own tests are `tests/schema.rs`.
+- **PR 2: `--format` and the end-to-end tests (tasks 2.4, 2.5).**
+  - The CLI's `Format::render` picks the renderer and fills in
+    `ReportSummary` from `FailOn`, so `main` stays one call.
+  - The JSON scenarios are in `tests/json.rs`; "Unknown format" is in
+    `tests/check.rs`, next to "Unknown fail-on level".
+  - "Range and related locations" uses a seven-line helper, so the new
+    copy spans lines 12-18 and the existing ones start where the
+    duplication spec's scenarios put them. The duplicate block fixtures
+    of `revisions.rs` moved to `tests/support/` with the other helpers.
+  - The usage lines name `[--format <format>]` before `[--fail-on
+    <level>]`, in every form, and the help test checks all three.
+- **PR 2: mutations (task 2.6).** Each of these fails tests in both
+  `qgate-report` and the end-to-end tests:
+  - every number written as a float;
+  - no key left out (a `null` instead);
+  - `failing` counting every finding;
+  - `summary` before `findings` in the envelope.
+- **PR 2: README (task 2.7).** The example report is real output, and
+  every new command was run in a temporary repository: the example and
+  the `jq` listing, `--worktree --format json`, the CI line (same exit
+  code as text, also when failing), an unknown base (empty standard
+  output, exit 2) and `--format text` against the default. The roadmap
+  marks M3 as in progress.
+- **Review round 1 of PR 2:** no blockers. Fixed:
+  - **README, "In CI":** a failing step skips the later ones in GitHub
+    Actions, so the example now gives the step that reads the report
+    `if: ${{ !cancelled() }}`.
+  - **The schema helper's guard checks value shapes too,** not only
+    keyword names: a `type` array, a `$ref` to a missing definition or a
+    non-numeric `minimum` would otherwise have been skipped silently.
+    `keywords_outside` became `unsupported`.
+  - **`metric` in the schema is exact:** `anyOf` with `required`
+    (`before` or `after`) replaces `minProperties`, which an unknown key
+    alone would have satisfied. The helper supports `anyOf` instead of
+    `minProperties`, still ten keywords; Python `jsonschema` agrees.
+  - **The renderer enforces what the schema requires:** a related
+    location without a line is left out (`JsonLocation::line` is a
+    `u32`), and an `end_line` is written only with a `line`. Analyzers
+    never produce either today.
+  - **"Several files" now needs the sort:** the finding in `src/a.ts` is
+    a duplicate block, which is collected after every file's own
+    findings, so without sorting `src/b.ts` would come first. Checked by
+    removing the sort.
+- **Verification round of PR 2:** every fix held. The guard's keyword
+  constants were left unused by the rewrite, so they were removed; the
+  keyword list is now the one `match` in `unsupported`.
+
 ## Risks / Trade-offs
 
 - **[Version 1 is frozen once published.]** A wrong name or shape stays

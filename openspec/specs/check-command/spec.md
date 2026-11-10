@@ -122,7 +122,9 @@ finding has a severity at or above the level given by `--fail-on`, and with
 code 0 otherwise. The levels are `error` (the default), `warning` and
 `never`, which never fails on findings. Exit code 2 for a check that could
 not run takes precedence. Standard output SHALL be the same whatever the
-level.
+level, except for the summary of the JSON report, which names the level
+and counts the findings at or above it (see "JSON summary" in
+`report-formats`).
 
 #### Scenario: Error finding
 
@@ -226,8 +228,9 @@ The system SHALL treat as a usage error a `check` command that has neither
 exactly two file arguments nor `--base`, that has both file arguments and
 `--base`, that has `--head` without `--base`, that has `--worktree` without
 `--base`, that has both `--worktree` and `--head`, that has a `--fail-on`
-value other than `error`, `warning` or `never`, or that has an unknown
-argument: print a usage message to standard error and exit with code 2.
+value other than `error`, `warning` or `never`, that has a `--format`
+value other than `text` or `json`, or that has an unknown argument: print
+a usage message to standard error and exit with code 2.
 
 #### Scenario: One argument
 
@@ -275,6 +278,13 @@ argument: print a usage message to standard error and exit with code 2.
 
 - **WHEN** the user runs `qgate check a.ts b.ts --fail-on info`
 - **THEN** standard error names the allowed values `error`, `warning` and `never`
+- **AND** the exit code is 2
+
+#### Scenario: Unknown format
+
+- **WHEN** the user runs `qgate check a.ts b.ts --format xml`
+- **THEN** standard error names the allowed values `text` and `json`
+- **AND** standard output is empty
 - **AND** the exit code is 2
 
 ### Requirement: Help and version

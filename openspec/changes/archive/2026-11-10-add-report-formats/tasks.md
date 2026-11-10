@@ -31,7 +31,7 @@ Commit messages and PR bodies are written to files first.
 
 ## 2. The JSON report and `--format` (PR 2)
 
-- [ ] 2.1 Add `serde_json` to the workspace and to `qgate-report`, saying why in the commit message (design D3). Write failing unit tests in `crates/qgate-report/src/lib.rs` for `render_json`:
+- [x] 2.1 Add `serde_json` to the workspace and to `qgate-report`, saying why in the commit message (design D3). Write failing unit tests in `crates/qgate-report/src/lib.rs` for `render_json`:
   - the exact bytes of the spec's "One finding", "No findings", "New function" and "Duplicate block" scenarios;
   - no `null` anywhere;
   - whole metric values written as integers, and a fractional one as a float (design D4);
@@ -40,27 +40,27 @@ Commit messages and PR bodies are written to files first.
   - a path that is not valid UTF-8, written with U+FFFD (design D7).
 
   Verify that they fail.
-- [ ] 2.2 Implement `render_json` and `ReportSummary` with private mirror structs (design D3–D5), and update the crate docs (the "JSON follows in M3" line). Verify that the 2.1 tests pass and that `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-report --no-deps` builds.
-- [ ] 2.3 Write `docs/schema/report-v1.json` (design D8). In `crates/qgate-cli/tests/`, add the schema test helper and its own tests:
+- [x] 2.2 Implement `render_json` and `ReportSummary` with private mirror structs (design D3–D5), and update the crate docs (the "JSON follows in M3" line). Verify that the 2.1 tests pass and that `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-report --no-deps` builds.
+- [x] 2.3 Write `docs/schema/report-v1.json` (design D8). In `crates/qgate-cli/tests/`, add the schema test helper and its own tests:
   - an invalid report (a missing key, a wrong type, a `null`) is rejected;
   - a valid one is accepted;
   - the spec's "A rule id the schema does not list": a report with an unknown rule id is accepted;
   - the schema uses only the supported keywords.
 
   Add `serde_json` as a dev-dependency of `qgate-cli`. Verify that the helper tests pass.
-- [ ] 2.4 Write failing end-to-end tests, one per scenario:
+- [x] 2.4 Write failing end-to-end tests, one per scenario:
   - `report-formats`: Default is text, JSON in every form, One finding, No findings, New function, Finding without a line, Duplicate block, Characters JSON must escape, Complexity values, Several files, Failing run, Never failing, Unknown base revision, Summary line on standard error, Reports match the published schema, Path from the two-file form;
   - `check-command`: Unknown format;
   - `duplication-analysis`: Range and related locations.
 
   Each one builds a temporary repository as the existing tests do. Verify that they fail.
-- [ ] 2.5 Add `--format` to `qgate-cli` (design D6): the value enum, the help text, `[--format <format>]` in every usage line, and the summary passed to `render_json`. Verify that the 2.4 tests pass and every existing test passes unchanged.
-- [ ] 2.6 Check that the tests bite. Break each of these, one at a time, and confirm that a test fails for each:
+- [x] 2.5 Add `--format` to `qgate-cli` (design D6): the value enum, the help text, `[--format <format>]` in every usage line, and the summary passed to `render_json`. Verify that the 2.4 tests pass and every existing test passes unchanged.
+- [x] 2.6 Check that the tests bite. Break each of these, one at a time, and confirm that a test fails for each:
   - integer output (always write floats);
   - leaving out empty fields (write `null`);
   - the `failing` count (count all findings);
   - the key order of the envelope.
-- [ ] 2.7 Update `README.md`:
+- [x] 2.7 Update `README.md`:
   - a "JSON output" section: an example report, every field, the versioning promise, that messages are for people and may be reworded, the schema file, and `jq` for pretty printing;
   - `--format` in "Try it";
   - the "In CI" and "Checking uncommitted work" examples where a script would use JSON.

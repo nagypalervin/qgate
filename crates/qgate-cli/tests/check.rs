@@ -443,15 +443,27 @@ fn unknown_fail_on_level() {
 }
 
 #[test]
+fn unknown_format() {
+    let out = qgate(&["check", "same.ts", "same.ts", "--format", "xml"]);
+    let err = stderr(&out);
+    assert!(err.contains("xml"), "{err}");
+    assert!(err.contains("[possible values: text, json]"), "{err}");
+    assert_eq!(stdout(&out), "");
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
 fn help_shows_every_form() {
     let out = qgate(&["check", "--help"]);
     let help = stdout(&out);
-    // Every form names --fail-on, so a usage error shows the opt-out.
+    // Every form names --format and --fail-on, so a usage error shows the
+    // opt-out and that JSON works in every form.
     for form in [
-        "qgate check <before> <after> [--fail-on <level>]\n",
-        "qgate check --base <rev> [--head <rev>] [--fail-on <level>]\n",
-        "qgate check --base <rev> --worktree [--fail-on <level>]\n",
+        "qgate check <before> <after> [--format <format>] [--fail-on <level>]\n",
+        "qgate check --base <rev> [--head <rev>] [--format <format>] [--fail-on <level>]\n",
+        "qgate check --base <rev> --worktree [--format <format>] [--fail-on <level>]\n",
         "Check the working tree (uncommitted and untracked files) instead of --head",
+        "[default: text] [possible values: text, json]",
     ] {
         assert!(help.contains(form), "{help}");
     }

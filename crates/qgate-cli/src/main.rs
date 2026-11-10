@@ -27,7 +27,7 @@ use qgate_config::Config;
 use qgate_core::{Finding, Location, Severity};
 use qgate_git::{BlobId, BlobReader, ChangedFile, Changes, GitError, Repository};
 use qgate_lang::{FileModel, Language, ParseError, Token};
-use qgate_report::render_text;
+use qgate_report::{ReportSummary, render_json, render_text};
 
 /// Exit code for a check that ran and found findings at or above the
 /// `--fail-on` level.
@@ -89,6 +89,52 @@ impl FailOn {
     }
 }
 
+/// How the report is written: the value of `--format`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Format {
+    /// Lines for people (the `check-command` spec).
+    Text,
+    /// The versioned JSON report (the `report-formats` spec).
+    Json,
+}
+
+impl Format {
+    /// The value as the user writes it.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Json => "json",
+        }
+    }
+
+    /// The report for `findings`, which fail the run at the `fail_on` level.
+    fn render(self, findings: &[Finding], fail_on: FailOn) -> String {
+        match self {
+            Self::Text => render_text(findings),
+            Self::Json => render_json(
+                findings,
+                ReportSummary {
+                    failing: fail_on.failing(findings),
+                    fail_on: fail_on.name(),
+                },
+            ),
+        }
+    }
+}
+
+impl ValueEnum for Format {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Text, Self::Json]
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
+        Some(PossibleValue::new(self.name()))
+    }
+}
+
+/// The `--format` value when the option is not given.
+const DEFAULT_FORMAT: Format = Format::Text;
+
 impl ValueEnum for FailOn {
     fn value_variants<'a>() -> &'a [Self] {
         &[Self::Error, Self::Warning, Self::Never]
@@ -110,9 +156,9 @@ fn check_command() -> Command {
     Command::new("check")
         .about("Report what got worse between two versions of TypeScript code")
         .override_usage(
-            "qgate check <before> <after> [--fail-on <level>]\n       \
-             qgate check --base <rev> [--head <rev>] [--fail-on <level>]\n       \
-             qgate check --base <rev> --worktree [--fail-on <level>]",
+            "qgate check <before> <after> [--format <format>] [--fail-on <level>]\n       \
+             qgate check --base <rev> [--head <rev>] [--format <format>] [--fail-on <level>]\n       \
+             qgate check --base <rev> --worktree [--format <format>] [--fail-on <level>]",
         )
         .arg(
             Arg::new("before")
@@ -151,6 +197,14 @@ fn check_command() -> Command {
                 .help("Check the working tree (uncommitted and untracked files) instead of --head")
                 .requires("base")
                 .conflicts_with_all(["head", "before", "after"]),
+        )
+        .arg(
+            Arg::new("format")
+                .long("format")
+                .value_name("format")
+                .help("How to write the report: text for people, json for programs")
+                .value_parser(value_parser!(Format))
+                .default_value(DEFAULT_FORMAT.name()),
         )
         .arg(
             Arg::new("fail-on")
@@ -204,8 +258,12 @@ fn main() -> ExitCode {
             .get_one::<FailOn>("fail-on")
             .copied()
             .unwrap_or(DEFAULT_FAIL_ON);
+        let format = args
+            .get_one::<Format>("format")
+            .copied()
+            .unwrap_or(DEFAULT_FORMAT);
         return match result.and_then(|findings| {
-            write_stdout(&render_text(&findings))?;
+            write_stdout(&format.render(&findings, fail_on))?;
             Ok(findings)
         }) {
             Ok(findings) => exit_code(fail_on, &findings),

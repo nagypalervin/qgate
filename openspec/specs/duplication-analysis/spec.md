@@ -147,7 +147,10 @@ line of the new occurrence. The message SHALL be `duplicates
 <path>:<first>-<last> (lines <first>-<last>, <n> tokens)`, naming the
 first file by path whose copy covers the whole block and is not itself
 reported as a new copy of it; with `k` further such files, `, and <k>
-more` SHALL end the parentheses.
+more` SHALL end the parentheses. The finding SHALL span the new
+occurrence's lines and name, as related locations in path order, the
+first copy of the whole block by line in each such file, with the lines
+it covers.
 
 #### Scenario: Message
 
@@ -166,3 +169,10 @@ more` SHALL end the parentheses.
 
 - **WHEN** the user runs `qgate check --base main --fail-on warning` on a change that adds a duplicate block
 - **THEN** the exit code is 1
+
+#### Scenario: Range and related locations
+
+- **GIVEN** the block of the "Several existing copies" scenario
+- **WHEN** the user runs `qgate check --base main --format json`
+- **THEN** the finding has `"line":12,"end_line":18`
+- **AND** its `related` array names `src/a.ts`, then `src/b.ts`, then `src/utils/date.ts`, each with the first and last line of its copy

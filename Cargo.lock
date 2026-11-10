@@ -149,6 +149,7 @@ dependencies = [
  "qgate-git",
  "qgate-lang",
  "qgate-report",
+ "serde_json",
 ]
 
 [[package]]
@@ -181,6 +182,8 @@ name = "qgate-report"
 version = "0.0.1"
 dependencies = [
  "qgate-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
