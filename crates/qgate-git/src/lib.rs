@@ -1527,11 +1527,19 @@ mod tests {
         let id = blob(&repo, "HEAD", "a.ts");
         let mut reader = found.blob_reader().expect("reader");
         reader.kill();
-        // Ended by a signal: no exit status.
-        assert!(matches!(
-            reader.read(&id),
-            Err(GitError::Command { status: None, .. })
-        ));
+        let result = reader.read(&id);
+        assert!(
+            matches!(result, Err(GitError::Command { .. })),
+            "{result:?}"
+        );
+        // Ended by a signal on Unix: no exit status. Windows ends a killed
+        // process with exit code 1 instead (design D2 of
+        // `add-release-binaries`).
+        #[cfg(unix)]
+        assert!(
+            matches!(result, Err(GitError::Command { status: None, .. })),
+            "{result:?}"
+        );
     }
 
     #[test]

@@ -475,7 +475,20 @@ mod tests {
         finding(Severity::Warning, "f: cyclomatic complexity 2 -> 4 (+2)")
     }
 
-    const CWD: &str = "/work/app";
+    /// The server's start directory: absolute on every platform, so a
+    /// drive on Windows (design D2 of `add-release-binaries`).
+    const CWD: &str = if cfg!(windows) {
+        r"C:\work\app"
+    } else {
+        "/work/app"
+    };
+
+    /// Another absolute directory.
+    const OTHER: &str = if cfg!(windows) {
+        r"C:\other\repo"
+    } else {
+        "/other/repo"
+    };
 
     /// A server started in `CWD` at `fail_on`, whose check returns
     /// `result` and records its calls.
@@ -774,18 +787,18 @@ mod tests {
     #[test]
     fn arguments_reach_the_check() {
         let cases = [
-            (json!({"base": "main"}), (CWD, "main", None)),
+            (json!({"base": "main"}), (PathBuf::from(CWD), "main", None)),
             (
                 json!({"base": "main", "head": "HEAD"}),
-                (CWD, "main", Some("HEAD")),
+                (PathBuf::from(CWD), "main", Some("HEAD")),
             ),
             (
-                json!({"directory": "/other/repo"}),
-                ("/other/repo", "HEAD", None),
+                json!({"directory": OTHER}),
+                (PathBuf::from(OTHER), "HEAD", None),
             ),
             (
                 json!({"directory": "sub/dir"}),
-                ("/work/app/sub/dir", "HEAD", None),
+                (Path::new(CWD).join("sub/dir"), "HEAD", None),
             ),
         ];
         for (arguments, (dir, base, head)) in cases {
@@ -793,7 +806,7 @@ mod tests {
             ask(&mut server, &call(&arguments));
             assert_eq!(
                 *calls.borrow(),
-                [(PathBuf::from(dir), base.to_owned(), head.map(str::to_owned))],
+                [(dir, base.to_owned(), head.map(str::to_owned))],
                 "{arguments}"
             );
         }
@@ -876,7 +889,7 @@ mod tests {
             "qgate: cannot read the current directory: gone"
         );
         // An absolute directory does not need it.
-        let response = ask(&mut server, &call(&json!({"directory": "/work/app"})));
+        let response = ask(&mut server, &call(&json!({"directory": CWD})));
         assert_eq!(super::tests::result(&response)["isError"], false);
         assert_eq!(*calls.borrow(), 1);
     }

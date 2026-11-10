@@ -11,12 +11,12 @@ This change spans three pull requests (design D6).
 
 ## 1. Platform CI (PR 1, `change/add-release-binaries`)
 
-- [ ] 1.1 Make `blob_reader_killed_process` in `crates/qgate-git/src/lib.rs` hold on Windows (design D2):
+- [x] 1.1 Make `blob_reader_killed_process` in `crates/qgate-git/src/lib.rs` hold on Windows (design D2):
   - assert `GitError::Command` on every platform;
   - assert `status: None` only under `cfg(unix)`.
 
   Verify that it still passes locally.
-- [ ] 1.2 Make the `mcp` unit tests' paths per-platform (design D2):
+- [x] 1.2 Make the `mcp` unit tests' paths per-platform (design D2):
   - the start directory and the "other" absolute directory become constants with a `C:\` form on Windows;
   - expected joined paths are built with `Path::join`.
 
