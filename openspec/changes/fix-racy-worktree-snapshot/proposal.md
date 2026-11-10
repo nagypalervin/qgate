@@ -21,7 +21,7 @@ A copy that keeps the original index's timestamp sees the edit.
 - **The clean-up of copies that interrupted checks left behind** no longer judges a copy's age by its modification time, which now says nothing about when the check ran.
   - It reads the age from the copy's name, which gets the time the check started.
   - Copies named by earlier versions are still judged by their modification time; those versions dated them when they were made.
-- **If the time cannot be set** (a file system that refuses it), the snapshot re-reads every tracked file instead of trusting the recorded timestamps (`git add -A --renormalize`). That is correct, just slower, so the check is not stopped.
+- **If the time cannot be kept** on the copy (a file system that refuses it or stores another one), the snapshot fails with a work-tree error instead of risking a missed edit. That case should not occur, because the copy lives on the same file system as the index (design D3, changed during apply).
 - **The behaviour users see does not change,** apart from the fix: no option, output or exit code changes.
 
 ### Out of scope
@@ -30,7 +30,7 @@ A copy that keeps the original index's timestamp sees the edit.
   - `assume-unchanged`;
   - a file-system monitor (`core.fsmonitor`);
   - timestamps a file system cannot tell apart, which `git status` would miss too.
-- **Rehashing every file on every check.** It would be robust, but it costs time in large repositories, and it runs clean filters such as Git LFS for every file. It is only the fallback.
+- **Rehashing every file on every check.** It would be robust, but it costs time in large repositories, and it runs clean filters such as Git LFS for every file.
 
 ## Capabilities
 

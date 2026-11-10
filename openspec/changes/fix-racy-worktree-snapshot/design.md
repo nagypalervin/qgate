@@ -31,7 +31,7 @@
 - **Alternatives:**
   - **`git update-index --refresh` on the copy.** It decides with the same stat comparison, so it misses the same edits.
   - **A fresh index from `read-tree HEAD`.** Every file would be hashed again. The marks the spec relies on would also be lost: `skip-worktree`, `assume-unchanged` and intent-to-add.
-  - **`add -A --renormalize` every time.** It is correct, and it was checked by hand to keep `skip-worktree`. But it reads every tracked file and runs every clean filter (Git LFS) on each check, and the hook checks every turn. It is kept as the fallback (D3).
+  - **`add -A --renormalize` every time.** It is correct, and it was checked by hand to keep `skip-worktree`. But it reads every tracked file and runs every clean filter (Git LFS) on each check, and the hook checks every turn. An earlier draft kept it as a fallback for D3, but it does not work as one (see D3).
 
 ### D2. A copy's age comes from its name
 
@@ -44,12 +44,21 @@
 - **Side effect:** the age is now measured with the local clock at both ends. On a network file system, the server's clock no longer matters.
 - **Alternative:** a marker file next to each copy, holding its start time. That means two files per check, and more for an interrupted check to leave behind. A name cannot get out of step with its file.
 
-### D3. If the time cannot be set, rehash
+### D3. If the time cannot be kept, the snapshot fails
 
-- **When it applies:** setting the time fails, or the time read back differs from the original's, for example on a file system that stores coarser times. Then the snapshot runs `add -A --renormalize` instead of `add -A`.
-- **What that does:** git rereads every tracked file and stages its content, whatever its stat data says. A manual check confirmed that it still leaves `skip-worktree` files alone. Task 1.3 verifies `assume-unchanged` the same way.
-- **Why not an error:** the check stays correct, only slower, on a rare file system. An error would show up in every agent turn.
-- **Testability:** an internal parameter forces the fallback in tests, because a real refusal cannot be provoked on the CI file system.
+- **When it applies:** reading the index's time fails, setting it on the copy fails, or the time read back from the copy differs. The snapshot then stops with a work-tree error, `cannot give the private index <path> the index's modification time: <reason>`.
+  - The spec already covers this case ("Working tree errors": no snapshot of the working tree can be taken).
+  - The hook shows it to the user, never to the model.
+- **Why an error is acceptable:** the case should not happen.
+  - The copy lives in the same git directory, on the same file system, as the index. So the index's time is already in that file system's precision, and it can be written back to the copy exactly.
+  - Every common file system lets the owner set the time of a file it just created.
+  - If the case does happen, an error is visible, while a check that goes on can miss an edit silently.
+- **Why not a fallback:** the approved draft rehashed with `git add -A --renormalize`. In apply (task 1.3) it turned out not to work:
+  - it stops with `fatal: unable to stat` when a tracked file was deleted from disk;
+  - it implies `-u`, so untracked files are not added.
+
+  A fallback that dates the copy in 1970, so that every entry is racily clean, would be more code for a case that should not happen. If time cannot be set at all, it would not help either. The human left this choice to the agent, and the error was chosen.
+- **Testing:** a real refusal cannot be provoked on the CI file system. The comparison of the two times is a small function with its own unit test.
 
 ### D4. Deterministic tests
 
@@ -61,14 +70,30 @@ The failing test raced the clock. The new tests set the times themselves:
 
 `git diff-files` lists the file. Before the fix, the snapshot does not. The same setup serves the unit test in `qgate-git` and the end-to-end test for the new spec scenario in `qgate-cli`.
 
+## Implementation Notes
+
+- **The order of the tasks.**
+  - Task 1.2 alone would let `remove_stale` remove a running check's copy of an index that is more than a day old. So tasks 1.1 to 2.2 land in one commit, and no commit has that regression.
+  - The pre-commit hook runs the tests, so the failing tests of 1.1 cannot be committed on their own.
+  - Before that commit, both 1.1 tests were seen to fail on the old code, and to pass with only the copy's time changed.
+- **The old test `private_index_is_dated_now_even_when_the_index_is_old`** asserted what D1 reverses. It became `private_index_keeps_the_index_time_and_survives_clean_up`. Its purpose is kept: a running check's copy of a three-day-old index survives another run's clean-up.
+- **Names that do not parse:** names with other than three or four numbers, or with anything that is not a number, are kept. Before, every name with the prefix was judged by its time.
+- **Mutations (task 2.2).** Each of these fails tests:
+  - **dating the copy now:** 4 tests fail: both racy unit tests, the clean-up test of a live copy, and the end-to-end scenario;
+  - **judging new-form names by their modification time:** 2 tests fail;
+  - **a comparison that accepts a different time:** 1 test fails.
+
+  Deleting the call to the comparison is not caught. A real refusal cannot be provoked on the CI file system, so no test reaches that path.
+- **Split index.** The racy edit is also caught with `core.splitIndex=true`, and the test fails when the copy is dated now. Git compares the entries with the time of the main index file, which the copy keeps.
+
 ## Risks / Trade-offs
 
 - **[Split index]** With `core.splitIndex`, entries can live in a `sharedindex.*` file, which has its own time.
   - **Mitigation:** the snapshot already writes one plain file. Task 1.2 runs the new racy test with a split index as well, so the result does not depend on it.
 - **[Copies left by earlier versions]** These keep the old name form.
   - **Mitigation:** D2 judges them by their modification time, as before. Task 2.1 tests both name forms.
-- **[A slow fallback]** `--renormalize` costs time in large repositories.
-  - **Mitigation:** it only applies where file times cannot be set, and a check measured on such a file system can be revisited then.
+- **[A file system that cannot keep the time]** The check fails on every run there.
+  - **Mitigation:** the error names the private index and the reason, so the case can be found and handled if it ever occurs. The reasoning in D3 says it should not occur.
 
 ## Migration Plan
 

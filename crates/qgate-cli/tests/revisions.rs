@@ -6,6 +6,7 @@
 mod support;
 
 use std::process::{Command, Output};
+use std::time::{Duration, SystemTime};
 
 use support::{
     DATE_HELPER, RENAMED_COPY, Repo, feature_repo, function, isolate, padding, qgate_in,
@@ -1129,6 +1130,36 @@ fn files_git_does_not_look_at() {
         "{}",
         stderr(&out)
     );
+}
+
+#[test]
+fn an_edit_in_the_same_instant_as_the_index_write() {
+    // Set up as in design D4 of `fix-racy-worktree-snapshot`: git sees the
+    // edit as racily clean. Ctime, which cannot be set, is not trusted.
+    let repo = Repo::new();
+    let set_modified = |path: &str, time: SystemTime| {
+        std::fs::File::options()
+            .write(true)
+            .open(repo.dir.join(path))
+            .and_then(|f| f.set_modified(time))
+            .expect("set the modification time");
+    };
+    repo.git(&["config", "core.trustctime", "false"]);
+    let after = function("f", 3);
+    let before = function("f", 1);
+    let before = format!("{before}//{}\n", " ".repeat(after.len() - before.len() - 3));
+    assert_eq!(before.len(), after.len());
+    let then = SystemTime::now() - Duration::from_secs(60 * 60);
+    repo.write("src/a.ts", &before);
+    set_modified("src/a.ts", then);
+    repo.commit("base");
+    // Written in place: the size and the inode stay the same.
+    repo.write("src/a.ts", &after);
+    set_modified("src/a.ts", then);
+    set_modified(".git/index", then);
+
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(stdout(&out), F_INCREASE, "{}", stderr(&out));
 }
 
 // revision-input: The working tree replaces the head everywhere
