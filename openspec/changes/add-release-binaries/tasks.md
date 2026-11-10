@@ -21,7 +21,7 @@ This change spans three pull requests (design D6).
   - expected joined paths are built with `Path::join`.
 
   Verify that they still pass locally.
-- [ ] 1.3 Add the `platforms` job to `.github/workflows/ci.yml` (design D1). It runs `cargo test --workspace --locked` on `ubuntu-24.04-arm`, `macos-latest`, `macos-15-intel`, `windows-latest` and `windows-11-arm`, with `fail-fast: false` and `Swatinem/rust-cache`. Open PR 1 and verify that all its checks pass. Record the job durations in `design.md`.
+- [x] 1.3 Add the `platforms` job to `.github/workflows/ci.yml` (design D1). It runs `cargo test --workspace --locked` on `ubuntu-24.04-arm`, `macos-latest`, `macos-15-intel`, `windows-latest` and `windows-11-arm`, with `fail-fast: false` and `Swatinem/rust-cache`. Open PR 1 and verify that all its checks pass. Record the job durations in `design.md`.
 
 ## 2. Release workflow (PR 2, `change/add-release-binaries-2`)
 

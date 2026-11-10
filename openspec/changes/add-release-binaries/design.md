@@ -234,6 +234,32 @@ repository. "Tests failing on one platform" holds by construction:
 `publish` needs every `build` job, and each `build` job runs the tests
 first. It is not tested by breaking a test on purpose.
 
+## Implementation Notes
+
+Decisions and results recorded during apply.
+
+- **PR 1 (#10), first CI run, 2026-11-10.** All seven checks passed,
+  with `RUSTFLAGS=-D warnings` from `ci.yml`. The spike had run
+  without it, so this also showed that no code compiled only on
+  Windows produces warnings.
+
+  | Job | Duration |
+  |---|---|
+  | `check` (Linux x64) | 37 s |
+  | MSRV | 32 s |
+  | `test (ubuntu-24.04-arm)` | 35 s |
+  | `test (macos-latest)` | 1 min 30 s |
+  | `test (macos-15-intel)` | 1 min 41 s |
+  | `test (windows-latest)` | 3 min 27 s |
+  | `test (windows-11-arm)` | 5 min 38 s |
+
+  These are cold caches. Windows arm64 sets the wall time of a pull
+  request.
+- **The `mcp` test constants** (D2) are `const` items chosen with
+  `cfg!(windows)`, `C:\work\app` and `C:\other\repo`. The joined
+  path is built with `Path::new(CWD).join("sub/dir")`, so each platform
+  compares its own separator.
+
 ## Risks / Trade-offs
 
 - **[GitHub retires `macos-15-intel`, the last x64 macOS image]** →
