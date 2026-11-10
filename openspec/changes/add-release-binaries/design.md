@@ -344,6 +344,18 @@ Decisions and results recorded during apply.
   9. **`sha256sum` is not on macOS or Windows** → D4 names a command
      for each OS.
 
+- **Ervin approved the design changes from the review** (2026-11-10),
+  with the statically linked C runtime on Windows. He left the ruleset
+  change to the agent.
+- **The required checks (task 1.4), 2026-11-10.** The agent added the
+  five `test (<runner>)` contexts to the "Protect main" ruleset
+  (id 26898116) with `gh api -X PUT`, using the GitHub Actions app's
+  integration id (15368), like the two existing ones. The ruleset was
+  saved before the change. Afterwards it listed all seven checks, and
+  its other rules, conditions, enforcement and bypass list were
+  unchanged. `gh pr checks 10 --required` then showed all seven as
+  required and passing.
+
 ## Risks / Trade-offs
 
 - **[GitHub retires `macos-15-intel`, the last x64 macOS image]** →

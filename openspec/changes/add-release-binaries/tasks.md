@@ -23,7 +23,7 @@ This change spans three pull requests (design D6).
   Verify that they still pass locally.
 - [x] 1.3 Add the `platforms` job to `.github/workflows/ci.yml` (design D1). It runs `cargo test --workspace --locked` on `ubuntu-24.04-arm`, `macos-latest`, `macos-15-intel`, `windows-latest` and `windows-11-arm`, with `fail-fast: false` and `Swatinem/rust-cache`. Open PR 1 and verify that all its checks pass. Record the job durations in `design.md`.
 
-- [ ] 1.4 Make the five `test (<runner>)` checks required in the "Protect main" ruleset, next to the two that already are (design D1). This is a repository setting, so do it with Ervin's approval. Verify with `gh api` that the ruleset lists all seven checks. (Added in review of PR 1.)
+- [x] 1.4 Make the five `test (<runner>)` checks required in the "Protect main" ruleset, next to the two that already are (design D1). This is a repository setting, so do it with Ervin's approval. Verify with `gh api` that the ruleset lists all seven checks. (Added in review of PR 1.)
 
 ## 2. Release workflow (PR 2, `change/add-release-binaries-2`)
 
