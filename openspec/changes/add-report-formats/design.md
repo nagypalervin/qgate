@@ -259,6 +259,18 @@ mechanical, and the compiler finds them all.
     of `revisions.rs` moved to `tests/support/` with the other helpers.
   - The usage lines name `[--format <format>]` before `[--fail-on
     <level>]`, in every form, and the help test checks all three.
+- **PR 2: mutations (task 2.6).** Each of these fails tests in both
+  `qgate-report` and the end-to-end tests:
+  - every number written as a float;
+  - no key left out (a `null` instead);
+  - `failing` counting every finding;
+  - `summary` before `findings` in the envelope.
+- **PR 2: README (task 2.7).** The example report is real output, and
+  every new command was run in a temporary repository: the example and
+  the `jq` listing, `--worktree --format json`, the CI line (same exit
+  code as text, also when failing), an unknown base (empty standard
+  output, exit 2) and `--format text` against the default. The roadmap
+  marks M3 as in progress.
 
 ## Risks / Trade-offs
 

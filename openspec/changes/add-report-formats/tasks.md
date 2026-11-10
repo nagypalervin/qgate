@@ -55,12 +55,12 @@ Commit messages and PR bodies are written to files first.
 
   Each one builds a temporary repository as the existing tests do. Verify that they fail.
 - [x] 2.5 Add `--format` to `qgate-cli` (design D6): the value enum, the help text, `[--format <format>]` in every usage line, and the summary passed to `render_json`. Verify that the 2.4 tests pass and every existing test passes unchanged.
-- [ ] 2.6 Check that the tests bite. Break each of these, one at a time, and confirm that a test fails for each:
+- [x] 2.6 Check that the tests bite. Break each of these, one at a time, and confirm that a test fails for each:
   - integer output (always write floats);
   - leaving out empty fields (write `null`);
   - the `failing` count (count all findings);
   - the key order of the envelope.
-- [ ] 2.7 Update `README.md`:
+- [x] 2.7 Update `README.md`:
   - a "JSON output" section: an example report, every field, the versioning promise, that messages are for people and may be reworded, the schema file, and `jq` for pretty printing;
   - `--format` in "Try it";
   - the "In CI" and "Checking uncommitted work" examples where a script would use JSON.

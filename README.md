@@ -71,6 +71,11 @@ Exit codes:
 example above has an Error finding, so it exits with `1`; add
 `--fail-on never` to only see the report.
 
+`--format json` writes the report as JSON for programs, such as coding
+agents, hooks and CI scripts, in every form (see
+[JSON output](#json-output)); `--format text`, the default, is the
+output shown here.
+
 ### Checking uncommitted work
 
 To check what you (or your coding agent) changed before committing it:
@@ -99,6 +104,14 @@ uncommitted ones only, compare with `HEAD`:
 qgate check --base HEAD --worktree
 ```
 
+A coding agent, or a hook that runs after it edits files, gets the same
+check as JSON, which it can read without parsing text (see
+[JSON output](#json-output)):
+
+```sh
+qgate check --base main --worktree --format json
+```
+
 **Nothing in the repository changes:** the index (what you staged),
 `HEAD`, branches, the stash and your files stay as they are, and no git
 hook runs (a configured file-system monitor, `core.fsmonitor`, may still
@@ -112,6 +125,88 @@ generated files (build output, bundles) in `.gitignore`.
 A check that is killed midway (by a timeout, say) can leave a copy of
 the index named `qgate-index-*` in the git directory; the next
 `--worktree` check removes copies more than a day old.
+
+### JSON output
+
+`--format json` writes one JSON object on a single line to standard
+output. Pretty-printed with `jq .`, it looks like this:
+
+```sh
+qgate check --base main --format json | jq .
+```
+
+```json
+{
+  "schema_version": 1,
+  "findings": [
+    {
+      "rule": "duplication/duplicate-block",
+      "severity": "warning",
+      "message": "duplicates src/utils/date.ts:1-6 (lines 4-9, 68 tokens)",
+      "path": "src/orders/format.ts",
+      "line": 4,
+      "end_line": 9,
+      "related": [
+        { "path": "src/utils/date.ts", "line": 1, "end_line": 6 }
+      ]
+    },
+    {
+      "rule": "complexity/cyclomatic-increase",
+      "severity": "warning",
+      "message": "total: cyclomatic complexity 3 -> 6 (+3)",
+      "path": "src/orders/total.ts",
+      "line": 1,
+      "metric": { "before": 3, "after": 6 }
+    }
+  ],
+  "summary": { "count": 2, "failing": 0, "fail_on": "error" }
+}
+```
+
+- **`schema_version`:** `1`, the version of this format.
+- **`findings`:** in the order the text format prints them: by path, then
+  line, then rule. Each finding has:
+  - `rule`, `severity` (`error`, `warning` or `info`), `message` and
+    `path` (relative to the repository root, or as given in the two-file
+    form), as the text format shows them;
+  - `line`, 1-based, unless the finding is about a whole file;
+  - `end_line`, when the finding spans lines: the last line of the range
+    that starts at `line` (it may equal `line`);
+  - `metric`, for a measured value: `before` and `after`, for example a
+    function's complexity. `before` is absent for a new function, and
+    `after` would be absent for a removed item;
+  - `related`, when the finding refers to other places: for a duplicate
+    block, the existing copies, one per file by path, each with `path`,
+    `line` and `end_line`. The first is the one the message names.
+- **`summary`:** `count` (the number of findings), `failing` (how many
+  are at or above the `--fail-on` level, so the run exits with `1` when
+  it is not `0`) and `fail_on` (that level).
+
+A key without a value is left out, never `null`. Line numbers and
+whole metric values are written as integers.
+
+**What stays stable:** within `schema_version` 1, qgate may add keys and
+new rule ids, but never removes or renames a key, changes its type or
+meaning, or adds a severity; that needs version 2. So ignore keys you do
+not know, and check `schema_version`. `message` is for people and may be
+reworded in any release; read the other fields instead of parsing it.
+The JSON Schema for version 1 is
+[`docs/schema/report-v1.json`](docs/schema/report-v1.json).
+
+Exit codes and the summary line on standard error are the same as for
+text. When the check cannot run, standard output stays empty and the
+error is text on standard error, with exit code `2`.
+
+With `jq`, for example, list where the findings are:
+
+```sh
+qgate check --base main --format json | jq -r '.findings[] | "\(.path):\(.line // "-") \(.rule)"'
+```
+
+```
+src/orders/format.ts:4 duplication/duplicate-block
+src/orders/total.ts:1 complexity/cyclomatic-increase
+```
 
 ### Duplicated code
 
@@ -216,6 +311,15 @@ The job fails when the pull request adds an Error finding. Use
 `--fail-on warning` for a stricter gate, or `--fail-on never` to report
 without failing the job.
 
+For a later step or another tool, write the report as JSON to a file
+instead; the exit code is the same:
+
+```yaml
+- run: qgate check --base "origin/$BASE_REF" --format json > qgate-report.json
+  env:
+    BASE_REF: ${{ github.base_ref }}
+```
+
 qgate has no release binaries yet (planned for M4); until then, install
 it with `cargo install` as above.
 
@@ -263,7 +367,7 @@ Design principles:
 |---|---|---|
 | **M1** | `qgate check`, TypeScript parsing, complexity delta, git revisions, `--fail-on` | done |
 | **M2** | Architecture rules (`qgate.toml`), duplication detection | done |
-| **M3** | Checking while coding: the working tree as head, JSON output, hooks for AI coding agents and git, an MCP server, so agents check their own changes before opening a pull request | planned |
+| **M3** | Checking while coding: the working tree as head, JSON output, hooks for AI coding agents and git, an MCP server, so agents check their own changes before opening a pull request | in progress |
 | **M4** | CI integration: release binaries, GitHub Action, Azure DevOps Pipelines, pull request comments, SARIF output | planned |
 | **M5** | Change risk from git history: hotspots (code that is both complex and changed often), code changed without its tests | planned |
 | **M6** | Baseline and trends over time, optional AI summary | planned |
