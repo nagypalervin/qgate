@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/nagypalervin/qgate/main/docs/schema/report-v1.json",
+  "title": "qgate JSON report, version 1",
+  "description": "What `qgate check --format json` writes to standard output. Within version 1, keys and rule ids may be added; no key is removed, renamed or changes its type or meaning, and no severity is added. Unknown keys must be ignored.",
+  "type": "object",
+  "required": ["schema_version", "findings", "summary"],
+  "properties": {
+    "schema_version": {
+      "description": "The format version. A reader that does not know it must not guess.",
+      "const": 1
+    },
+    "findings": {
+      "description": "What got worse, in the order the text format prints it: by path, then line (none first), then rule.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "summary": { "$ref": "#/$defs/summary" }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": ["rule", "severity", "message", "path"],
+      "properties": {
+        "rule": {
+          "description": "The rule id, `<analyzer>/<rule>` in lowercase, e.g. `complexity/cyclomatic-increase`. New ids may appear within version 1.",
+          "type": "string"
+        },
+        "severity": {
+          "enum": ["error", "warning", "info"]
+        },
+        "message": {
+          "description": "One line for people. It may be reworded in any release; do not parse it.",
+          "type": "string"
+        },
+        "path": {
+          "description": "The file, relative to the repository root (or as given, for two files).",
+          "type": "string"
+        },
+        "line": { "$ref": "#/$defs/line" },
+        "end_line": {
+          "description": "The last line of a range that starts at `line`; it may equal `line`.",
+          "$ref": "#/$defs/line"
+        },
+        "metric": { "$ref": "#/$defs/metric" },
+        "related": {
+          "description": "Other places the finding refers to, in an order the rule defines. For a duplicate block: the first copy in each file that holds the whole block, by path.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/location" }
+        }
+      }
+    },
+    "location": {
+      "type": "object",
+      "required": ["path", "line"],
+      "properties": {
+        "path": { "type": "string" },
+        "line": { "$ref": "#/$defs/line" },
+        "end_line": { "$ref": "#/$defs/line" }
+      }
+    },
+    "line": {
+      "description": "A 1-based line number.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "metric": {
+      "description": "The measured value before and after the change. `before` is absent for a new item, `after` for a removed one.",
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "before": { "type": "number" },
+        "after": { "type": "number" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["count", "failing", "fail_on"],
+      "properties": {
+        "count": {
+          "description": "The number of findings.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "failing": {
+          "description": "How many findings are at or above the `fail_on` level; the run exits with 1 when this is not 0.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "fail_on": {
+          "description": "The `--fail-on` level: `error` (the default), `warning` or `never`.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

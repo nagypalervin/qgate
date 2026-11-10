@@ -232,6 +232,22 @@ mechanical, and the compiler finds them all.
   - `serde_json` cannot fail on these types; `render_json` documents
     that it never panics in practice rather than returning a `Result`
     every caller would have to handle.
+- **PR 2: the schema and its test helper (task 2.3).**
+  - The schema also uses `minItems` (a `related` array is never empty)
+    and `minProperties` (a `metric` always has a value), because the
+    spec promises both. The helper supports these two keywords as well,
+    ten in all.
+  - The helper treats `integer` more strictly than JSON Schema: `1.0`
+    is not an integer there, because qgate promises integers without a
+    fraction. A standard validator accepts more, never less.
+  - The schema was also checked once, by hand, with a full Draft 2020-12
+    implementation (Python `jsonschema`): the metaschema accepts it, and
+    it accepts and rejects the same sample reports as the helper. This
+    is not part of CI.
+  - The end-to-end tests share the temporary-repository helpers, so
+    they moved from `revisions.rs` to `tests/support/mod.rs`, unchanged
+    except for `pub`. The schema helper is `tests/support/schema.rs`,
+    and its own tests are `tests/schema.rs`.
 
 ## Risks / Trade-offs
 

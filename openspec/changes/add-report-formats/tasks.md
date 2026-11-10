@@ -41,7 +41,7 @@ Commit messages and PR bodies are written to files first.
 
   Verify that they fail.
 - [x] 2.2 Implement `render_json` and `ReportSummary` with private mirror structs (design D3–D5), and update the crate docs (the "JSON follows in M3" line). Verify that the 2.1 tests pass and that `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-report --no-deps` builds.
-- [ ] 2.3 Write `docs/schema/report-v1.json` (design D8). In `crates/qgate-cli/tests/`, add the schema test helper and its own tests:
+- [x] 2.3 Write `docs/schema/report-v1.json` (design D8). In `crates/qgate-cli/tests/`, add the schema test helper and its own tests:
   - an invalid report (a missing key, a wrong type, a `null`) is rejected;
   - a valid one is accepted;
   - the spec's "A rule id the schema does not list": a report with an unknown rule id is accepted;

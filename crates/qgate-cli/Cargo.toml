@@ -21,5 +21,8 @@ qgate-git.workspace = true
 qgate-lang.workspace = true
 qgate-report.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true
