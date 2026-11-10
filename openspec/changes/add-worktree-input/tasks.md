@@ -98,7 +98,7 @@ Commit messages and PR bodies are written to files first.
   - `GitError::WorkTree` printed through its `Display` ("cannot take a snapshot of the working tree: ...").
 
   Verify the 2.1 and 2.2 tests pass, and that every existing test passes unchanged.
-- [ ] 2.4 Update `README.md`:
+- [x] 2.4 Update `README.md`:
   - a "Checking uncommitted work" section: what counts, that nothing in the repository changes, `--base HEAD --worktree` for only the uncommitted changes, and the advice to ignore large generated files;
   - the option in "Try it".
 

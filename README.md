@@ -26,8 +26,10 @@ qgate check --base main
 
 qgate compares the merge base of `main` and `HEAD` with `HEAD` (what a
 pull request shows) and analyzes every changed `.ts`, `.mts`, `.cts` and
-`.tsx` file. `--head <rev>` checks another revision instead of `HEAD`.
-Paths in the output are relative to the repository root.
+`.tsx` file. `--head <rev>` checks another revision instead of `HEAD`,
+and `--worktree` checks your uncommitted work (see
+[below](#checking-uncommitted-work)). Paths in the output are relative to
+the repository root.
 
 Or compare two files directly, here two fixtures from this repository
 (without installing):
@@ -68,6 +70,40 @@ Exit codes:
 (findings never fail it; only a check that could not run does). The
 example above has an Error finding, so it exits with `1`; add
 `--fail-on never` to only see the report.
+
+### Checking uncommitted work
+
+To check what you (or your coding agent) changed before committing it:
+
+```sh
+qgate check --base main --worktree
+```
+
+The working tree takes the place of `HEAD`, so the check sees everything
+a commit of all your changes would contain:
+
+- **Tracked files as they are on disk**, staged or not; a file deleted
+  from disk counts as deleted, and a file moved with a plain `mv` is
+  still a rename.
+- **Untracked files**, unless `.gitignore` excludes them.
+- **`qgate.toml` as it is on disk.**
+- Files marked `skip-worktree` or `assume-unchanged` count as unchanged,
+  as git sees them.
+
+The before side is still the merge base of `main` and `HEAD`, so this
+reports your committed and uncommitted changes together. For the
+uncommitted ones only, compare with `HEAD`:
+
+```sh
+qgate check --base HEAD --worktree
+```
+
+**Nothing in the repository changes:** the index (what you staged),
+`HEAD`, branches, the stash and your files stay as they are, and no git
+hook runs. qgate writes a snapshot of the working tree into git's object
+store as objects that no branch refers to; `git gc` removes them later.
+That snapshot includes every untracked file that is not ignored, so list
+large generated files (build output, bundles) in `.gitignore`.
 
 ### Duplicated code
 
@@ -142,7 +178,8 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
 - **Every import counts**, `import type` and `import("...")` in a type
   included; dynamic imports and `require` count with a string literal.
 - **The file is read from the revision being checked** (`--head`, by default
-  `HEAD`), not from the working tree. A missing `qgate.toml` means no
+  `HEAD`), not from the working tree, unless you check the working tree
+  itself with `--worktree`. A missing `qgate.toml` means no
   rules; an invalid one (unknown keys included) fails with exit code `2`.
   The two-file form ignores it.
 - **Not yet supported:** tsconfig `paths`, root-absolute imports
