@@ -216,6 +216,32 @@ the required behaviour.
   - **a turn with one new file** (a copy of another): 0.60 s.
 
   No shortcut is needed.
+- **Manual check (task 3.3).** Four `claude -p` runs in a temporary
+  repository with the README's settings entry (Claude Code 2.1.319, Sonnet,
+  `--include-hook-events`, the release build on the `PATH`):
+  - **A block and the model's fix.** Asked to add discounts to a
+    function, the model raised its complexity by 5. The hook blocked, and
+    the model got the `reason` as "Stop hook feedback". It moved the logic
+    into helpers and lookup tables, and the second run of the hook wrote
+    nothing. To get there, the model dropped an early return, and it told
+    the user.
+  - **An explanation instead of a fix.** When the prompt required
+    everything in one function, the model answered the block by
+    explaining why the increase was intended, and stopped. The second run
+    saw `stop_hook_active` and sent the remaining finding to the user.
+  - **A Warning.** A +2 increase reached the user as a notice, not the
+    model, and the turn ended.
+  - **An invalid `qgate.toml`.** The parse error reached the user as a
+    notice. The model's transcript does not contain it.
+
+  Two things Claude Code does that qgate does not control:
+  - **A deliberate block is labelled as an error.** Claude Code also
+    raised a "Stop hook error occurred" notification, even though qgate
+    exited with 0 and Claude Code recorded the outcome as a success.
+  - **Notices are prefixed.** Every line of a `systemMessage` was shown
+    with a "Stop says: " prefix.
+
+  The interactive interface was not checked; `-p` has none.
 
 ## Risks / Trade-offs
 
