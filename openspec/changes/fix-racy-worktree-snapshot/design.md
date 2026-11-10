@@ -35,22 +35,34 @@
 
 ### D2. A copy's age comes from its name
 
-- **The new name:** `qgate-index-<pid>-<seconds since 1970>-<subsec nanos>-<n>`. The seconds are the time the check started.
+- **The new name:** `qgate-snapshot-index-<pid>-<seconds since 1970>-<subsec nanos>-<n>`. The seconds are the time the check started.
 - **`remove_stale`:**
   - **Names of this form:** the copy is removed when the seconds in its name are more than a day ago.
-  - **Names of the old form** (`<pid>-<nanos>-<n>`, one number fewer): the copy is judged by its modification time, as before. Earlier versions dated their copies when they made them, so that time is still right.
+  - **Names of earlier versions** (`qgate-index-<pid>-<nanos>-<n>`): the copy is judged by its modification time, as before. Earlier versions dated their copies when they made them, so that time is still right.
   - **Anything else, and times in the future:** the copy is kept.
 - **Why the name:** with D1, the modification time is the user's index time. That time can be days old for a copy that a running check uses right now.
+- **Why a new stem** (changed after review): earlier versions remove every `qgate-index-*` file whose modification time is more than a day old.
+  - Under the old stem, an older qgate running at the same time could delete a new check's copy, for example a pinned version in a pre-commit hook next to the agent hook.
+  - Without its copy, `add -A` starts from an empty index, and `write-tree` can even write the empty tree. That is a silent miss again.
+  - Earlier versions do not match `qgate-snapshot-index-`, so they leave such copies alone.
 - **Side effect:** the age is now measured with the local clock at both ends. On a network file system, the server's clock no longer matters.
 - **Alternative:** a marker file next to each copy, holding its start time. That means two files per check, and more for an interrupted check to leave behind. A name cannot get out of step with its file.
 
 ### D3. If the time cannot be kept, the snapshot fails
 
-- **When it applies:** reading the index's time fails, setting it on the copy fails, or the time read back from the copy differs. The snapshot then stops with a work-tree error, `cannot give the private index <path> the index's modification time: <reason>`.
+- **When it applies:** the snapshot stops with a work-tree error in three cases:
+  - reading the index's time fails: `cannot read the modification time of the index <path>: <reason>`;
+  - setting the time on the copy fails;
+  - the copy reads back a **later** time than the index's.
+
+  The last two give `cannot give the private index <path> the index's modification time: <reason>`.
+- **An earlier time is accepted** (changed after review). A copy dated earlier than the index makes git compare the content of at least the files it would compare with the index itself: more work, never a missed edit. Only a later time lets git trust a file it must read.
+  - This matters where the copy's file system stores coarser times than the index's.
+  - That can happen, because `--git-path index` follows `GIT_INDEX_FILE` while the copy stays in the git directory, so the two may be on different file systems.
   - The spec already covers this case ("Working tree errors": no snapshot of the working tree can be taken).
   - The hook shows it to the user, never to the model.
 - **Why an error is acceptable:** the case should not happen.
-  - The copy lives in the same git directory, on the same file system, as the index. So the index's time is already in that file system's precision, and it can be written back to the copy exactly.
+  - A time can only be stored coarser, that is, truncated and so earlier, which is accepted.
   - Every common file system lets the owner set the time of a file it just created.
   - If the case does happen, an error is visible, while a check that goes on can miss an edit silently.
 - **Why not a fallback:** the approved draft rehashed with `git add -A --renormalize`. In apply (task 1.3) it turned out not to work:
@@ -58,7 +70,7 @@
   - it implies `-u`, so untracked files are not added.
 
   A fallback that dates the copy in 1970, so that every entry is racily clean, would be more code for a case that should not happen. If time cannot be set at all, it would not help either. The human left this choice to the agent, and the error was chosen.
-- **Testing:** a real refusal cannot be provoked on the CI file system. The comparison of the two times is a small function with its own unit test.
+- **Testing:** a real refusal cannot be provoked on the CI file system. The comparison of the two times is a small function with its own unit test: equal and earlier times pass, and a later one fails.
 
 ### D4. Deterministic tests
 
@@ -83,6 +95,8 @@ The failing test raced the clock. The new tests set the times themselves:
   - **judging new-form names by their modification time:** 2 tests fail;
   - **a comparison that accepts a different time:** 1 test fails.
 
+  The comparison was later changed to accept an earlier time; see "After review".
+
   Deleting the call to the comparison is not caught. A real refusal cannot be provoked on the CI file system, so no test reaches that path.
 - **Split index.** The racy edit is also caught with `core.splitIndex=true`, and the test fails when the copy is dated now. Git compares the entries with the time of the main index file, which the copy keeps.
 
@@ -95,12 +109,27 @@ The failing test raced the clock. The new tests set the times themselves:
     - The evidence is the deterministic tests instead: both fail on the old code and pass on the new.
     - `snapshot_sees_a_racily_clean_edit` also passed 300 times out of 300.
 
+- **After review.** The `reviewer` subagent found two gaps, both fixed:
+  - **Earlier versions' clean-up.** An older qgate's clean-up could delete a new check's copy. New copies now use the stem `qgate-snapshot-index` (D2), and the README names both stems.
+  - **Coarser time on the copy.** An exact read-back rejected a coarser, earlier time on the copy, although that is safe. Only a later time is now an error (D3). The test asserts both.
+
+  Further changes from the review:
+  - the error for a failed read of the index's time now names the index, not the copy;
+  - new tests: a racily clean edit in a linked work tree, a recent lock file with an old modification time, a name with a future time, and the stem the copy must not start with.
+
+  Each new behaviour bites:
+  - **dating the copy now:** fails 4 unit tests, including the linked-work-tree one;
+  - **exact equality in the comparison:** fails 1 test;
+  - **using the old stem:** fails 2 tests.
+
 ## Risks / Trade-offs
 
 - **[Split index]** With `core.splitIndex`, entries can live in a `sharedindex.*` file, which has its own time.
   - **Mitigation:** the snapshot already writes one plain file. Task 1.2 runs the new racy test with a split index as well, so the result does not depend on it.
 - **[Copies left by earlier versions]** These keep the old name form.
   - **Mitigation:** D2 judges them by their modification time, as before. Task 2.1 tests both name forms.
+- **[Earlier versions running at the same time]** Their clean-up judges copies by modification time.
+  - **Mitigation:** new copies use a stem that earlier versions do not match (D2).
 - **[A file system that cannot keep the time]** The check fails on every run there.
   - **Mitigation:** the error names the private index and the reason, so the case can be found and handled if it ever occurs. The reasoning in D3 says it should not occur.
 
