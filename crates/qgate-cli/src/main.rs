@@ -417,9 +417,7 @@ fn mcp_server(args: &ArgMatches) -> ExitCode {
                 return ExitCode::from(FAILED);
             }
         }
-        // Text that is not UTF-8 is not JSON either: the server answers it
-        // with a parse error.
-        let Some(mut response) = server.handle(&String::from_utf8_lossy(&line)) else {
+        let Some(mut response) = server.handle_bytes(&line) else {
             continue;
         };
         response.push('\n');

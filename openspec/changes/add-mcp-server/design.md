@@ -186,7 +186,8 @@ object. It may hold:
 - `base` and `head`, strings;
 - `directory`, a string.
 
-Anything else gives a tool error. Possible texts:
+A `null` value counts as an absent argument (changed in review, see
+"Review fixes"). Anything else gives a tool error. Possible texts:
 - `qgate: unknown argument "foo"; the arguments are base, head and directory`;
 - `qgate: argument "base" must be a string`;
 - `qgate: the arguments must be an object`.
@@ -224,18 +225,17 @@ The tool's `title` is "Check what got worse". The `description`:
 
 > Report what the changes made worse: higher complexity, duplicated
 > code, broken architecture rules. Without arguments it checks the
-> uncommitted work: the working tree, untracked files included,
-> against HEAD. Pass base "main" (or the branch this work will merge
-> into) to check the whole branch. Pass head to check a commit instead
-> of the working tree. Each finding is a delta that this change made
-> worse. summary.failing counts the findings the team treats as
-> failing.
+> uncommitted work (the working tree, untracked files included) against
+> HEAD. Pass base "main" (or the branch this work will merge into) to
+> check the whole branch; pass head to check a commit instead of the
+> working tree. Each finding is a delta this change made worse;
+> summary.failing counts the findings the team treats as failing.
 
 The `instructions`, sent with discovery and the handshake:
 
 > qgate reports what a change made worse. Call check before you hand
 > work back or commit it. Fix the findings that summary.failing counts,
-> or tell the user why such a change is intended. Fix the others when
+> or tell the user why such a change is intended; fix the others when
 > it is cheap.
 
 The texts are in English, like all of qgate's output. The tests pin
@@ -244,10 +244,24 @@ their presence, not their wording.
 ### D8. Errors, notifications and the I/O loop
 
 - **Errors the server answers:**
-  - a line that is not JSON gets `-32700` with `"id": null`;
+  - a line that is not JSON, or not UTF-8, gets `-32700` with
+    `"id": null`;
   - a JSON array (a batch, which was removed in `2025-06-18`) or an
     object without a string `method` gets `-32600`. The response uses
-    its `id` if it has one, otherwise `null`.
+    its `id` if it has one, otherwise `null`;
+  - an `id` that is not a string or an integer gets `-32600` with
+    `"id": null`, and so does a message without `"jsonrpc":"2.0"`
+    (with its `id`). Both added in review.
+- **Responses from the client** (an object with `result` or `error`
+  and no `method`) are not answered. The server sends no requests, so
+  it expects none, and JSON-RPC never answers a response. Added in
+  review.
+- **A check that panics** (a bug in an analyzer or parser) becomes a
+  tool error, and the server keeps running. The panic hook has already
+  written the details to standard error. Added in review: an exit with
+  101 would end the agent's session, which the spec's "the server
+  keeps running" rules out. The check is a plain function without
+  state, so continuing after a caught panic is safe.
 - **Notifications.** A message without an `id` is a notification and
   never gets a response, even one with an unknown method.
 - **Empty lines** are skipped.
@@ -263,7 +277,7 @@ their presence, not their wording.
   after the response it names has been written, so the specification's
   "MUST NOT send any further messages" holds anyway.
 - **No logging.** The server writes nothing to standard error, except
-  the exit-1 cases above.
+  the exit-1 cases above and a caught panic's message.
 
 ### D9. Tests and hand checks
 
@@ -337,8 +351,12 @@ Decisions made during apply:
   - The text block keeps the bytes of `qgate check --format json`
     exactly. Its order is the report's, and a test compares them.
 - **Input that is not UTF-8.** `main` reads lines as bytes and passes
-  them on with invalid sequences replaced. Such a line is not valid
-  JSON-RPC either, so it gets `-32700` like any other unparsable line.
+  them to `Server::handle_bytes`, which answers a line that is not
+  UTF-8 with `-32700`. The first version replaced invalid sequences
+  instead, and wrongly claimed here that this gives `-32700`. Inside a
+  JSON string the replacement character is valid, so a bad byte in a
+  method name got `-32601` instead. The end-to-end test added in review
+  caught it.
 - **Arguments are checked in key order.** With several bad arguments,
   the first in alphabetical order is named, since `serde_json` maps
   sort their keys. The tests use one bad argument each.
@@ -420,6 +438,62 @@ Decisions made during apply:
     an incomplete table header, [architecture. It needs a closing ]
     before qgate can run." The tool error reached the model, and the
     model explained it.
+
+- **Review fixes.** The `reviewer` subagent found two should-fix
+  problems and eight nits; all were fixed.
+  1. **The README said `"cwd"` works in `.mcp.json`.** Claude Code
+     2.1.319 has no `cwd` for stdio servers and always starts them in
+     the project directory. The README now names `cwd` for VS Code only,
+     and points to `directory` for everything else.
+  2. **This file said discovery is always marked, but the code marked
+     it by era.** The code now marks `server/discover` always, and a
+     unit test pins it.
+  3. **The per-request era after a handshake was not tested.** A unit
+     test now sends `initialize`, then a request that declares
+     2026-07-28, which is served in the current era, then one that
+     declares nothing, which is served in the old era.
+  4. **The I/O loop had no tests.** End-to-end tests now cover:
+     - a closed standard output (exit 0);
+     - standard input that cannot be read, a directory (exit 1, Unix);
+     - standard output that cannot be written, `/dev/full` (exit 1,
+       Linux);
+     - input that is not UTF-8, which found the bug in the note above.
+
+     A unit test covers a version in `_meta` that is not a string.
+  5. **README wording.** The `head` row now says that the default, the
+     working tree, includes uncommitted files. The report sentence now
+     names `--head` as the alternative to `--worktree`.
+  6. **`null` arguments** count as absent (D5). The spec has a new
+     scenario, "A null argument".
+  7. **A panicking check** is a tool error (D8). The spec's "A check
+     that cannot run" now names an internal error.
+  8. **The spec's discovery requirement** now names `_meta` under
+     `io.modelcontextprotocol/serverInfo` instead of a `serverInfo`
+     field.
+  9. **The envelope is checked:** ids, `jsonrpc`, and responses from the
+     client (D8). There is a new spec requirement, "Invalid messages".
+  10. **D7 quotes the texts exactly** as `mcp.rs` has them.
+
+  Each fix was mutated away once, and a test fails each time:
+
+  | Fix undone | Unit test failing | End-to-end test failing |
+  |---|---|---|
+  | Discovery marked by era | `discovery_after_a_handshake_is_still_current` | none |
+  | A declared version ignored after a handshake | `a_declared_current_revision_wins_over_the_handshake` | none |
+  | `null` is an error | `a_null_argument_is_absent` | `a_null_argument` |
+  | No `catch_unwind` | `a_check_that_panics_is_a_tool_error_and_the_server_goes_on` | none |
+  | Any `id` accepted | `ids_must_be_strings_or_integers` | `an_id_that_is_not_a_string_or_an_integer` |
+  | Any `jsonrpc` accepted | `a_message_without_the_jsonrpc_version` | none |
+  | Responses answered | `a_response_from_the_client_is_not_answered` | `a_response_from_the_client` |
+  | Lossy UTF-8 | `a_line_that_is_not_utf8` | `input_that_is_not_utf8` |
+
+  - **The panic needs a unit test.** It cannot be caused end to end
+    without a parser bug.
+  - **A process slip during the check:** the first mutation loop
+    restored `mcp.rs` with `git checkout`. That reverted the
+    uncommitted review fixes too. They were applied again from the
+    same script, and the loop was rerun with a copy of the file as the
+    restore point.
 
 ## Risks / Trade-offs
 

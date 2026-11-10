@@ -13,15 +13,27 @@ its work made worse.
 `qgate mcp [--fail-on <level>]` SHALL serve MCP over stdio. It SHALL
 read JSON-RPC 2.0 messages from standard input, one per line, and write
 each response as one line on standard output. It SHALL write nothing
-else to standard output, and SHALL exit with code 0 when standard input
-ends. `--fail-on` takes the levels of `qgate check`, `error` by default.
-`qgate --help` SHALL list the `mcp` command.
+else to standard output. It SHALL exit with code 0 when standard input
+ends or the client closes standard output, and with 1 when reading or
+writing fails otherwise. `--fail-on` takes the levels of `qgate check`,
+`error` by default. `qgate --help` SHALL list the `mcp` command.
 
 #### Scenario: Input ends
 
 - **WHEN** a client starts `qgate mcp` and closes its standard input without sending anything
 - **THEN** standard output is empty
 - **AND** the exit code is 0
+
+#### Scenario: The client closes the output
+
+- **WHEN** the client closes the server's standard output and sends a request
+- **THEN** the exit code is 0
+
+#### Scenario: Input that cannot be read
+
+- **WHEN** reading the server's standard input fails
+- **THEN** standard error says that the input cannot be read
+- **AND** the exit code is 1
 
 #### Scenario: Help lists the MCP command
 
@@ -39,8 +51,9 @@ ends. `--fail-on` takes the levels of `qgate check`, `error` by default.
 
 The server SHALL implement MCP revision `2026-07-28`. It SHALL answer
 `server/discover` with `supportedVersions` holding `2026-07-28`, a `tools`
-capability, `serverInfo` named `qgate` with qgate's version, and
-`instructions` that say when to call `check`. It SHALL serve every
+capability, `instructions` that say when to call `check`, and in `_meta`
+under `io.modelcontextprotocol/serverInfo` the name `qgate` with qgate's
+version. It SHALL serve every
 request whose `_meta` declares `2026-07-28`, without a handshake.
 
 #### Scenario: Discovery
@@ -188,7 +201,8 @@ working directory.
 ### Requirement: A check that cannot run
 
 When the check cannot run, for example outside a repository, with an
-unknown revision or an invalid `qgate.toml`, the result SHALL have
+unknown revision, an invalid `qgate.toml` or an internal error in qgate,
+the result SHALL have
 `"isError":true` and no `structuredContent`. Its `content` SHALL be one
 text block starting with `qgate: ` and naming the problem, as `qgate check`
 would on standard error. The server SHALL keep running.
@@ -215,13 +229,20 @@ would on standard error. The server SHALL keep running.
 
 Arguments that do not match the input schema, such as an unknown property
 or a value that is not a string, SHALL give a result with `"isError":true`
-and a text naming the argument, so the model can correct its call. A call
-of a tool other than `check` SHALL get the JSON-RPC error `-32602`.
+and a text naming the argument, so the model can correct its call. A
+`null` value SHALL count as an absent argument. A call of a tool other
+than `check` SHALL get the JSON-RPC error `-32602`.
 
 #### Scenario: A value that is not a string
 
 - **WHEN** the client calls `check` with `{"base":7}`
 - **THEN** the result has `"isError":true` and a text that names `base`
+
+#### Scenario: A null argument
+
+- **GIVEN** the repository of "Uncommitted work"
+- **WHEN** the client calls `check` with `{"base":"main","head":null}`
+- **THEN** the report has the findings for both `f` and `g`
 
 #### Scenario: Unknown tool
 
@@ -230,10 +251,10 @@ of a tool other than `check` SHALL get the JSON-RPC error `-32602`.
 
 ### Requirement: Protocol errors
 
-The server SHALL answer a line that is not JSON with the error `-32700`
-and the `id` `null`, a request for a method it does not know with
-`-32601`, and SHALL write no response to a notification. It SHALL keep
-running after each of them.
+The server SHALL answer a line that is not JSON (or not UTF-8) with the
+error `-32700` and the `id` `null`, a request for a method it does not
+know with `-32601`, and SHALL write no response to a notification. It
+SHALL keep running after each of them.
 
 #### Scenario: Not JSON
 
@@ -249,6 +270,29 @@ running after each of them.
 #### Scenario: A cancellation
 
 - **WHEN** the client sends the notification `notifications/cancelled`
+- **THEN** no response is written
+
+#### Scenario: Input that is not UTF-8
+
+- **WHEN** the client sends a line with a byte sequence that is not UTF-8
+- **THEN** the response is an error with code `-32700` and `"id":null`
+
+### Requirement: Invalid messages
+
+A message whose `id` is not a string or an integer SHALL get the error
+`-32600` with the `id` `null`. A message without `"jsonrpc":"2.0"`, or
+without a method and not a response, SHALL get `-32600`. A response
+from the client (an `id` with a `result` or an `error`) SHALL get no
+response, since the server sends no requests.
+
+#### Scenario: A null id
+
+- **WHEN** the client sends `{"jsonrpc":"2.0","id":null,"method":"tools/list"}`
+- **THEN** the response is an error with code `-32600` and `"id":null`
+
+#### Scenario: A response from the client
+
+- **WHEN** the client sends `{"jsonrpc":"2.0","id":4,"result":{}}`
 - **THEN** no response is written
 
 ### Requirement: The server changes nothing

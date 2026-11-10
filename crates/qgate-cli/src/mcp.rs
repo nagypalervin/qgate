@@ -5,6 +5,7 @@
 //! Everything here is pure: `main` reads the lines, passes the check as a
 //! callback and writes the responses (design D1).
 
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 
 use qgate_core::Finding;
@@ -126,6 +127,18 @@ where
         }
     }
 
+    /// The response to one input line as read, bytes that need not be
+    /// UTF-8: a line that is not UTF-8 is not JSON either.
+    pub fn handle_bytes(&mut self, line: &[u8]) -> Option<String> {
+        match std::str::from_utf8(line) {
+            Ok(line) => self.handle(line),
+            Err(e) => {
+                let error = RpcError::new(PARSE_ERROR, format!("the message is not UTF-8: {e}"));
+                Some(respond(&Value::Null, Err(error)))
+            }
+        }
+    }
+
     /// The response to one input line, without a newline, or `None` when
     /// the line gets no response: an empty line or a notification
     /// (design D8).
@@ -152,7 +165,20 @@ where
             ));
         };
         let id = object.get("id");
+        if id.is_some_and(|id| !valid_id(id)) {
+            let error = RpcError::new(INVALID_REQUEST, "an id must be a string or an integer");
+            return Some(respond(&Value::Null, Err(error)));
+        }
+        if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+            let error = RpcError::new(INVALID_REQUEST, "a message needs \"jsonrpc\":\"2.0\"");
+            return Some(respond(id.unwrap_or(&Value::Null), Err(error)));
+        }
         let Some(method) = object.get("method").and_then(Value::as_str) else {
+            // A response: the server sends no requests, and a response is
+            // never answered.
+            if object.contains_key("result") || object.contains_key("error") {
+                return None;
+            }
             let error = RpcError::new(INVALID_REQUEST, "a request needs a method");
             return Some(respond(id.unwrap_or(&Value::Null), Err(error)));
         };
@@ -203,7 +229,8 @@ where
                 ));
             }
         };
-        if era == Era::Current {
+        // Discovery exists only in the current era.
+        if era == Era::Current || method == "server/discover" {
             result["resultType"] = json!("complete");
         }
         Ok(result)
@@ -253,7 +280,15 @@ where
             .head
             .as_deref()
             .map_or(HeadArg::WorkTree, HeadArg::Revision);
-        let findings = (self.check)(&dir, base, head)?;
+        // A bug in an analyzer must not end the agent's session: the
+        // panic hook has written the details to standard error.
+        let findings =
+            std::panic::catch_unwind(AssertUnwindSafe(|| (self.check)(&dir, base, head)))
+                .map_err(|_| {
+                    "the check stopped on an internal error in qgate (details on the server's \
+                 standard error); please report it"
+                        .to_owned()
+                })??;
         let report = render_json(
             &findings,
             ReportSummary {
@@ -300,12 +335,23 @@ fn parse_arguments(arguments: Option<&Value>) -> Result<Arguments, String> {
                 ));
             }
         };
-        let Value::String(text) = value else {
-            return Err(format!("argument \"{key}\" must be a string"));
-        };
-        *slot = Some(text.clone());
+        match value {
+            // Models often fill unused optional arguments with null.
+            Value::Null => {}
+            Value::String(text) => *slot = Some(text.clone()),
+            _ => return Err(format!("argument \"{key}\" must be a string")),
+        }
     }
     Ok(parsed)
+}
+
+/// Whether `id` is a request id MCP allows: a string or an integer.
+fn valid_id(id: &Value) -> bool {
+    match id {
+        Value::String(_) => true,
+        Value::Number(n) => n.is_i64() || n.is_u64(),
+        _ => false,
+    }
 }
 
 /// What the server is, for discovery and the handshake alike.
@@ -845,10 +891,6 @@ mod tests {
                 json!({"base": 7}),
                 "qgate: argument \"base\" must be a string",
             ),
-            (
-                json!({"head": null}),
-                "qgate: argument \"head\" must be a string",
-            ),
             (json!(["main"]), "qgate: the arguments must be an object"),
         ];
         for (arguments, text) in cases {
@@ -930,5 +972,121 @@ mod tests {
         );
         assert_eq!(response["id"], "probe-1");
         assert!(response.get("result").is_some(), "{response}");
+    }
+
+    // Review of add-mcp-server.
+
+    #[test]
+    fn discovery_after_a_handshake_is_still_current() {
+        let mut server = server();
+        ask(&mut server, &initialize(Some("2025-11-25")));
+        let response = ask(&mut server, &request(1, "server/discover", &json!({})));
+        assert_eq!(result(&response)["resultType"], "complete");
+    }
+
+    #[test]
+    fn a_declared_current_revision_wins_over_the_handshake() {
+        let mut server = server();
+        ask(&mut server, &initialize(Some("2025-11-25")));
+        let response = ask(&mut server, &request(2, "tools/list", &current()));
+        let result = result(&response);
+        assert_eq!(result["resultType"], "complete");
+        assert_eq!(result["ttlMs"], 0);
+        // The process stays in the old era for requests that declare nothing.
+        let response = ask(&mut server, &request(3, "tools/list", &json!({})));
+        assert!(super::tests::result(&response).get("resultType").is_none());
+    }
+
+    #[test]
+    fn a_declared_revision_that_is_not_a_string_is_rejected() {
+        let params = json!({"_meta": {"io.modelcontextprotocol/protocolVersion": 7}});
+        let response = ask(&mut server(), &request(4, "tools/list", &params));
+        assert_eq!(error_code(&response), -32022);
+        assert_eq!(response["error"]["data"]["requested"], 7);
+    }
+
+    #[test]
+    fn a_null_argument_is_absent() {
+        let (mut server, calls) = server_with(FailOn::Error, Ok(Vec::new()));
+        let response = ask(
+            &mut server,
+            &call(&json!({"base": "main", "head": null, "directory": null})),
+        );
+        assert_eq!(result(&response)["isError"], false);
+        assert_eq!(
+            *calls.borrow(),
+            [(PathBuf::from(CWD), "main".to_owned(), None)]
+        );
+    }
+
+    #[test]
+    fn a_check_that_panics_is_a_tool_error_and_the_server_goes_on() {
+        let mut server = Server::new(
+            FailOn::Error,
+            Ok(PathBuf::from(CWD)),
+            |_: &Path, _: &str, _: HeadArg<'_>| -> Result<Vec<Finding>, String> {
+                panic!("an analyzer bug")
+            },
+        );
+        let response = ask(&mut server, &call(&json!({})));
+        let result = result(&response);
+        assert_eq!(result["isError"], true);
+        assert!(
+            tool_text(result).starts_with("qgate: the check stopped on an internal error"),
+            "{result}"
+        );
+        let response = ask(&mut server, &request(6, "tools/list", &current()));
+        assert_eq!(super::tests::result(&response)["tools"][0]["name"], "check");
+    }
+
+    #[test]
+    fn ids_must_be_strings_or_integers() {
+        for id in ["null", "true", "1.5", "{}"] {
+            let line = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"ping"}}"#);
+            let response = ask_line(&mut server(), &line);
+            assert_eq!(error_code(&response), -32600, "{id}");
+            assert_eq!(response["id"], Value::Null, "{id}");
+        }
+        let response = ask_line(
+            &mut server(),
+            r#"{"jsonrpc":"2.0","id":-3,"method":"ping"}"#,
+        );
+        assert_eq!(response["id"], -3);
+        assert!(response.get("result").is_some(), "{response}");
+    }
+
+    #[test]
+    fn a_message_without_the_jsonrpc_version() {
+        for line in [
+            r#"{"id":1,"method":"ping"}"#,
+            r#"{"jsonrpc":"1.0","id":1,"method":"ping"}"#,
+        ] {
+            let response = ask_line(&mut server(), line);
+            assert_eq!(error_code(&response), -32600, "{line}");
+            assert_eq!(response["id"], 1, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_response_from_the_client_is_not_answered() {
+        let mut server = server();
+        assert_eq!(
+            server.handle(r#"{"jsonrpc":"2.0","id":4,"result":{}}"#),
+            None
+        );
+        assert_eq!(
+            server.handle(r#"{"jsonrpc":"2.0","id":4,"error":{"code":-1,"message":"x"}}"#),
+            None
+        );
+    }
+
+    #[test]
+    fn a_line_that_is_not_utf8() {
+        let line = server()
+            .handle_bytes(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"\xff\"}")
+            .expect("a response");
+        let response: Value = serde_json::from_str(&line).expect("JSON");
+        assert_eq!(error_code(&response), -32700);
+        assert_eq!(response["id"], Value::Null);
     }
 }

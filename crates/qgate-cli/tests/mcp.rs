@@ -560,3 +560,123 @@ fn staged_work_stays_staged() {
     );
     assert_eq!(repo.git(&["status", "--porcelain"]), before);
 }
+
+// Review of add-mcp-server: the I/O loop and the envelope.
+
+/// Start `qgate mcp` in `dir` with the given standard streams.
+fn start(dir: &Path, stdin: Stdio, stdout: Stdio) -> std::process::Child {
+    isolate(&mut Command::new(env!("CARGO_BIN_EXE_qgate")))
+        .arg("mcp")
+        .current_dir(dir)
+        .stdin(stdin)
+        .stdout(stdout)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("qgate runs")
+}
+
+#[test]
+fn input_that_is_not_utf8() {
+    let repo = f_goes_to(9);
+    let mut child = start(&repo.dir, Stdio::piped(), Stdio::piped());
+    let mut stdin = child.stdin.take().expect("stdin");
+    stdin
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"\xff\"}\n")
+        .expect("write");
+    stdin
+        .write_all(format!("{}\n", request(2, "tools/list", &current())).as_bytes())
+        .expect("write");
+    drop(stdin);
+    let responses = responses(&child.wait_with_output().expect("qgate finishes"));
+    assert_eq!(responses[0]["error"]["code"], -32700);
+    assert_eq!(responses[0]["id"], Value::Null);
+    assert_eq!(responses[1]["result"]["tools"][0]["name"], "check");
+}
+
+#[test]
+fn the_client_closes_the_output() {
+    let repo = f_goes_to(9);
+    let mut child = start(&repo.dir, Stdio::piped(), Stdio::piped());
+    drop(child.stdout.take());
+    let mut stdin = child.stdin.take().expect("stdin");
+    // Ignore a closed pipe: the server may already have ended.
+    let _ = stdin.write_all(format!("{}\n", request(1, "tools/list", &current())).as_bytes());
+    drop(stdin);
+    let out = child.wait_with_output().expect("qgate finishes");
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+}
+
+#[cfg(unix)]
+#[test]
+fn input_that_cannot_be_read() {
+    let repo = f_goes_to(9);
+    // Reading a directory fails with EISDIR.
+    let dir = std::fs::File::open(&repo.dir).expect("open the directory");
+    let out = start(&repo.dir, Stdio::from(dir), Stdio::piped())
+        .wait_with_output()
+        .expect("qgate finishes");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("cannot read the input"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn output_that_cannot_be_written() {
+    let repo = f_goes_to(9);
+    // Writing to /dev/full fails with ENOSPC.
+    let full = std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/full")
+        .expect("open /dev/full");
+    let mut child = start(&repo.dir, Stdio::piped(), Stdio::from(full));
+    let mut stdin = child.stdin.take().expect("stdin");
+    stdin
+        .write_all(format!("{}\n", request(1, "tools/list", &current())).as_bytes())
+        .expect("write");
+    drop(stdin);
+    let out = child.wait_with_output().expect("qgate finishes");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("cannot write a response"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn a_null_argument() {
+    let repo = committed_and_uncommitted();
+    assert_eq!(
+        found(&call(&repo, &json!({"base": "main", "head": null}))),
+        ["src/a.ts f", "src/b.ts g"]
+    );
+}
+
+#[test]
+fn an_id_that_is_not_a_string_or_an_integer() {
+    let repo = f_goes_to(9);
+    let out = serve(
+        &repo.dir,
+        &[],
+        &[r#"{"jsonrpc":"2.0","id":null,"method":"tools/list"}"#.to_owned()],
+    );
+    let responses = responses(&out);
+    assert_eq!(responses[0]["error"]["code"], -32600);
+    assert_eq!(responses[0]["id"], Value::Null);
+}
+
+#[test]
+fn a_response_from_the_client() {
+    let repo = f_goes_to(9);
+    let out = serve(
+        &repo.dir,
+        &[],
+        &[r#"{"jsonrpc":"2.0","id":4,"result":{}}"#.to_owned()],
+    );
+    assert_eq!(stdout(&out), "");
+    assert_eq!(out.status.code(), Some(0));
+}

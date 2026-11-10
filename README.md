@@ -222,21 +222,23 @@ For **VS Code with GitHub Copilot**, add this to `.vscode/mcp.json`:
 For **other clients**, start `qgate mcp` as a stdio server in the
 repository.
 
-The server checks the repository it was started in. Claude Code starts
-it in the project, and VS Code in the workspace folder. If your client
-starts it elsewhere, set the working directory in the client's entry
-(`"cwd"` in both files above), or let the agent pass `directory`.
+The server checks the repository it was started in. Claude Code always
+starts it in the project directory, and VS Code starts it in the
+workspace folder unless the entry sets `"cwd"`. If the repository is
+elsewhere, for example in a subfolder of the project, the agent can
+pass `directory`.
 
 `check` takes three optional arguments:
 
 | Argument | Default | Meaning |
 |---|---|---|
 | `base` | `HEAD` | The revision to compare against. `HEAD` checks the uncommitted work. `main` checks the whole branch. |
-| `head` | the working tree | A revision to check instead of the working tree, uncommitted and untracked files included. |
+| `head` | the working tree, uncommitted and untracked files included | A revision to check instead, such as `HEAD` for the last commit. |
 | `directory` | where the server started | The repository to check, absolute or relative to that directory. |
 
 It returns the [JSON report](#json-output), the same one
-`qgate check --base <base> --worktree --format json` prints. It always
+`qgate check --base <base> --worktree --format json` prints (or
+`--head <head>` instead of `--worktree`). It always
 holds every finding, at every severity. `summary.failing` counts the
 findings at the server's `--fail-on` level, `error` by default. A team
 sets the level once, in the entry's arguments, for example
