@@ -1,30 +1,14 @@
 //! A JSON Schema validator for `docs/schema/report-v1.json`, just large
-//! enough for that schema (design D8 of `add-report-formats`). It knows the
-//! keywords in [`ASSERTIONS`] with the value shapes the schema uses;
-//! `unsupported` finds any other keyword or shape, so a test fails before
-//! this validator skips a rule silently.
+//! enough for that schema (design D8 of `add-report-formats`). `check`
+//! reads ten keywords, with the value shapes the schema uses; `unsupported`
+//! lists those keywords and shapes, plus the annotations, in one `match`,
+//! and reports anything else, so a test fails before this validator skips
+//! a rule silently.
 //!
 //! Stricter than JSON Schema in one way: `integer` means a JSON number
 //! written without a fraction or exponent, because qgate promises that.
 
 use serde_json::Value;
-
-/// The keywords this validator checks.
-pub const ASSERTIONS: &[&str] = &[
-    "type",
-    "properties",
-    "required",
-    "items",
-    "enum",
-    "const",
-    "minimum",
-    "minItems",
-    "anyOf",
-    "$ref",
-];
-
-/// Keywords that only describe or hold definitions; nothing to check.
-pub const ANNOTATIONS: &[&str] = &["$schema", "$id", "title", "description", "$defs"];
 
 /// The version 1 schema, read from the repository.
 pub fn report_v1() -> Value {
@@ -143,9 +127,10 @@ fn check(root: &Value, schema: &Value, instance: &Value, at: &str, errors: &mut 
     }
 }
 
-/// Every keyword in `schema` that is neither in [`ASSERTIONS`] nor in
-/// [`ANNOTATIONS`], and every value of a shape `check` does not read, with
-/// where it is.
+/// Every keyword in `schema` that `check` does not read and is no
+/// annotation, and every value of a shape `check` does not read, with
+/// where it is. Supporting a new keyword means adding it both here and to
+/// `check`.
 pub fn unsupported(schema: &Value) -> Vec<String> {
     let mut found = Vec::new();
     walk(schema, schema, "$", &mut found);

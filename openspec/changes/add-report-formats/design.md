@@ -291,6 +291,9 @@ mechanical, and the compiler finds them all.
     a duplicate block, which is collected after every file's own
     findings, so without sorting `src/b.ts` would come first. Checked by
     removing the sort.
+- **Verification round of PR 2:** every fix held. The guard's keyword
+  constants were left unused by the rewrite, so they were removed; the
+  keyword list is now the one `match` in `unsupported`.
 
 ## Risks / Trade-offs
 
