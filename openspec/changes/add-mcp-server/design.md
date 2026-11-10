@@ -254,8 +254,10 @@ their presence, not their wording.
     (with its `id`). Both added in review.
 - **Responses from the client** (an object with `result` or `error`
   and no `method`) are not answered. The server sends no requests, so
-  it expects none, and JSON-RPC never answers a response. Added in
-  review.
+  it expects none, and JSON-RPC never answers a response. This holds
+  whatever the `id`: JSON-RPC allows `"id": null` in an error response,
+  so this check runs before the `id` check (from the verification
+  round). Added in review.
 - **A check that panics** (a bug in an analyzer or parser) becomes a
   tool error, and the server keeps running. The panic hook has already
   written the details to standard error. Added in review: an exit with
@@ -487,6 +489,11 @@ Decisions made during apply:
   | Responses answered | `a_response_from_the_client_is_not_answered` | `a_response_from_the_client` |
   | Lossy UTF-8 | `a_line_that_is_not_utf8` | `input_that_is_not_utf8` |
 
+  - **The verification round** confirmed all ten fixes ("ready to
+    merge") and found two nits, both fixed:
+    - a client error response with `"id": null` got `-32600`, because
+      the `id` check ran first;
+    - `handle`'s doc comment did not name client responses.
   - **The panic needs a unit test.** It cannot be caused end to end
     without a parser bug.
   - **A process slip during the check:** the first mutation loop

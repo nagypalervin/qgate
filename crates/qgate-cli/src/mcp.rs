@@ -140,8 +140,8 @@ where
     }
 
     /// The response to one input line, without a newline, or `None` when
-    /// the line gets no response: an empty line or a notification
-    /// (design D8).
+    /// the line gets no response: an empty line, a notification or a
+    /// response from the client (design D8).
     pub fn handle(&mut self, line: &str) -> Option<String> {
         if line.trim().is_empty() {
             return None;
@@ -165,6 +165,12 @@ where
             ));
         };
         let id = object.get("id");
+        let method = object.get("method").and_then(Value::as_str);
+        // A response: the server sends no requests, and a response is
+        // never answered, even an error response whose id is null.
+        if method.is_none() && (object.contains_key("result") || object.contains_key("error")) {
+            return None;
+        }
         if id.is_some_and(|id| !valid_id(id)) {
             let error = RpcError::new(INVALID_REQUEST, "an id must be a string or an integer");
             return Some(respond(&Value::Null, Err(error)));
@@ -173,12 +179,7 @@ where
             let error = RpcError::new(INVALID_REQUEST, "a message needs \"jsonrpc\":\"2.0\"");
             return Some(respond(id.unwrap_or(&Value::Null), Err(error)));
         }
-        let Some(method) = object.get("method").and_then(Value::as_str) else {
-            // A response: the server sends no requests, and a response is
-            // never answered.
-            if object.contains_key("result") || object.contains_key("error") {
-                return None;
-            }
+        let Some(method) = method else {
             let error = RpcError::new(INVALID_REQUEST, "a request needs a method");
             return Some(respond(id.unwrap_or(&Value::Null), Err(error)));
         };
@@ -1076,6 +1077,11 @@ mod tests {
         );
         assert_eq!(
             server.handle(r#"{"jsonrpc":"2.0","id":4,"error":{"code":-1,"message":"x"}}"#),
+            None
+        );
+        // JSON-RPC allows a null id in an error response.
+        assert_eq!(
+            server.handle(r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"x"}}"#),
             None
         );
     }

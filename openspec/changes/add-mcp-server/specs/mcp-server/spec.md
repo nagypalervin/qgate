@@ -282,8 +282,8 @@ SHALL keep running after each of them.
 A message whose `id` is not a string or an integer SHALL get the error
 `-32600` with the `id` `null`. A message without `"jsonrpc":"2.0"`, or
 without a method and not a response, SHALL get `-32600`. A response
-from the client (an `id` with a `result` or an `error`) SHALL get no
-response, since the server sends no requests.
+from the client (a `result` or an `error`, without a method) SHALL get
+no response, whatever its `id`, since the server sends no requests.
 
 #### Scenario: A null id
 
