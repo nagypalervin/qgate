@@ -324,12 +324,16 @@ fn numbers(text: &str) -> Option<Vec<&str>> {
 /// time `wanted`, reads back the later time `kept`. An earlier time is
 /// safe: git then compares the content of at least the files it would
 /// compare with the index itself. A later one would let it trust files it
-/// must read (design D3).
+/// must read (design D3). So would a time within the first second of 1970:
+/// git takes an index time of 0 whole seconds as no time at all.
 fn check_kept_time(path: &Path, wanted: SystemTime, kept: SystemTime) -> Result<(), GitError> {
-    if kept <= wanted {
-        Ok(())
-    } else {
+    let whole_seconds = kept.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    if kept > wanted {
         Err(time_error(path, "the file system stored a later time"))
+    } else if whole_seconds == 0 {
+        Err(time_error(path, "the file system stored no time"))
+    } else {
+        Ok(())
     }
 }
 
@@ -737,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_later_time_read_back_is_an_error() {
+    fn a_later_or_missing_time_read_back_is_an_error() {
         let path = std::path::Path::new("/repo/.git/qgate-snapshot-index-1-2-3-4");
         let wanted = UNIX_EPOCH + Duration::from_nanos(1_794_321_680_421_856_783);
         assert!(check_kept_time(path, wanted, wanted).is_ok());
@@ -745,6 +749,18 @@ mod tests {
         // makes git compare more files.
         let coarser = UNIX_EPOCH + Duration::from_secs(1_794_321_680);
         assert!(check_kept_time(path, wanted, coarser).is_ok());
+
+        // Git ignores an index time of 0 whole seconds, and with it the
+        // racy check.
+        let Err(GitError::WorkTree { detail }) =
+            check_kept_time(path, wanted, UNIX_EPOCH + Duration::from_nanos(5))
+        else {
+            panic!("a time of 0 whole seconds must be a work tree error");
+        };
+        assert!(
+            detail.ends_with("the file system stored no time"),
+            "{detail}"
+        );
 
         let later = UNIX_EPOCH + Duration::from_secs(1_794_321_681);
         let Err(GitError::WorkTree { detail }) = check_kept_time(path, wanted, later) else {

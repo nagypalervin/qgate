@@ -20,6 +20,7 @@ A copy that keeps the original index's timestamp sees the edit.
 - **The private index copy keeps the original index's modification time,** so git applies the same racy-git check it applies to the user's own index. A snapshot then stages exactly what `git add -A` would stage from the user's index.
 - **The clean-up of copies that interrupted checks left behind** no longer judges a copy's age by its modification time, which now says nothing about when the check ran.
   - It reads the age from the copy's name, which gets the time the check started.
+  - New copies are named `qgate-snapshot-index-*` instead of `qgate-index-*`, so that the clean-up of an earlier qgate running at the same time, which judges `qgate-index-*` by modification time, leaves them alone (design D2, changed after review).
   - Copies named by earlier versions are still judged by their modification time; those versions dated them when they were made.
 - **If the time cannot be kept** on the copy (a file system that refuses it or stores another one), the snapshot fails with a work-tree error instead of risking a missed edit. That case should not occur, because the copy lives on the same file system as the index (design D3, changed during apply).
 - **The behaviour users see does not change,** apart from the fix: no option, output or exit code changes.
@@ -50,7 +51,7 @@ None.
   - their tests.
 - **Tests:** a new unit test in `qgate-git` and an end-to-end test in `qgate-cli` for the new scenario, both deterministic: they set the timestamps instead of racing the clock. The existing stale-copy test changes to name copies by their age.
 - **No new dependency.** Setting a file's time is in the standard library (Rust 1.75), within the MSRV.
-- **README:** no change. It already says that copies more than a day old are removed.
+- **README:** the note on interrupted checks names the new copies, `qgate-snapshot-index-*`, next to `qgate-index-*` from earlier versions.
 
 ## Open questions
 

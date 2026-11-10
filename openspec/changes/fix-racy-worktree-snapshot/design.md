@@ -53,7 +53,7 @@
 - **When it applies:** the snapshot stops with a work-tree error in three cases:
   - reading the index's time fails: `cannot read the modification time of the index <path>: <reason>`;
   - setting the time on the copy fails;
-  - the copy reads back a **later** time than the index's.
+  - the copy reads back a **later** time than the index's, or a time within the first second of 1970, which git takes as no time at all (added after the verification round).
 
   The last two give `cannot give the private index <path> the index's modification time: <reason>`.
 - **An earlier time is accepted** (changed after review). A copy dated earlier than the index makes git compare the content of at least the files it would compare with the index itself: more work, never a missed edit. Only a later time lets git trust a file it must read.
@@ -62,14 +62,14 @@
   - The spec already covers this case ("Working tree errors": no snapshot of the working tree can be taken).
   - The hook shows it to the user, never to the model.
 - **Why an error is acceptable:** the case should not happen.
-  - A time can only be stored coarser, that is, truncated and so earlier, which is accepted.
+  - A file system that stores coarser times usually truncates, which gives an earlier time and is accepted. One that rounds up gives a later time, which is an error.
   - Every common file system lets the owner set the time of a file it just created.
   - If the case does happen, an error is visible, while a check that goes on can miss an edit silently.
 - **Why not a fallback:** the approved draft rehashed with `git add -A --renormalize`. In apply (task 1.3) it turned out not to work:
   - it stops with `fatal: unable to stat` when a tracked file was deleted from disk;
   - it implies `-u`, so untracked files are not added.
 
-  A fallback that dates the copy in 1970, so that every entry is racily clean, would be more code for a case that should not happen. If time cannot be set at all, it would not help either. The human left this choice to the agent, and the error was chosen.
+  A fallback that dates the copy early in 1970 (after its first second: git takes an index time of 0 whole seconds as no time and skips the racy check), so that every entry is racily clean, would be more code for a case that should not happen. If time cannot be set at all, it would not help either. The human left this choice to the agent, and the error was chosen.
 - **Testing:** a real refusal cannot be provoked on the CI file system. The comparison of the two times is a small function with its own unit test: equal and earlier times pass, and a later one fails.
 
 ### D4. Deterministic tests
