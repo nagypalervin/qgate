@@ -158,6 +158,17 @@ committed yet, as `qgate check --base HEAD --worktree` would:
   the next turns. The whole branch is checked in the pull request (see
   [In CI](#in-ci)).
 
+Keep in mind:
+
+- **If the agent commits in its turn,** the hook sees nothing of that
+  commit. Use `--base main` if you let the agent commit.
+- **Your own uncommitted work counts too.** An Error in it sends the
+  agent back even after a turn that only answered a question. Commit or
+  stash first, or use `--fail-on never` while you edit next to the agent.
+- **Another Stop hook uses up the round too.** Once any Stop hook has
+  sent the agent back in a turn, qgate shows its findings to you instead
+  of sending the agent back again.
+
 Options go into the command:
 
 - `qgate hook claude-code --fail-on warning` also sends the agent back

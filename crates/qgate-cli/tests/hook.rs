@@ -171,6 +171,37 @@ fn uncommitted_work_only() {
 }
 
 #[test]
+fn same_findings_as_check() {
+    let repo = committed(&[
+        ("src/a.ts", &(function("f", 1) + &function("h", 1))),
+        ("src/b.ts", &function("g", 1)),
+        ("src/utils/date.ts", DATE_HELPER),
+    ]);
+    repo.write("src/a.ts", function("f", 3) + &function("h", 8));
+    repo.write("src/b.ts", function("g", 8));
+    repo.write("src/orders/format.ts", RENAMED_COPY);
+    let message = message_only(&hook(&repo, &["--fail-on", "never"], FIRST_STOP));
+    let hook_lines: Vec<&str> = message.lines().skip(1).collect();
+
+    let check = repo.qgate(&["--base", "HEAD", "--worktree", "--fail-on", "never"]);
+    let text = stdout(&check);
+    let check_lines: Vec<&str> = text
+        .lines()
+        .filter(|line| line.starts_with("error ") || line.starts_with("warning "))
+        .collect();
+    assert!(check_lines.len() >= 4, "{text}");
+    assert!(
+        check_lines.iter().any(|l| l.starts_with("warning ")),
+        "{text}"
+    );
+    assert!(
+        check_lines.iter().any(|l| l.starts_with("error ")),
+        "{text}"
+    );
+    assert_eq!(hook_lines, check_lines, "{message}\n---\n{text}");
+}
+
+#[test]
 fn another_base() {
     let repo = committed_and_uncommitted();
     let reason = block_reason(&hook(&repo, &["--base", "main"], FIRST_STOP));

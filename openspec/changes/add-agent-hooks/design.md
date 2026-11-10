@@ -189,6 +189,10 @@ the required behaviour.
     message on standard error, since there is no response to give.
   - `qgate hook claude-code --base` defaults to `HEAD` in clap, so
     `--help` shows the default.
+  - "The same order as `qgate check`" has its own end-to-end test. It
+    compares the hook's lines with `qgate check`'s for five mixed Errors
+    and Warnings in three files, and it fails when the hook reverses its
+    list.
 - **Mutations (task 2.5).** Each of these fails unit and end-to-end tests:
   - blocking although `stop_hook_active` is `true`;
   - sending every finding to the model;
@@ -245,11 +249,31 @@ the required behaviour.
 
 ## Risks / Trade-offs
 
-- **[Another tool's Stop hook blocks first.]** Then `stop_hook_active`
-  is already `true` when qgate first runs, and qgate never blocks in that
-  turn.
+- **[Another tool's Stop hook has already blocked.]** Once any Stop hook
+  has sent the agent back in a turn, `stop_hook_active` is `true` at the
+  next stop, and qgate does not block again in that turn, even for a
+  finding it has not reported yet.
   - **Mitigation:** the user still sees the findings in the
-    `systemMessage`. This is documented.
+    `systemMessage`, and the README says why qgate did not send the agent
+    back.
+- **[The agent commits its own work.]** When the agent runs `git commit`
+  in its turn, the working tree is clean against `HEAD` at `Stop`, and the
+  hook reports nothing about that commit.
+  - **Mitigation:** the README says so, and suggests `--base main` for
+    sessions in which the agent commits. The pull request still checks
+    the whole branch.
+- **[The user's own uncommitted work.]** The hook cannot tell the agent's
+  changes from the user's. A turn that only answered a question still
+  sends the agent back for an Error in work the user has not committed,
+  and the agent may then edit it.
+  - **Mitigation:** the README says so: commit or stash first, or use
+    `--fail-on never` while working by hand next to the agent. Telling
+    the changes apart would need the hook to remember the tree at the
+    start of the turn, which is out of scope here.
+- **[A repository with no commits.]** `HEAD` does not exist yet, so
+  every turn shows the user `qgate: unknown revision`, as `qgate check
+  --base HEAD` would. This is kept: it is an error for the user, as the
+  spec requires, and it ends with the first commit.
 - **[Claude Code changes its protocol.]**
   - **Mitigation:** the end-to-end tests fix the bytes qgate writes, the
     manual check (task 3.3) confirms them against Claude Code, and the

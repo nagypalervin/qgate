@@ -267,7 +267,9 @@ fn main() -> ExitCode {
             let code = u8::try_from(err.exit_code()).unwrap_or(INVALID);
             // Claude Code sends a hook's standard error to the model on exit
             // code 2; a broken settings entry is for the user (design D4 of
-            // `add-agent-hooks`).
+            // `add-agent-hooks`). The top-level command takes no options, so
+            // the subcommand is always the first argument; a global option
+            // would have to change this test.
             let in_hook = std::env::args_os().nth(1).is_some_and(|arg| arg == "hook");
             return ExitCode::from(if in_hook && code == INVALID {
                 FAILED
