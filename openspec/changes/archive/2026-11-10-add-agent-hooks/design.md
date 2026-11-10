@@ -268,12 +268,13 @@ the required behaviour.
   and the agent may then edit it.
   - **Mitigation:** the README says so and suggests committing or
     stashing first. (`--fail-on never` is no quick switch: it lives in
-    the team's committed settings.) Telling the changes apart would need the hook to remember the tree at the
-    start of the turn, which is out of scope here.
+    the team's committed settings.) Telling the changes apart would
+    need the hook to remember the tree at the start of the turn, which
+    is out of scope here.
 - **[A repository with no commits.]** `HEAD` does not exist yet, so
   every turn shows the user `qgate: unknown revision`, as `qgate check
-  --base HEAD --worktree` would. This is kept: it is an error for the user, as the
-  spec requires, and it ends with the first commit.
+  --base HEAD --worktree` would. This is kept: it is an error for the
+  user, as the spec requires, and it ends with the first commit.
 - **[Claude Code changes its protocol.]**
   - **Mitigation:** the end-to-end tests fix the bytes qgate writes, the
     manual check (task 3.3) confirms them against Claude Code, and the
