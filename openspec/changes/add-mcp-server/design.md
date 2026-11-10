@@ -401,6 +401,26 @@ Decisions made during apply:
   - **The repository:** `git status --porcelain` was unchanged
     afterwards.
 
+- **Hand check with VS Code and GitHub Copilot (task 3.3), 2026-11-10,
+  done by Ervin.**
+  - **Setup:** VS Code 1.145.2, Copilot Chat in agent mode, in the
+    temporary repository of task 3.2. Its `.vscode/mcp.json` ran the
+    built binary through `sh -c 'tee -a <log> | qgate mcp'`, and the
+    workspace was trusted.
+  - **The client sent:** `initialize` with `2025-11-25`, then
+    `notifications/initialized`, `tools/list` and two `tools/call`
+    with empty arguments. It sent no `server/discover`, so the old era
+    was used. The default directory (where VS Code started the server,
+    the workspace folder) was the repository.
+  - **First call:** Copilot answered: "Qgate found one failing issue in
+    a.ts:1: cyclomatic complexity increased from 2 to 9 (+7). The
+    untracked .vscode changes produced no findings."
+  - **Second call,** after a `qgate.toml` holding `[architecture`:
+    "Qgate could not check the uncommitted work: qgate.toml:1 contains
+    an incomplete table header, [architecture. It needs a closing ]
+    before qgate can run." The tool error reached the model, and the
+    model explained it.
+
 ## Risks / Trade-offs
 
 - **[The 2026-07-28 revision is four months old, and clients differ in
@@ -440,6 +460,8 @@ entry from the client's configuration.
 
 ## Open Questions
 
-- **Does VS Code 1.145 speak the current era or the old one?** It does
-  not change the design, since both are served. The hand check in D9
-  answers it, and the answer goes into this file.
+- **Does VS Code 1.145 speak the current era or the old one?**
+  Answered on 2026-11-10 by the hand check (task 3.3): the old one.
+  VS Code 1.145.2 sends `initialize` with `2025-11-25` and no
+  `server/discover`. The two target clients therefore use different
+  eras, which confirms the choice to serve both (D3).

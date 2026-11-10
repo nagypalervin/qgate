@@ -91,7 +91,7 @@ planning artifacts.
 
   Run every README command in a temporary repository and verify that it behaves as documented.
 - [x] 3.2 Check the server by hand with Claude Code, in a temporary repository with one finding (design D9). Use `claude -p` with an `--mcp-config` that names the built binary. Confirm that the model calls `check` and reports the finding, and that the era is 2026-07-28. Record the result in `design.md`.
-- [ ] 3.3 Ask the human to check the server by hand in VS Code with GitHub Copilot, with the README's `.vscode/mcp.json` entry and the `tee` wrapper from design D9:
+- [x] 3.3 Ask the human to check the server by hand in VS Code with GitHub Copilot, with the README's `.vscode/mcp.json` entry and the `tee` wrapper from design D9:
   - Copilot calls `check` and reports the finding;
   - an invalid `qgate.toml` reaches the model as a tool error.
 
