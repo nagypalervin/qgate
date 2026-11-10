@@ -37,8 +37,8 @@ pub struct Location {
     pub path: PathBuf,
     /// 1-based line number, if the finding points at a specific line.
     pub line: Option<u32>,
-    /// 1-based last line, if the location spans lines from `line` to
-    /// here; `None` for a single line or no line.
+    /// 1-based last line of a range that starts at `line`; it may equal
+    /// `line`. `None` when the location is not a range.
     pub end_line: Option<u32>,
 }
 
@@ -84,8 +84,9 @@ pub struct Finding {
     pub location: Location,
     /// The measured change, if the rule is metric-based.
     pub metric: Option<Metric>,
-    /// Other places the finding refers to, in an order the rule defines
-    /// (for a duplicate block: the existing copies). Empty for most rules.
+    /// Other places the finding refers to, each with a line, in an order
+    /// the rule defines (for a duplicate block: the existing copies).
+    /// Empty for most rules.
     pub related: Vec<Location>,
 }
 

@@ -39,10 +39,14 @@ the specs.
 
 ### D1. Two new fields in the core types
 
-- `Location` gets `end_line: Option<u32>`: the last line of a finding
-  that spans lines. It is `None` for a single-line finding.
+- `Location` gets `end_line: Option<u32>`: the last line of a range
+  that starts at `line`. It may equal `line` (a duplicate block on one
+  minified line). It is `None` when the location is not a range, as for
+  every complexity and architecture finding.
 - `Finding` gets `related: Vec<Location>`: other places the finding
-  refers to, in a meaningful order. It is empty for most findings.
+  refers to, in a meaningful order. Each has a line, because the JSON
+  report requires `line` in a related location. It is empty for most
+  findings.
 
 **Why generic fields, not a duplication-specific one:** SARIF (M4) has
 the same concepts (`region.endLine`, `relatedLocations`), so the M4
@@ -94,8 +98,10 @@ mechanical, and the compiler finds them all.
   - it escapes strings correctly: control characters, quotes and
     backslashes, which appear in messages that quote import specifiers;
   - it formats numbers correctly;
-  - it is maintained with `serde`, and adds only `itoa`, `ryu` and
-    `memchr`.
+  - it is maintained with `serde`. Without features it needs `itoa`,
+    `memchr`, `serde_core` and `zmij`, and all of them, `serde_json`
+    included, are already in `Cargo.lock`, because tree-sitter builds
+    with it. So the new dependency adds no new crate to the build.
 
   A hand-written writer would be about 60 lines, but escaping is
   exactly where a public format must not have bugs.
@@ -108,9 +114,13 @@ mechanical, and the compiler finds them all.
 
 - **The problem:** `Metric` values are `f64`, so serde would write
   complexity 4 as `4.0`.
-- **The fix:** the mirror struct holds a small number type. A finite
-  value with no fraction that fits in an `i64` serializes as an integer;
-  any other value as a float.
+- **The fix:** the mirror struct holds a small number type:
+  - a finite value with no fraction and a magnitude below 2^53 is
+    written as an integer;
+  - any other finite value is written as a float;
+  - a value that is not finite is left out, because `serde_json` would
+    write `null`;
+  - a metric left with neither value is left out as a whole.
 - **Why not change `Metric` to integers:** later metrics, such as a
   duplication ratio or churn, may not be whole numbers. The JSON Schema
   declares the fields as `number`, so both forms stay valid.
@@ -157,6 +167,9 @@ mechanical, and the compiler finds them all.
   - `type`, `properties`, `required`, `items`, `enum`, `const`, `minimum`
     and `$ref` to `$defs`.
 
+  `severity` is an `enum`, because a new value needs version 2. `rule` is
+  a plain string, because new rule ids may appear within version 1.
+
   A second test fails if the schema ever uses another keyword, so the
   helper cannot silently skip a rule.
 - **Why not the `jsonschema` crate as a dev-dependency:** it pulls in
@@ -179,6 +192,26 @@ mechanical, and the compiler finds them all.
   `related` therefore cannot disagree about which file is named or how
   many there are. Every existing duplication test, and the end-to-end
   messages, stayed byte-identical.
+- **Review round 1 of PR 1:** the code was fine. The JSON format,
+  which is about to be frozen, needed these fixes in the spec:
+  - **`end_line` may equal `line`:** a duplicate block on one minified
+    line is still a range. The core doc and D1 now say so, rather than
+    the analyzer dropping the end line in that case.
+  - **Related locations always have `path` and `line`:** the schema can
+    then require both. `end_line` is there for a range.
+  - **Open rule ids, closed severities:** the versioning requirement now
+    allows new `rule` ids within version 1 but not new `severity`
+    values, and a scenario checks that the schema accepts an unknown
+    rule id.
+  - **Numbers that cannot be written:** values that are not finite, an
+    empty metric, and whole numbers beyond 2^53 are now specified
+    (see D4).
+  - **`summary.count`:** renamed from `summary.findings`, so one name
+    does not mean an array at the top level and a number in the summary.
+  - **`serde_json`'s dependencies:** D3 had the wrong list. All of them
+    are already locked as tree-sitter's build dependencies.
+  - **Spec wording:** a related copy is the first copy *of the whole
+    block* in its file.
 - **PR 1: mutations (task 1.4).** Each of these fails a test:
   - the end line set to the first line;
   - every copy kept instead of one per file;

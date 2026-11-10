@@ -38,23 +38,23 @@ output.
 
 - **GIVEN** `f` in `src/a.ts` went from 2 to 4 between `main` and `HEAD`, and nothing else changed
 - **WHEN** the user runs `qgate check --base main --format json`
-- **THEN** standard output is `{"schema_version":1,"findings":[{"rule":"complexity/cyclomatic-increase","severity":"warning","message":"f: cyclomatic complexity 2 -> 4 (+2)","path":"src/a.ts","line":1,"metric":{"before":2,"after":4}}],"summary":{"findings":1,"failing":0,"fail_on":"error"}}` followed by a newline
+- **THEN** standard output is `{"schema_version":1,"findings":[{"rule":"complexity/cyclomatic-increase","severity":"warning","message":"f: cyclomatic complexity 2 -> 4 (+2)","path":"src/a.ts","line":1,"metric":{"before":2,"after":4}}],"summary":{"count":1,"failing":0,"fail_on":"error"}}` followed by a newline
 - **AND** the exit code is 0
 
 #### Scenario: No findings
 
 - **GIVEN** the change makes nothing worse
 - **WHEN** the user runs `qgate check --base main --format json`
-- **THEN** standard output is `{"schema_version":1,"findings":[],"summary":{"findings":0,"failing":0,"fail_on":"error"}}` followed by a newline
+- **THEN** standard output is `{"schema_version":1,"findings":[],"summary":{"count":0,"failing":0,"fail_on":"error"}}` followed by a newline
 
 ### Requirement: Finding fields
 
-Each finding SHALL be an object with `rule`, `severity` (`error`,
-`warning` or `info`), `message` and `path`, as the text format shows them,
-and, when the finding has them: `line`, `end_line`, `metric` (`before`
-and `after`, each only when known) and `related` (a non-empty array of
-objects with `path`, `line` and `end_line`). A field without a value
-SHALL be left out, never `null`.
+Each finding SHALL have `rule`, `severity` (`error`, `warning` or
+`info`), `message` and `path`, as the text format shows them, and when it
+has them: `line`; `end_line`, the last line of a range, which may equal
+`line`; `metric`; `related`, a non-empty array of objects with `path`,
+`line` and, for a range, `end_line`. A key without a value SHALL be left
+out, never `null`.
 
 #### Scenario: New function
 
@@ -82,13 +82,21 @@ SHALL be left out, never `null`.
 
 ### Requirement: Numbers in the JSON report
 
-Metric values and line numbers SHALL be JSON numbers. A whole number SHALL
-be written without a fraction or exponent (`4`, not `4.0`).
+Metric values and line numbers SHALL be JSON numbers. A whole number below
+2^53 in magnitude SHALL be written without a fraction or exponent (`4`,
+not `4.0`). A metric value that is not finite SHALL be left out, and a
+`metric` with neither `before` nor `after` SHALL be left out.
 
 #### Scenario: Complexity values
 
 - **WHEN** a finding's complexity goes from 2 to 4
 - **THEN** its metric is written as `{"before":2,"after":4}`
+
+#### Scenario: Values that cannot be written
+
+- **GIVEN** a finding whose metric has an `after` value that is not finite and no `before` value
+- **WHEN** the report is written as JSON
+- **THEN** the finding has no `metric` key, and no `null` appears
 
 ### Requirement: Order of findings in the JSON report
 
@@ -103,7 +111,7 @@ prints them (see "Deterministic output order" in `check-command`).
 
 ### Requirement: JSON summary
 
-`summary` SHALL hold `findings` (the number of findings), `failing` (how
+`summary` SHALL hold `count` (the number of findings), `failing` (how
 many of them are at or above the `--fail-on` level) and `fail_on` (that
 level as written on the command line, `error` by default).
 
@@ -111,14 +119,14 @@ level as written on the command line, `error` by default).
 
 - **GIVEN** inputs that produce two Error findings and one Warning finding
 - **WHEN** the user runs `qgate check --base main --format json --fail-on warning`
-- **THEN** `summary` is `{"findings":3,"failing":3,"fail_on":"warning"}`
+- **THEN** `summary` is `{"count":3,"failing":3,"fail_on":"warning"}`
 - **AND** the exit code is 1
 
 #### Scenario: Never failing
 
 - **GIVEN** inputs that produce one Error finding
 - **WHEN** the user runs `qgate check --base main --format json --fail-on never`
-- **THEN** `summary` is `{"findings":1,"failing":0,"fail_on":"never"}`
+- **THEN** `summary` is `{"count":1,"failing":0,"fail_on":"never"}`
 - **AND** the exit code is 0
 
 ### Requirement: Exit codes and errors with JSON
@@ -144,11 +152,16 @@ text format.
 
 ### Requirement: Versioned JSON format
 
-Within `schema_version` 1, a later qgate MAY add keys to the envelope, the
-summary, findings and related locations, but SHALL NOT remove a key, rename
-it or change its type or meaning; that needs a new `schema_version`. The
-repository SHALL hold a JSON Schema for version 1 that every report
-validates against.
+Within `schema_version` 1, a later qgate MAY add keys and new `rule` ids,
+but SHALL NOT remove or rename a key, change its type or meaning, or add a
+`severity` value; that needs a new `schema_version`. The repository SHALL
+hold a JSON Schema for version 1 that every report validates against.
+
+#### Scenario: A rule id the schema does not list
+
+- **GIVEN** the JSON Schema for version 1
+- **WHEN** a report holds a finding whose `rule` is an id that no analyzer reports today, written as `<analyzer>/<rule>` in lowercase
+- **THEN** the report is valid against it
 
 #### Scenario: Reports match the published schema
 

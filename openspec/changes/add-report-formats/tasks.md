@@ -35,6 +35,7 @@ Commit messages and PR bodies are written to files first.
   - the exact bytes of the spec's "One finding", "No findings", "New function" and "Duplicate block" scenarios;
   - no `null` anywhere;
   - whole metric values written as integers, and a fractional one as a float (design D4);
+  - the spec's "Values that cannot be written": a value that is not finite, and a metric left empty, are left out;
   - a message with `"`, `\` and a control character, escaped;
   - a path that is not valid UTF-8, written with U+FFFD (design D7).
 
@@ -43,6 +44,7 @@ Commit messages and PR bodies are written to files first.
 - [ ] 2.3 Write `docs/schema/report-v1.json` (design D8). In `crates/qgate-cli/tests/`, add the schema test helper and its own tests:
   - an invalid report (a missing key, a wrong type, a `null`) is rejected;
   - a valid one is accepted;
+  - the spec's "A rule id the schema does not list": a report with an unknown rule id is accepted;
   - the schema uses only the supported keywords.
 
   Add `serde_json` as a dev-dependency of `qgate-cli`. Verify that the helper tests pass.

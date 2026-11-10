@@ -10,7 +10,8 @@ first file by path whose copy covers the whole block and is not itself
 reported as a new copy of it; with `k` further such files, `, and <k>
 more` SHALL end the parentheses. The finding SHALL span the new
 occurrence's lines and name, as related locations in path order, the
-first copy by line in each such file, with the lines it covers.
+first copy of the whole block by line in each such file, with the lines
+it covers.
 
 #### Scenario: Message
 
