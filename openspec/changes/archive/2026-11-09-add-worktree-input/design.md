@@ -372,4 +372,3 @@ None. The option is new and the default is unchanged.
     proposal's Users line now state the behaviour change.
   - **README:** names the ignore rules, the file-system monitor, the
     two-week prune and the files an interrupted check can leave.
-
