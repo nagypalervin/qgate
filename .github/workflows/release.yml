@@ -1,0 +1,266 @@
+# Release binaries (the `releases` spec, design D3 and D4 of
+# `add-release-binaries`). A `v<version>` tag builds, tests and packs
+# qgate on six platforms and creates a draft GitHub Release that a
+# maintainer publishes. Pull requests that change the release inputs,
+# and manual runs, rehearse everything except creating the release.
+#
+# Third-party actions are pinned to commit SHAs, because `publish` can
+# write to the repository.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/scripts/**
+      - Cargo.toml
+      - Cargo.lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read the workspace version
+        id: read
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "qgate-cli") | .version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check the tag
+        if: github.ref_type == 'tag'
+        run: .github/scripts/check-version.sh "$GITHUB_REF_NAME"
+
+      - name: Test the tag check
+        # Not a tag: make sure the check accepts the right tag and rejects
+        # a wrong one before the first real tag depends on it.
+        if: github.ref_type != 'tag'
+        env:
+          VERSION: ${{ steps.read.outputs.version }}
+        run: |
+          .github/scripts/check-version.sh "v$VERSION"
+          if .github/scripts/check-version.sh "v$VERSION.1"; then
+            echo "error: the tag check accepted v$VERSION.1" >&2
+            exit 1
+          fi
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: version
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            # No Visual C++ Redistributable needed. Set here, not in
+            # .cargo/config.toml, which RUSTFLAGS would override.
+            rustflags: -C target-feature=+crt-static
+          - target: aarch64-pc-windows-msvc
+            os: windows-11-arm
+            rustflags: -C target-feature=+crt-static
+    runs-on: ${{ matrix.os }}
+    env:
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ needs.version.outputs.version }}
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10-16
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+          components: llvm-tools
+
+      - name: Install musl-tools
+        if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Name the files
+        run: |
+          case "$TARGET" in
+            *windows*) exe=qgate.exe; asset="qgate-$VERSION-$TARGET.zip" ;;
+            *) exe=qgate; asset="qgate-$VERSION-$TARGET.tar.gz" ;;
+          esac
+          {
+            echo "BIN=target/$TARGET/release/$exe"
+            echo "ASSET=$asset"
+          } >> "$GITHUB_ENV"
+
+      - name: Test
+        run: cargo test --workspace --locked --target "$TARGET"
+
+      - name: Build
+        run: cargo build --release --locked -p qgate-cli --target "$TARGET"
+
+      - name: Check the version
+        run: |
+          printed=$("$BIN" --version | tr -d '\r')
+          echo "$printed"
+          if [ "$printed" != "qgate $VERSION" ]; then
+            echo "error: --version printed '$printed', expected 'qgate $VERSION'" >&2
+            exit 1
+          fi
+
+      - name: Check static linking
+        if: contains(matrix.target, 'linux')
+        run: |
+          info=$(file "$BIN")
+          echo "$info"
+          case "$info" in
+            *"dynamically linked"*)
+              echo "error: the binary is dynamically linked" >&2
+              exit 1 ;;
+            *"statically linked"* | *"static-pie linked"*) ;;
+            *)
+              echo "error: file does not report a static binary" >&2
+              exit 1 ;;
+          esac
+
+      - name: Check the C runtime imports
+        if: contains(matrix.target, 'windows')
+        run: |
+          sysroot=$(cygpath -u "$(rustc --print sysroot)")
+          readobj=$(find "$sysroot" -name 'llvm-readobj.exe' -type f | head -n 1)
+          if [ -z "$readobj" ]; then
+            echo "error: llvm-readobj not found under $sysroot" >&2
+            exit 1
+          fi
+          dlls=$("$readobj" --coff-imports "$BIN" | sed -n 's/^ *Name: *//p' | sort -u)
+          echo "$dlls"
+          # The tool must see the imports at all: every Windows binary
+          # imports kernel32.
+          if ! grep -qi '^kernel32\.dll$' <<< "$dlls"; then
+            echo "error: no kernel32.dll import listed; the check cannot see imports" >&2
+            exit 1
+          fi
+          if grep -qi 'vcruntime' <<< "$dlls"; then
+            echo "error: the binary imports a VCRUNTIME DLL" >&2
+            exit 1
+          fi
+
+      - name: Pack
+        run: |
+          name="qgate-$VERSION-$TARGET"
+          mkdir -p "dist/$name"
+          cp "$BIN" README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cd dist
+          case "$ASSET" in
+            *.zip) 7z a -tzip "$ASSET" "$name" > /dev/null ;;
+            *) tar czf "$ASSET" "$name" ;;
+          esac
+          ls -l "$ASSET"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.ASSET }}
+          path: dist/${{ env.ASSET }}
+          if-no-files-found: error
+
+  checksums:
+    # Runs on every trigger, so pull requests rehearse the download and
+    # the checksums that `publish` relies on.
+    name: checksums
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write SHA256SUMS
+        working-directory: dist
+        run: |
+          ls -l
+          count=$(find . -maxdepth 1 -type f | wc -l)
+          if [ "$count" -ne 6 ]; then
+            echo "error: expected 6 archives, found $count" >&2
+            exit 1
+          fi
+          LC_ALL=C sha256sum -- qgate-* | LC_ALL=C sort -k 2 > SHA256SUMS
+          cat SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: SHA256SUMS
+          path: dist/SHA256SUMS
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    if: github.ref_type == 'tag'
+    needs: [version, checksums]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Check the files
+        working-directory: dist
+        run: |
+          ls -l
+          count=$(find . -maxdepth 1 -type f | wc -l)
+          if [ "$count" -ne 7 ]; then
+            echo "error: expected 6 archives and SHA256SUMS, found $count files" >&2
+            exit 1
+          fi
+          sha256sum --check SHA256SUMS
+
+      - name: Replace a draft from an earlier run
+        # A re-run after a failed upload must not leave two drafts; a
+        # published release is never replaced.
+        run: |
+          if draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null); then
+            if [ "$draft" = "true" ]; then
+              gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes
+            else
+              echo "error: the release $TAG is already published" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Create the draft release
+        working-directory: dist
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "qgate $VERSION" --generate-notes -- qgate-* SHA256SUMS

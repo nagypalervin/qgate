@@ -10,8 +10,63 @@
 
 ## Try it
 
-Install it from a clone of this repository (release binaries come with
-M4):
+Download the archive for your platform from the
+[latest release](https://github.com/nagypalervin/qgate/releases/latest),
+check it against `SHA256SUMS`, unpack it, and put `qgate` on your
+`PATH`:
+
+| Platform | Target in the archive name |
+|---|---|
+| Linux x64 | `x86_64-unknown-linux-musl` |
+| Linux arm64 | `aarch64-unknown-linux-musl` |
+| macOS, Apple Silicon | `aarch64-apple-darwin` |
+| macOS, Intel | `x86_64-apple-darwin` |
+| Windows x64 | `x86_64-pc-windows-msvc` |
+| Windows arm64 | `aarch64-pc-windows-msvc` |
+
+The Linux binaries are statically linked and run on any distribution,
+Alpine included. On Linux, with version 0.1.0 as the example:
+
+```sh
+v=0.1.0 t=x86_64-unknown-linux-musl
+base=https://github.com/nagypalervin/qgate/releases/download/v$v
+curl -fLO "$base/qgate-$v-$t.tar.gz" -fLO "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+tar xzf "qgate-$v-$t.tar.gz"
+install -D "qgate-$v-$t/qgate" ~/.local/bin/qgate
+```
+
+On macOS, check the archive with `shasum`:
+
+```sh
+v=0.1.0 t=aarch64-apple-darwin
+base=https://github.com/nagypalervin/qgate/releases/download/v$v
+curl -fLO "$base/qgate-$v-$t.tar.gz" -fLO "$base/SHA256SUMS"
+grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | shasum -a 256 --check
+tar xzf "qgate-$v-$t.tar.gz"
+sudo install "qgate-$v-$t/qgate" /usr/local/bin/qgate
+```
+
+On Windows, in PowerShell, then add the unpacked folder to your `PATH`:
+
+```powershell
+$v = "0.1.0"; $t = "x86_64-pc-windows-msvc"
+$base = "https://github.com/nagypalervin/qgate/releases/download/v$v"
+Invoke-WebRequest "$base/qgate-$v-$t.zip" -OutFile "qgate-$v-$t.zip"
+Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
+$line = Select-String -Path SHA256SUMS -SimpleMatch " qgate-$v-$t.zip"
+if ((Get-FileHash "qgate-$v-$t.zip" -Algorithm SHA256).Hash -ne $line.Line.Split(" ")[0]) { throw "checksum mismatch" }
+Expand-Archive "qgate-$v-$t.zip" -DestinationPath .
+```
+
+**The binaries are not signed yet.**
+- **macOS:** a file downloaded with a browser is quarantined, and
+  Gatekeeper refuses to run it. Run `xattr -d com.apple.quarantine qgate`
+  once. Files downloaded with `curl` are not quarantined.
+- **Windows:** SmartScreen or Defender may warn about a `qgate.exe`
+  downloaded with a browser. Run `Unblock-File .\qgate.exe` once.
+
+Or build it from a clone of this repository, with Rust 1.85 or later:
 
 ```sh
 cargo install --locked --path crates/qgate-cli
@@ -431,6 +486,16 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
 
 ### In CI
 
+Install qgate in the job from a release. On `ubuntu-latest`:
+
+```yaml
+- name: Install qgate
+  run: |
+    v=0.1.0 t=x86_64-unknown-linux-musl
+    curl -fsSL "https://github.com/nagypalervin/qgate/releases/download/v$v/qgate-$v-$t.tar.gz" | tar xz
+    echo "$PWD/qgate-$v-$t" >> "$GITHUB_PATH"
+```
+
 For a workflow triggered `on: pull_request` (`github.base_ref` is empty
 for other events). `--base` needs the base branch in the clone, and
 `actions/checkout` fetches a single commit by default, so fetch the full
@@ -465,9 +530,6 @@ to report.
     name: qgate-report
     path: qgate-report.json
 ```
-
-qgate has no release binaries yet (planned for M4); until then, install
-it with `cargo install` as above.
 
 ## Why
 
@@ -514,7 +576,7 @@ Design principles:
 | **M1** | `qgate check`, TypeScript parsing, complexity delta, git revisions, `--fail-on` | done |
 | **M2** | Architecture rules (`qgate.toml`), duplication detection | done |
 | **M3** | Checking while coding: the working tree as head, JSON output, a Claude Code hook, an MCP server, so agents check their own changes before opening a pull request | done |
-| **M4** | CI integration: release binaries, GitHub Action, Azure DevOps Pipelines, pull request comments, SARIF output | planned |
+| **M4** | CI integration: release binaries, GitHub Action, Azure DevOps Pipelines, pull request comments, SARIF output | in progress |
 | **M5** | Change risk from git history: hotspots (code that is both complex and changed often), code changed without its tests | planned |
 | **M6** | Baseline and trends over time, optional AI summary | planned |
 | **Later** | A git pre-commit hook, which needs a check of the staged changes (`--staged`) | not planned yet |

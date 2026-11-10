@@ -356,6 +356,44 @@ Decisions and results recorded during apply.
   unchanged. `gh pr checks 10 --required` then showed all seven as
   required and passing.
 
+- **PR 2: decisions made while writing the release workflow.**
+  - **A separate `checksums` job,** which D3 put inside `publish`. It
+    runs on every trigger with `contents: read`. It downloads the six
+    archives, checks there are six, writes `SHA256SUMS` sorted by name
+    with `LC_ALL=C`, checks it, and uploads it as an artifact.
+    `publish` (tags only) downloads all seven files and checks the
+    count and the sums again. So pull requests rehearse the artifact
+    download and the checksums too, which D3 left to the first tag.
+  - **Pinned actions** (looked up on 2026-11-10):
+    - `actions/checkout` v7.0.1;
+    - `actions/upload-artifact` v7.0.2;
+    - `actions/download-artifact` v8.0.2;
+    - `dtolnay/rust-toolchain`, which has no releases: the `master`
+      commit of 2026-10-16, with `toolchain: stable`.
+  - **The `version` job uses the runner's preinstalled `cargo` and
+    `jq`.** Off a tag, it tests the script with `v<version>`, which
+    must pass, and `v<version>.1`, which must fail.
+  - **The Windows import check** finds `llvm-readobj.exe` in the
+    toolchain's sysroot, since the `llvm-tools` component is not on
+    the `PATH`. It requires `kernel32.dll` among the imports, so an
+    empty listing cannot pass for "no VCRUNTIME". `llvm-tools` is
+    installed on every target, to keep the matrix uniform.
+  - **The script, run locally on 2026-11-10** with version 0.0.1:
+    - `v0.0.1` exited 0;
+    - `v0.0.2` exited 1, naming both versions;
+    - `0.0.1` exited 1;
+    - no argument exited 2.
+
+    After the change to 0.1.0, `v0.1.0` passes. `shellcheck` is not
+    installed here.
+  - **The stripped release binary** for the local glibc host is about
+    6.0 MB.
+  - **README:** the CI example gets an install step from a release, in
+    place of the "no release binaries yet" note. The install commands
+    use the checksum commands of D4. The Windows check uses
+    `Select-String -SimpleMatch` to find the archive's line, and
+    PowerShell's case-insensitive `-ne` to compare.
+
 ## Risks / Trade-offs
 
 - **[GitHub retires `macos-15-intel`, the last x64 macOS image]** →
