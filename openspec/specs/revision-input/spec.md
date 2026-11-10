@@ -262,6 +262,12 @@ count as unchanged. The before side SHALL be the merge base of `--base` and
 - **WHEN** the user runs `qgate check --base main --worktree`
 - **THEN** no finding is reported for `src/a.ts` or `src/b.ts`
 
+#### Scenario: An edit in the same instant as the index write
+
+- **GIVEN** `f` in `src/a.ts` was made more complex on disk without changing the file's size, and the file's modification time equals both the time recorded for it in the index and the index file's own time, as when the edit lands in the same file-system timestamp as the last index write
+- **WHEN** the user runs `qgate check --base main --worktree`
+- **THEN** a `complexity/cyclomatic-increase` finding is reported for `f` in `src/a.ts`
+
 ### Requirement: The working tree replaces the head everywhere
 
 With `--worktree`, everything this and the other capabilities say about the
