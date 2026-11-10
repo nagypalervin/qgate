@@ -35,7 +35,7 @@ Commit messages and PR bodies are written to files first.
   - the exact bytes of the spec's "One finding", "No findings", "New function" and "Duplicate block" scenarios;
   - no `null` anywhere;
   - whole metric values written as integers, and a fractional one as a float (design D4);
-  - the spec's "Values that cannot be written": a value that is not finite, and a metric left empty, are left out;
+  - the spec's "Values that cannot be written": a metric with a value that is not finite, and a metric with neither value, are left out as a whole;
   - a message with `"`, `\` and a control character, escaped;
   - a path that is not valid UTF-8, written with U+FFFD (design D7).
 

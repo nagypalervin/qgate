@@ -51,10 +51,11 @@ output.
 
 Each finding SHALL have `rule`, `severity` (`error`, `warning` or
 `info`), `message` and `path`, as the text format shows them, and when it
-has them: `line`; `end_line`, the last line of a range, which may equal
-`line`; `metric`; `related`, a non-empty array of objects with `path`,
-`line` and, for a range, `end_line`. A key without a value SHALL be left
-out, never `null`.
+has them: `line`; `end_line`, the last line of a range (may equal `line`);
+`metric`, with `before` (absent for a new item) and `after` (absent for a
+removed one); `related`, a non-empty array of objects with `path`, `line`
+and, for a range, `end_line`. A key without a value SHALL be left out,
+never `null`.
 
 #### Scenario: New function
 
@@ -84,8 +85,9 @@ out, never `null`.
 
 Metric values and line numbers SHALL be JSON numbers. A whole number below
 2^53 in magnitude SHALL be written without a fraction or exponent (`4`,
-not `4.0`). A metric value that is not finite SHALL be left out, and a
-`metric` with neither `before` nor `after` SHALL be left out.
+not `4.0`). A `metric` with a value that is not finite, or with neither
+`before` nor `after`, SHALL be left out as a whole, so an absent `before`
+or `after` always means a new or removed item.
 
 #### Scenario: Complexity values
 

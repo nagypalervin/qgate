@@ -118,9 +118,11 @@ mechanical, and the compiler finds them all.
   - a finite value with no fraction and a magnitude below 2^53 is
     written as an integer;
   - any other finite value is written as a float;
-  - a value that is not finite is left out, because `serde_json` would
-    write `null`;
-  - a metric left with neither value is left out as a whole.
+  - a metric with a value that is not finite is left out as a whole,
+    because `serde_json` would write `null`, and dropping only that
+    value would make an absent `before` or `after` ambiguous (new or
+    removed item, or not finite);
+  - a metric with neither value is left out as a whole.
 - **Why not change `Metric` to integers:** later metrics, such as a
   duplication ratio or churn, may not be whole numbers. The JSON Schema
   declares the fields as `number`, so both forms stay valid.
@@ -205,7 +207,9 @@ mechanical, and the compiler finds them all.
     rule id.
   - **Numbers that cannot be written:** values that are not finite, an
     empty metric, and whole numbers beyond 2^53 are now specified
-    (see D4).
+    (see D4). The verification round added that a non-finite value
+    drops the whole metric, so an absent `before` or `after` keeps its
+    one meaning, and that "Finding fields" names `metric`'s keys.
   - **`summary.count`:** renamed from `summary.findings`, so one name
     does not mean an array at the top level and a number in the summary.
   - **`serde_json`'s dependencies:** D3 had the wrong list. All of them
