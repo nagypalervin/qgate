@@ -181,6 +181,8 @@ name = "qgate-report"
 version = "0.0.1"
 dependencies = [
  "qgate-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

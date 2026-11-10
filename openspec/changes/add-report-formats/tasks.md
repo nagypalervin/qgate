@@ -31,7 +31,7 @@ Commit messages and PR bodies are written to files first.
 
 ## 2. The JSON report and `--format` (PR 2)
 
-- [ ] 2.1 Add `serde_json` to the workspace and to `qgate-report`, saying why in the commit message (design D3). Write failing unit tests in `crates/qgate-report/src/lib.rs` for `render_json`:
+- [x] 2.1 Add `serde_json` to the workspace and to `qgate-report`, saying why in the commit message (design D3). Write failing unit tests in `crates/qgate-report/src/lib.rs` for `render_json`:
   - the exact bytes of the spec's "One finding", "No findings", "New function" and "Duplicate block" scenarios;
   - no `null` anywhere;
   - whole metric values written as integers, and a fractional one as a float (design D4);
@@ -40,7 +40,7 @@ Commit messages and PR bodies are written to files first.
   - a path that is not valid UTF-8, written with U+FFFD (design D7).
 
   Verify that they fail.
-- [ ] 2.2 Implement `render_json` and `ReportSummary` with private mirror structs (design D3–D5), and update the crate docs (the "JSON follows in M3" line). Verify that the 2.1 tests pass and that `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-report --no-deps` builds.
+- [x] 2.2 Implement `render_json` and `ReportSummary` with private mirror structs (design D3–D5), and update the crate docs (the "JSON follows in M3" line). Verify that the 2.1 tests pass and that `RUSTDOCFLAGS="-D warnings" cargo doc -p qgate-report --no-deps` builds.
 - [ ] 2.3 Write `docs/schema/report-v1.json` (design D8). In `crates/qgate-cli/tests/`, add the schema test helper and its own tests:
   - an invalid report (a missing key, a wrong type, a `null`) is rejected;
   - a valid one is accepted;

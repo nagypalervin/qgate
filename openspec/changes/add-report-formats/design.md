@@ -222,6 +222,17 @@ mechanical, and the compiler finds them all.
   - the related order reversed;
   - each copy's own window end used instead of the whole block.
 
+- **PR 2: the renderer (tasks 2.1, 2.2).**
+  - `qgate-report` depends on `serde` (for the derive) as well as
+    `serde_json`. Neither adds a crate to `Cargo.lock`.
+  - The JSON severity names are spelled out in the renderer, not taken
+    from `Severity`'s `Display`, so a change to the text output cannot
+    change a public JSON value.
+  - `ReportSummary` is `Copy` and passed by value.
+  - `serde_json` cannot fail on these types; `render_json` documents
+    that it never panics in practice rather than returning a `Result`
+    every caller would have to handle.
+
 ## Risks / Trade-offs
 
 - **[Version 1 is frozen once published.]** A wrong name or shape stays
