@@ -433,6 +433,41 @@ Decisions and results recorded during apply.
     - `version` accepted `v0.1.0` and rejected `v0.1.0.1` with a message
       naming both versions.
 
+- **Review of PR 2.** No blockers. The reviewer checked every pinned
+  SHA with `git ls-remote`, found no script injection, and walked
+  through the tag path that has not run yet. Eight findings, all
+  addressed:
+  1. **The README's CI step unpacked into the workspace.** If it came
+     before `actions/checkout`, the checkout deleted the files; if it
+     came after, it left a folder in the repository under analysis. It
+     also skipped the checksum. → It now installs in `$RUNNER_TEMP` and
+     checks `SHA256SUMS`.
+  2. **The README's install lines ran on after a failed checksum.** →
+     They are chained with `&&`, with `curl --fail-early`, because curl
+     otherwise reports only the last transfer. PowerShell gets
+     `$ErrorActionPreference = "Stop"`, and `Expand-Archive` runs in the
+     `else` branch. Checked locally with `file://` URLs:
+     - a good archive is installed;
+     - a tampered one stops the chain with nothing installed;
+     - a missing first file makes curl exit 37.
+  3. **`publish` took any `gh release view` failure for "no release".**
+     → Only `release not found` counts as no release, and any other
+     error fails the job. The message was checked against the real
+     repository with an unused tag.
+  4. **`workflow_dispatch` on a tag ref would have run `publish`.** →
+     `publish` requires `github.event_name == 'push'`.
+  5. **An empty `RUSTFLAGS` on the non-Windows targets** would override
+     a future `.cargo/config.toml`. → `RUSTFLAGS` is written to
+     `GITHUB_ENV` only when the matrix sets it.
+  6. **`actions/checkout` kept the token in `.git/config`** while
+     third-party build scripts ran. → `persist-credentials: false`.
+  7. **"Alpine included" did not hold for the commands,** since BusyBox
+     `sha256sum` has no `--ignore-missing` and Alpine has no `curl`. →
+     Linux uses the same grep-the-line check as macOS, which BusyBox
+     supports, and the README says curl must be installed.
+  8. **`/usr/local/bin` may not exist on Apple Silicon Macs.** →
+     `sudo install -d /usr/local/bin` first.
+
 ## Risks / Trade-offs
 
 - **[GitHub retires `macos-15-intel`, the last x64 macOS image]** →

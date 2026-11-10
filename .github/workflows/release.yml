@@ -37,6 +37,8 @@ jobs:
       version: ${{ steps.read.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Read the workspace version
         id: read
@@ -79,8 +81,8 @@ jobs:
             os: macos-latest
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            # No Visual C++ Redistributable needed. Set here, not in
-            # .cargo/config.toml, which RUSTFLAGS would override.
+            # No Visual C++ Redistributable needed. Set as RUSTFLAGS, not
+            # in .cargo/config.toml, which RUSTFLAGS would override.
             rustflags: -C target-feature=+crt-static
           - target: aarch64-pc-windows-msvc
             os: windows-11-arm
@@ -89,12 +91,13 @@ jobs:
     env:
       TARGET: ${{ matrix.target }}
       VERSION: ${{ needs.version.outputs.version }}
-      RUSTFLAGS: ${{ matrix.rustflags }}
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10-16
         with:
@@ -107,7 +110,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Name the files
+        env:
+          MATRIX_RUSTFLAGS: ${{ matrix.rustflags }}
         run: |
+          # RUSTFLAGS only where the matrix sets it: even an empty
+          # RUSTFLAGS would override a .cargo/config.toml.
+          if [ -n "$MATRIX_RUSTFLAGS" ]; then
+            echo "RUSTFLAGS=$MATRIX_RUSTFLAGS" >> "$GITHUB_ENV"
+          fi
           case "$TARGET" in
             *windows*) exe=qgate.exe; asset="qgate-$VERSION-$TARGET.zip" ;;
             *) exe=qgate; asset="qgate-$VERSION-$TARGET.tar.gz" ;;
@@ -220,7 +230,9 @@ jobs:
 
   publish:
     name: publish
-    if: github.ref_type == 'tag'
+    # A tag push only: a manual run on a tag ref rehearses, it does not
+    # replace a draft.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [version, checksums]
     runs-on: ubuntu-latest
     permissions:
@@ -250,13 +262,20 @@ jobs:
         # A re-run after a failed upload must not leave two drafts; a
         # published release is never replaced.
         run: |
-          if draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null); then
+          if draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> view-error); then
             if [ "$draft" = "true" ]; then
               gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes
             else
               echo "error: the release $TAG is already published" >&2
               exit 1
             fi
+          elif grep -qi 'release not found' view-error; then
+            echo "no release for $TAG yet"
+          else
+            # Any other failure (an API error, a rate limit) must not be
+            # taken for "no release", or a second draft would appear.
+            cat view-error >&2
+            exit 1
           fi
 
       - name: Create the draft release

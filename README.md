@@ -25,38 +25,40 @@ check it against `SHA256SUMS`, unpack it, and put `qgate` on your
 | Windows arm64 | `aarch64-pc-windows-msvc` |
 
 The Linux binaries are statically linked and run on any distribution,
-Alpine included. On Linux, with version 0.1.0 as the example:
+Alpine included (with `curl` installed). Each block below installs only
+when the checksum matches. On Linux, with version 0.1.0 as the example:
 
 ```sh
 v=0.1.0 t=x86_64-unknown-linux-musl
 base=https://github.com/nagypalervin/qgate/releases/download/v$v
-curl -fLO "$base/qgate-$v-$t.tar.gz" -fLO "$base/SHA256SUMS"
-sha256sum --check --ignore-missing SHA256SUMS
-tar xzf "qgate-$v-$t.tar.gz"
-install -D "qgate-$v-$t/qgate" ~/.local/bin/qgate
+curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
+  grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c &&
+  tar xzf "qgate-$v-$t.tar.gz" &&
+  install -D "qgate-$v-$t/qgate" ~/.local/bin/qgate
 ```
 
-On macOS, check the archive with `shasum`:
+On macOS, the check uses `shasum`:
 
 ```sh
 v=0.1.0 t=aarch64-apple-darwin
 base=https://github.com/nagypalervin/qgate/releases/download/v$v
-curl -fLO "$base/qgate-$v-$t.tar.gz" -fLO "$base/SHA256SUMS"
-grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | shasum -a 256 --check
-tar xzf "qgate-$v-$t.tar.gz"
-sudo install "qgate-$v-$t/qgate" /usr/local/bin/qgate
+curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
+  grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | shasum -a 256 --check &&
+  tar xzf "qgate-$v-$t.tar.gz" &&
+  sudo install -d /usr/local/bin &&
+  sudo install "qgate-$v-$t/qgate" /usr/local/bin/qgate
 ```
 
 On Windows, in PowerShell, then add the unpacked folder to your `PATH`:
 
 ```powershell
+$ErrorActionPreference = "Stop"
 $v = "0.1.0"; $t = "x86_64-pc-windows-msvc"
 $base = "https://github.com/nagypalervin/qgate/releases/download/v$v"
 Invoke-WebRequest "$base/qgate-$v-$t.zip" -OutFile "qgate-$v-$t.zip"
 Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
 $line = Select-String -Path SHA256SUMS -SimpleMatch " qgate-$v-$t.zip"
-if ((Get-FileHash "qgate-$v-$t.zip" -Algorithm SHA256).Hash -ne $line.Line.Split(" ")[0]) { throw "checksum mismatch" }
-Expand-Archive "qgate-$v-$t.zip" -DestinationPath .
+if ((Get-FileHash "qgate-$v-$t.zip" -Algorithm SHA256).Hash -ne $line.Line.Split(" ")[0]) { throw "checksum mismatch" } else { Expand-Archive "qgate-$v-$t.zip" -DestinationPath . }
 ```
 
 **The binaries are not signed yet.**
@@ -486,15 +488,24 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
 
 ### In CI
 
-Install qgate in the job from a release. On `ubuntu-latest`:
+Install qgate in the job from a release, outside the checkout, so
+`actions/checkout` does not remove it and qgate does not analyze it. On
+`ubuntu-latest`:
 
 ```yaml
 - name: Install qgate
+  working-directory: ${{ runner.temp }}
   run: |
     v=0.1.0 t=x86_64-unknown-linux-musl
-    curl -fsSL "https://github.com/nagypalervin/qgate/releases/download/v$v/qgate-$v-$t.tar.gz" | tar xz
+    base=https://github.com/nagypalervin/qgate/releases/download/v$v
+    curl -fsSL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS"
+    grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c
+    tar xzf "qgate-$v-$t.tar.gz"
     echo "$PWD/qgate-$v-$t" >> "$GITHUB_PATH"
 ```
+
+A `run` step stops at its first failing command, so a bad download
+installs nothing.
 
 For a workflow triggered `on: pull_request` (`github.base_ref` is empty
 for other events). `--base` needs the base branch in the clone, and
