@@ -84,6 +84,7 @@ fn increase(change: &FileChange, after: &Function, before: u32) -> Option<Findin
             before: Some(f64::from(before)),
             after: Some(f64::from(after.cyclomatic)),
         }),
+        related: Vec::new(),
     })
 }
 
@@ -106,6 +107,7 @@ fn new_function(change: &FileChange, after: &Function) -> Option<Finding> {
             before: None,
             after: Some(f64::from(after.cyclomatic)),
         }),
+        related: Vec::new(),
     })
 }
 
@@ -113,6 +115,7 @@ fn location(change: &FileChange, after: &Function) -> Location {
     Location {
         path: change.path.clone(),
         line: Some(after.line),
+        end_line: None,
     }
 }
 
@@ -158,11 +161,13 @@ mod tests {
             location: Location {
                 path: PATH.into(),
                 line: Some(line),
+                end_line: None,
             },
             metric: Some(Metric {
                 before: Some(f64::from(before)),
                 after: Some(f64::from(after)),
             }),
+            related: Vec::new(),
         }
     }
 
@@ -174,11 +179,13 @@ mod tests {
             location: Location {
                 path: PATH.into(),
                 line: Some(line),
+                end_line: None,
             },
             metric: Some(Metric {
                 before: None,
                 after: Some(f64::from(after)),
             }),
+            related: Vec::new(),
         }
     }
 

@@ -324,8 +324,10 @@ impl DuplicationIndex {
                     location: Location {
                         path: PathBuf::from(&self.paths[file]),
                         line: Some(place.first_line),
+                        end_line: None,
                     },
                     metric: None,
+                    related: Vec::new(),
                 });
             }
             start = end + 1;

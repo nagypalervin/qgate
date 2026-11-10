@@ -516,8 +516,10 @@ fn file_change(
         location: Location {
             path: PathBuf::from(&file.path),
             line,
+            end_line: None,
         },
         metric: None,
+        related: Vec::new(),
     };
 
     let after_bytes = repo.read_blob(&file.after).map_err(|e| e.to_string())?;

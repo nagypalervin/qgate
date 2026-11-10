@@ -14,7 +14,7 @@ Commit messages and PR bodies are written to files first.
 
 ## 1. Ranges and related locations in findings (PR 1)
 
-- [ ] 1.1 Add `Location::end_line` and `Finding::related` to `qgate-core` (design D1), with doc comments, and set them to `None` and empty at every existing construction site. Verify that `cargo test --workspace` passes unchanged and that the text output tests in `crates/qgate-cli/tests/` need no edit.
+- [x] 1.1 Add `Location::end_line` and `Finding::related` to `qgate-core` (design D1), with doc comments, and set them to `None` and empty at every existing construction site. Verify that `cargo test --workspace` passes unchanged and that the text output tests in `crates/qgate-cli/tests/` need no edit.
 - [ ] 1.2 Write failing unit tests in `crates/qgate-analyzers/src/duplication.rs` for design D2, using before/after fixtures as the existing tests do:
   - a block copied from one file: `end_line` is the new occurrence's last line, and `related` holds that file with the lines the message names;
   - copies in three files: `related` holds one location per file, in path order, the first being the file the message names;
