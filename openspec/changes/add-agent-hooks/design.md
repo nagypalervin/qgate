@@ -173,6 +173,23 @@ the required behaviour.
   - a `systemMessage` the user sees;
   - an error that does not reach the model.
 
+## Implementation Notes
+
+- **The hook (tasks 1.2-2.4).**
+  - `Cargo.lock` gains only the `serde` and `serde_json` edges of
+    `qgate-cli`, no new package.
+  - Input that is valid JSON but not an object (`[]`, a string) is
+    rejected before serde reads it, because a derived struct would also
+    accept a JSON array.
+  - Missing `hook_event_name` counts as invalid hook input; another event
+    name gets its own message naming it.
+  - An empty `CLAUDE_PROJECT_DIR` counts as unset.
+  - `qgate hook` without `claude-code` is a usage error too, so it also
+    exits with 1. A failure to write standard output exits with 1 and a
+    message on standard error, since there is no response to give.
+  - `qgate hook claude-code --base` defaults to `HEAD` in clap, so
+    `--help` shows the default.
+
 ## Risks / Trade-offs
 
 - **[Another tool's Stop hook blocks first.]** Then `stop_hook_active`

@@ -10,11 +10,11 @@ first.
 ## 1. Groundwork
 
 - [x] 1.1 Pass the directory to discover the repository from into `check_revisions` (design D2). `qgate check` passes the current directory. Verify that every existing test passes unchanged.
-- [ ] 1.2 Make `serde` and `serde_json` normal dependencies of `qgate-cli` (design D3), saying why in the commit message. Verify that `Cargo.lock` gains no new package.
+- [x] 1.2 Make `serde` and `serde_json` normal dependencies of `qgate-cli` (design D3), saying why in the commit message. Verify that `Cargo.lock` gains no new package.
 
 ## 2. `qgate hook claude-code`
 
-- [ ] 2.1 Write failing unit tests in `crates/qgate-cli/src/hook.rs` for the decision function (design D1, D5):
+- [x] 2.1 Write failing unit tests in `crates/qgate-cli/src/hook.rs` for the decision function (design D1, D5):
   - nothing to report: no output;
   - a failing finding: a block with the exact `reason`;
   - `stop_hook_active`: no block, and the remaining findings in the `systemMessage`;
@@ -26,9 +26,9 @@ first.
   - the output is one line, without `null`.
 
   Verify that they fail.
-- [ ] 2.2 Implement the input, the decision function and the output (design D1, D3, D5). Verify that the 2.1 tests pass.
-- [ ] 2.3 Write failing end-to-end tests in `crates/qgate-cli/tests/hook.rs`, one per scenario of the `agent-hooks` spec. Each builds a temporary repository with the helpers in `tests/support`, feeds the input on standard input, and removes `CLAUDE_PROJECT_DIR` from the environment unless the scenario sets it. Verify that they fail.
-- [ ] 2.4 Add `qgate hook claude-code` to the CLI (design D2, D4):
+- [x] 2.2 Implement the input, the decision function and the output (design D1, D3, D5). Verify that the 2.1 tests pass.
+- [x] 2.3 Write failing end-to-end tests in `crates/qgate-cli/tests/hook.rs`, one per scenario of the `agent-hooks` spec. Each builds a temporary repository with the helpers in `tests/support`, feeds the input on standard input, and removes `CLAUDE_PROJECT_DIR` from the environment unless the scenario sets it. Verify that they fail.
+- [x] 2.4 Add `qgate hook claude-code` to the CLI (design D2, D4):
   - `--base` and `--fail-on`, with help text;
   - reading standard input;
   - the project directory;
