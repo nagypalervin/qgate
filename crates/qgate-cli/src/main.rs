@@ -10,13 +10,16 @@
 //! invalid invocation or input), else `1` when a finding is at or above the
 //! `--fail-on` level, else `0`. `qgate hook` speaks an agent's hook
 //! protocol instead (see the `hook` module): `0`, or `1` for an invalid
-//! invocation, never `2`.
+//! invocation, never `2`. `qgate mcp` serves MCP until its input ends (see
+//! the `mcp` module): `0`, `1` when its input or output fails, `2` for an
+//! invalid invocation.
 
 mod hook;
+mod mcp;
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{ErrorKind, Read as _, Write as _};
+use std::io::{BufRead as _, ErrorKind, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -155,6 +158,25 @@ fn command() -> Command {
         .version(env!("CARGO_PKG_VERSION"))
         .subcommand(check_command())
         .subcommand(hook_command())
+        .subcommand(mcp_command())
+}
+
+/// `qgate mcp`: an MCP server on standard input and output (the
+/// `mcp-server` spec).
+fn mcp_command() -> Command {
+    Command::new("mcp")
+        .about(
+            "Serve the Model Context Protocol on standard input and output, with a check \
+             tool that AI coding agents call",
+        )
+        .arg(
+            Arg::new("fail-on")
+                .long("fail-on")
+                .value_name("level")
+                .help("The level the report's summary.failing counts")
+                .value_parser(value_parser!(FailOn))
+                .default_value(DEFAULT_FAIL_ON.name()),
+        )
 }
 
 /// `qgate hook <agent>`: run from a coding agent's hooks (the
@@ -285,6 +307,10 @@ fn main() -> ExitCode {
         }
     }
 
+    if let Some(("mcp", args)) = matches.subcommand() {
+        return mcp_server(args);
+    }
+
     if let Some(("check", args)) = matches.subcommand() {
         let two_files = args.contains_id("before") && args.contains_id("after");
         if !two_files && !args.contains_id("base") {
@@ -364,6 +390,51 @@ fn claude_code_hook(args: &ArgMatches) -> ExitCode {
             // Not 2: Claude Code would send it to the model.
             let _ = writeln!(std::io::stderr(), "error: {message}");
             ExitCode::from(FAILED)
+        }
+    }
+}
+
+/// `qgate mcp`: answer each line of standard input until it ends (design
+/// D1, D6 and D8 of `add-mcp-server`).
+fn mcp_server(args: &ArgMatches) -> ExitCode {
+    let fail_on = args
+        .get_one::<FailOn>("fail-on")
+        .copied()
+        .unwrap_or(DEFAULT_FAIL_ON);
+    let cwd =
+        std::env::current_dir().map_err(|e| format!("cannot read the current directory: {e}"));
+    let mut server = mcp::Server::new(fail_on, cwd, check_revisions);
+    let mut input = std::io::stdin().lock();
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match input.read_until(b'\n', &mut line) {
+            Ok(0) => return ExitCode::SUCCESS,
+            Ok(_) => {}
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => {
+                let _ = writeln!(std::io::stderr(), "error: cannot read the input: {e}");
+                return ExitCode::from(FAILED);
+            }
+        }
+        // Text that is not UTF-8 is not JSON either: the server answers it
+        // with a parse error.
+        let Some(mut response) = server.handle(&String::from_utf8_lossy(&line)) else {
+            continue;
+        };
+        response.push('\n');
+        let mut stdout = std::io::stdout().lock();
+        match stdout
+            .write_all(response.as_bytes())
+            .and_then(|()| stdout.flush())
+        {
+            Ok(()) => {}
+            // The client is gone.
+            Err(e) if e.kind() == ErrorKind::BrokenPipe => return ExitCode::SUCCESS,
+            Err(e) => {
+                let _ = writeln!(std::io::stderr(), "error: cannot write a response: {e}");
+                return ExitCode::from(FAILED);
+            }
         }
     }
 }

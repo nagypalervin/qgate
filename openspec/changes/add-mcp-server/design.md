@@ -300,6 +300,59 @@ their presence, not their wording.
     as `sh -c 'tee /tmp/qgate-mcp-in.log | qgate mcp'`. The server
     itself does not log (D8).
 
+## Implementation Notes
+
+Decisions made during apply:
+
+- **Tasks 1.1 to 2.2 are one commit.** Until `main` uses the `mcp`
+  module, it is dead code, which `clippy -D warnings` rejects. The
+  pre-commit hook also runs the tests, so failing tests cannot be
+  committed on their own.
+
+  The tests were still written first and run to fail:
+  - against a stub `handle` that answered nothing, 23 of the 25 unit
+    tests failed. The two that passed check that a notification and an
+    empty line get no answer, which a silent stub also does;
+  - before `qgate mcp` existed, all 30 end-to-end tests failed.
+- **Discovery is always marked as current.** A `server/discover` result
+  carries `resultType`, even after an `initialize`. Discovery exists
+  only in the current era.
+- **Every request's version is checked, discovery included.** A
+  request whose `_meta` declares a revision other than 2026-07-28 gets
+  `-32022`, whatever its method. The error's `data.supported` tells the
+  client the same as discovery would. `initialize` is exempt, because
+  it carries its version in `protocolVersion`.
+- **A version that is not a string** gets `-32022` too, with the value
+  as `requested`.
+- **`ping` is answered in both eras.** The current era removed it, but
+  answering costs nothing. In the current era its result is
+  `{"resultType":"complete"}`.
+- **Key order.**
+  - The response envelope is a struct, so a response line starts with
+    `"jsonrpc"`, then `"id"`, as in the JSON-RPC examples and the spec's
+    `ping` scenario.
+  - Inside `result`, `serde_json` maps sort their keys. So
+    `structuredContent` lists `findings`, `schema_version`, `summary`
+    in that order.
+  - The text block keeps the bytes of `qgate check --format json`
+    exactly. Its order is the report's, and a test compares them.
+- **Input that is not UTF-8.** `main` reads lines as bytes and passes
+  them on with invalid sequences replaced. Such a line is not valid
+  JSON-RPC either, so it gets `-32700` like any other unparsable line.
+- **Arguments are checked in key order.** With several bad arguments,
+  the first in alphabetical order is named, since `serde_json` maps
+  sort their keys. The tests use one bad argument each.
+- **The end-to-end tests' `found` helper looks only at complexity
+  findings.** The `f` and `g` fixtures are copies of each other, so an
+  uncommitted `g` also gives a `duplication/duplicate-block` finding.
+  The scenarios are about which complexity change is reported.
+  `the_report_is_the_check_commands_report` compares whole reports,
+  duplication included.
+- **The unit tests' fake check is boxed (`FakeCheck`),** because
+  clippy's `type_complexity` rejects the `impl FnMut` return type.
+- **Rust 1.85:** the `qgate-cli` tests pass on the MSRV toolchain
+  locally too.
+
 ## Risks / Trade-offs
 
 - **[The 2026-07-28 revision is four months old, and clients differ in

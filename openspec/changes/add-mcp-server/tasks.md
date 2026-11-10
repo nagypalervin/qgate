@@ -14,7 +14,7 @@ planning artifacts.
 
 ## 1. Protocol module
 
-- [ ] 1.1 Write failing unit tests in `crates/qgate-cli/src/mcp.rs`. They use a fake check callback that records its arguments (design D1 to D5, D8). They cover:
+- [x] 1.1 Write failing unit tests in `crates/qgate-cli/src/mcp.rs`. They use a fake check callback that records its arguments (design D1 to D5, D8). They cover:
   - **`server/discover`:**
     - `resultType`;
     - `supportedVersions`;
@@ -52,18 +52,18 @@ planning artifacts.
   - **Every response** is one line with `"jsonrpc":"2.0"` and the request's `id`, as a number or as a string.
 
   Verify that they fail.
-- [ ] 1.2 Implement `mcp.rs` (design D1 to D5, D7, D8). Verify that the 1.1 tests pass.
+- [x] 1.2 Implement `mcp.rs` (design D1 to D5, D7, D8). Verify that the 1.1 tests pass.
 
 ## 2. `qgate mcp`
 
-- [ ] 2.1 Write failing end-to-end tests in `crates/qgate-cli/tests/mcp.rs`, one per scenario of the `mcp-server` spec.
+- [x] 2.1 Write failing end-to-end tests in `crates/qgate-cli/tests/mcp.rs`, one per scenario of the `mcp-server` spec.
   - **How each test runs:** it builds a temporary repository with the helpers in `tests/support`, starts `qgate mcp` in it, writes the messages to standard input, closes it, and reads the response lines.
   - **Extra checks:**
     - `structuredContent` validates against the schema with `tests/support/schema.rs`;
     - it equals what `qgate check --base HEAD --worktree --format json` prints in the same repository.
 
   Verify that they fail.
-- [ ] 2.2 Add `qgate mcp` to the CLI (design D1, D6, D8):
+- [x] 2.2 Add `qgate mcp` to the CLI (design D1, D6, D8):
   - `--fail-on`, with help text;
   - the loop over standard input;
   - the working directory, read once;
