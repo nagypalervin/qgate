@@ -250,7 +250,9 @@ fn main() -> ExitCode {
                             .map_or("HEAD", String::as_str),
                     )
                 };
-                check_revisions(base, head)
+                std::env::current_dir()
+                    .map_err(|e| format!("cannot read the current directory: {e}"))
+                    .and_then(|cwd| check_revisions(&cwd, base, head))
             }
             None => check(args),
         };
@@ -365,12 +367,9 @@ struct Head {
 }
 
 /// Run `qgate check --base <base>` with `--head <rev>` or `--worktree` in
-/// the repository that contains the current directory, and return the
-/// sorted findings.
-fn check_revisions(base: &str, head: HeadArg<'_>) -> Result<Vec<Finding>, String> {
-    let cwd =
-        std::env::current_dir().map_err(|e| format!("cannot read the current directory: {e}"))?;
-    let repo = Repository::discover(&cwd).map_err(|e| e.to_string())?;
+/// the repository that contains `dir`, and return the sorted findings.
+fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Finding>, String> {
+    let repo = Repository::discover(dir).map_err(|e| e.to_string())?;
     let head = match head {
         HeadArg::Revision(revision) => Head {
             revision: revision.to_owned(),

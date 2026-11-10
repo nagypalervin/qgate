@@ -9,7 +9,7 @@ first.
 
 ## 1. Groundwork
 
-- [ ] 1.1 Pass the directory to discover the repository from into `check_revisions` (design D2). `qgate check` passes the current directory. Verify that every existing test passes unchanged.
+- [x] 1.1 Pass the directory to discover the repository from into `check_revisions` (design D2). `qgate check` passes the current directory. Verify that every existing test passes unchanged.
 - [ ] 1.2 Make `serde` and `serde_json` normal dependencies of `qgate-cli` (design D3), saying why in the commit message. Verify that `Cargo.lock` gains no new package.
 
 ## 2. `qgate hook claude-code`
