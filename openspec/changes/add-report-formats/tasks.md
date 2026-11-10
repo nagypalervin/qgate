@@ -15,15 +15,15 @@ Commit messages and PR bodies are written to files first.
 ## 1. Ranges and related locations in findings (PR 1)
 
 - [x] 1.1 Add `Location::end_line` and `Finding::related` to `qgate-core` (design D1), with doc comments, and set them to `None` and empty at every existing construction site. Verify that `cargo test --workspace` passes unchanged and that the text output tests in `crates/qgate-cli/tests/` need no edit.
-- [ ] 1.2 Write failing unit tests in `crates/qgate-analyzers/src/duplication.rs` for design D2, using before/after fixtures as the existing tests do:
+- [x] 1.2 Write failing unit tests in `crates/qgate-analyzers/src/duplication.rs` for design D2, using before/after fixtures as the existing tests do:
   - a block copied from one file: `end_line` is the new occurrence's last line, and `related` holds that file with the lines the message names;
   - copies in three files: `related` holds one location per file, in path order, the first being the file the message names;
   - two copies in one file: `related` holds the first by line;
   - a copy whose counterpart is longer than the block: the related `end_line` covers only the block, as the message does.
 
   Verify that they fail.
-- [ ] 1.3 Fill in `end_line` and `related` in the duplication analyzer (design D2). Verify that the 1.2 tests pass and every message stays byte-identical (the existing duplication tests and `crates/qgate-cli/tests/revisions.rs`).
-- [ ] 1.4 Check that the tests bite. Break each of these, one at a time, and confirm that a test fails for each:
+- [x] 1.3 Fill in `end_line` and `related` in the duplication analyzer (design D2). Verify that the 1.2 tests pass and every message stays byte-identical (the existing duplication tests and `crates/qgate-cli/tests/revisions.rs`).
+- [x] 1.4 Check that the tests bite. Break each of these, one at a time, and confirm that a test fails for each:
   - the end line (use the first line);
   - one related location per file (keep every copy);
   - the related order (reverse it);

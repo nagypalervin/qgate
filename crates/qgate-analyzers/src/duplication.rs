@@ -296,17 +296,27 @@ impl DuplicationIndex {
             if new_tokens >= MIN_TOKENS {
                 used.extend(windows[start..=end].iter().map(|(k, _)| *k));
                 copies.sort_by_key(|c| (&self.paths[c.path], c.first_line, c.start));
-                let counterpart = copies[0];
-                let counterpart_last_line = lookup
-                    .last_line(
-                        self,
-                        windows[end].0,
-                        counterpart.path,
-                        counterpart.start + offset,
-                    )
-                    .unwrap_or(counterpart.last_line);
-                let other_files: BTreeSet<usize> = copies.iter().map(|c| c.path).collect();
-                let more = match other_files.len() - 1 {
+                // The first copy in each file, in path order, with the
+                // lines it covers over the whole block; the first one is
+                // the copy the message names.
+                let mut related: Vec<Location> = Vec::new();
+                let mut last_path = None;
+                for copy in &copies {
+                    if last_path == Some(copy.path) {
+                        continue;
+                    }
+                    last_path = Some(copy.path);
+                    let last_line = lookup
+                        .last_line(self, windows[end].0, copy.path, copy.start + offset)
+                        .unwrap_or(copy.last_line);
+                    related.push(Location {
+                        path: PathBuf::from(&self.paths[copy.path]),
+                        line: Some(copy.first_line),
+                        end_line: Some(last_line),
+                    });
+                }
+                let counterpart = &related[0];
+                let more = match related.len() - 1 {
                     0 => String::new(),
                     k => format!(", and {k} more"),
                 };
@@ -315,19 +325,19 @@ impl DuplicationIndex {
                     severity: Severity::Warning,
                     message: format!(
                         "duplicates {}:{}-{} (lines {}-{}, {tokens} tokens{more})",
-                        self.paths[counterpart.path],
-                        counterpart.first_line,
-                        counterpart_last_line,
+                        counterpart.path.display(),
+                        counterpart.line.unwrap_or_default(),
+                        counterpart.end_line.unwrap_or_default(),
                         place.first_line,
                         windows[end].1.last_line,
                     ),
                     location: Location {
                         path: PathBuf::from(&self.paths[file]),
                         line: Some(place.first_line),
-                        end_line: None,
+                        end_line: Some(windows[end].1.last_line),
                     },
                     metric: None,
-                    related: Vec::new(),
+                    related,
                 });
             }
             start = end + 1;
@@ -518,11 +528,12 @@ mod tests {
         run_with(changes, others, fnv1a)
     }
 
-    fn run_with(
+    /// The findings themselves, for what `run` leaves out.
+    fn findings_with(
         changes: &[(&str, Vec<Token>, Vec<Token>)],
         others: &[(&str, Vec<Token>)],
         hash: fn(&str) -> u64,
-    ) -> Vec<(String, u32, String)> {
+    ) -> Vec<Finding> {
         let sources: Vec<ChangedSource<'_>> = changes
             .iter()
             .map(|(path, before, after)| ChangedSource {
@@ -535,8 +546,15 @@ mod tests {
         for (path, tokens) in others {
             index.add(path, tokens);
         }
-        index
-            .findings()
+        index.findings()
+    }
+
+    fn run_with(
+        changes: &[(&str, Vec<Token>, Vec<Token>)],
+        others: &[(&str, Vec<Token>)],
+        hash: fn(&str) -> u64,
+    ) -> Vec<(String, u32, String)> {
+        findings_with(changes, others, hash)
             .into_iter()
             .map(|f| {
                 assert_eq!(f.rule, RULE);
@@ -588,6 +606,115 @@ mod tests {
         assert_eq!(
             found[0].2,
             "duplicates src/a.ts:1-6 (lines 4-9, 68 tokens, and 2 more)"
+        );
+    }
+
+    // Requirement: Duplicate block finding, the range and related locations
+    // (add-report-formats, design D2)
+
+    /// A location from `path` over lines `line` to `end_line`.
+    fn span(path: &str, line: u32, end_line: u32) -> Location {
+        Location {
+            path: PathBuf::from(path),
+            line: Some(line),
+            end_line: Some(end_line),
+        }
+    }
+
+    /// The only finding of a run, with its message checked.
+    fn only_finding(
+        changes: &[(&str, Vec<Token>, Vec<Token>)],
+        others: &[(&str, Vec<Token>)],
+        message: &str,
+    ) -> Finding {
+        let mut found = findings_with(changes, others, fnv1a);
+        assert_eq!(found.len(), 1, "{found:?}");
+        let finding = found.remove(0);
+        assert_eq!(finding.message, message);
+        finding
+    }
+
+    #[test]
+    fn a_copy_spans_its_lines_and_names_the_original() {
+        let finding = only_finding(
+            &[("src/orders/format.ts", vec![], tokens(COPY))],
+            &[("src/utils/date.ts", tokens(DATE))],
+            "duplicates src/utils/date.ts:1-6 (lines 4-9, 68 tokens)",
+        );
+        assert_eq!(finding.location, span("src/orders/format.ts", 4, 9));
+        assert_eq!(finding.related, [span("src/utils/date.ts", 1, 6)]);
+    }
+
+    #[test]
+    fn related_locations_are_one_per_file_in_path_order() {
+        let finding = only_finding(
+            &[("src/orders/format.ts", vec![], tokens(COPY))],
+            &[
+                ("src/utils/date.ts", tokens(DATE)),
+                ("src/b.ts", tokens(DATE)),
+                ("src/a.ts", tokens(DATE)),
+            ],
+            "duplicates src/a.ts:1-6 (lines 4-9, 68 tokens, and 2 more)",
+        );
+        assert_eq!(
+            finding.related,
+            [
+                span("src/a.ts", 1, 6),
+                span("src/b.ts", 1, 6),
+                span("src/utils/date.ts", 1, 6),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_file_with_two_copies_is_named_once_by_its_first() {
+        let x = texts("x", 60);
+        let mut u = x.clone();
+        u.extend(texts("j", 10));
+        u.extend(x.iter().cloned());
+        let finding = only_finding(
+            &[("new.ts", vec![], synthetic(&x))],
+            &[("u.ts", synthetic(&u))],
+            "duplicates u.ts:1-60 (lines 1-60, 60 tokens)",
+        );
+        assert_eq!(finding.related, [span("u.ts", 1, 60)]);
+    }
+
+    #[test]
+    fn related_lines_cover_the_whole_block() {
+        // 70 shared tokens: every copy's first window ends after 50 of
+        // them, the block after all 70.
+        let shared = texts("s", 70);
+        let mut new = texts("a", 5);
+        new.extend(shared.iter().cloned());
+        new.extend(texts("b", 5));
+        let mut old = texts("c", 10);
+        old.extend(shared.iter().cloned());
+        let finding = only_finding(
+            &[("new.ts", vec![], synthetic(&new))],
+            &[("old.ts", synthetic(&old))],
+            "duplicates old.ts:11-80 (lines 6-75, 70 tokens)",
+        );
+        assert_eq!(finding.location, span("new.ts", 6, 75));
+        assert_eq!(finding.related, [span("old.ts", 11, 80)]);
+    }
+
+    #[test]
+    fn related_copies_cover_the_whole_block_like_the_named_one() {
+        // u.ts has a partial copy first and a full one later; only the
+        // full one counts, as in the message.
+        let x = texts("x", 70);
+        let mut u = x[..50].to_vec();
+        u.extend(texts("j", 6));
+        u.extend(x.iter().cloned());
+        let finding = only_finding(
+            &[("new.ts", vec![], synthetic(&x))],
+            &[("u.ts", synthetic(&u)), ("u2.ts", synthetic(&x))],
+            "duplicates u.ts:57-126 (lines 1-70, 70 tokens, and 1 more)",
+        );
+        assert_eq!(
+            finding.related,
+            [span("u.ts", 57, 126), span("u2.ts", 1, 70)]
         );
     }
 

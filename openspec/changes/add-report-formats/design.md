@@ -171,6 +171,20 @@ mechanical, and the compiler finds them all.
   `serde_json`, added as a dev-dependency of `qgate-cli`. It is the same
   crate the report uses.
 
+## Implementation Notes
+
+- **PR 1: the message is built from the first related location.** The
+  analyzer computes the related locations first, and the message names
+  `related[0]`, with `, and <k> more` for the rest. The message and
+  `related` therefore cannot disagree about which file is named or how
+  many there are. Every existing duplication test, and the end-to-end
+  messages, stayed byte-identical.
+- **PR 1: mutations (task 1.4).** Each of these fails a test:
+  - the end line set to the first line;
+  - every copy kept instead of one per file;
+  - the related order reversed;
+  - each copy's own window end used instead of the whole block.
+
 ## Risks / Trade-offs
 
 - **[Version 1 is frozen once published.]** A wrong name or shape stays
