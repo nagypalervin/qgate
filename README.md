@@ -104,8 +104,9 @@ uncommitted ones only, compare with `HEAD`:
 qgate check --base HEAD --worktree
 ```
 
-A coding agent, or a hook that runs after it edits files, gets the same
-check as JSON, which it can read without parsing text (see
+With Claude Code, let a hook run this check whenever the agent finishes
+(see [With Claude Code](#with-claude-code)). Other tools get the same
+check as JSON, which they can read without parsing text (see
 [JSON output](#json-output)):
 
 ```sh
@@ -125,6 +126,56 @@ generated files (build output, bundles) in `.gitignore`.
 A check that is killed midway (by a timeout, say) can leave a copy of
 the index named `qgate-index-*` in the git directory; the next
 `--worktree` check removes copies more than a day old.
+
+### With Claude Code
+
+Add this to `.claude/settings.json` in your repository and commit it, so
+everyone on the team gets it:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "qgate hook claude-code" }] }
+    ]
+  }
+}
+```
+
+Whenever Claude Code finishes a turn, qgate checks the work that is not
+committed yet, as `qgate check --base HEAD --worktree` would:
+
+- **A finding at or above `--fail-on`** (an Error, by default) sends the
+  agent back once, with the findings and the request to fix them or to
+  tell you why a change is intended.
+- **One round only.** Whatever remains after that round is shown to you,
+  and the agent may stop: you decide.
+- **Findings below the level** (Warnings, by default) are shown to you,
+  not to the agent.
+- **Errors** (an invalid `qgate.toml`, say) are shown to you and never
+  sent to the agent.
+- **Committing accepts a change:** committed work is not checked again in
+  the next turns. The whole branch is checked in the pull request (see
+  [In CI](#in-ci)).
+
+Options go into the command:
+
+- `qgate hook claude-code --fail-on warning` also sends the agent back
+  for Warnings, such as a duplicated block or a small complexity
+  increase. Expect an extra round in many turns.
+- `qgate hook claude-code --base main` checks everything the branch
+  changed since `main`. Then findings you have already committed send
+  the agent back at the end of every turn.
+- `--fail-on never` never sends the agent back; you see every finding.
+
+`qgate` must be on the `PATH` of the shell Claude Code runs hooks in. The
+hook protocol is described in the
+[Claude Code hooks documentation](https://code.claude.com/docs/en/hooks).
+
+**A note on trust:** in an interactive session, Claude Code runs a
+repository's hooks only after you trust the folder. `claude -p` and SDK
+sessions run them without asking, so do not run those on repositories
+you do not trust; a repository can configure any command as a hook.
 
 ### JSON output
 

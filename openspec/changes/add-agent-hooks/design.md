@@ -189,6 +189,21 @@ the required behaviour.
     message on standard error, since there is no response to give.
   - `qgate hook claude-code --base` defaults to `HEAD` in clap, so
     `--help` shows the default.
+- **Mutations (task 2.5).** Each of these fails unit and end-to-end tests:
+  - blocking although `stop_hook_active` is `true`;
+  - sending every finding to the model;
+  - blocking with a check error as the `reason`;
+  - listing every finding;
+  - ignoring `CLAUDE_PROJECT_DIR`;
+  - keeping exit code 2 for a usage error.
+- **README (task 3.1).** Every statement was run in a temporary
+  repository, calling the hook as Claude Code does:
+  - the settings entry parses;
+  - an Error blocks, and the second round goes to the user;
+  - a Warning goes to the user;
+  - committed work is not checked again, but `--base main` sees it;
+  - `--fail-on never` and `--fail-on warning` behave as documented;
+  - an invalid `qgate.toml` goes to the user.
 
 ## Risks / Trade-offs
 

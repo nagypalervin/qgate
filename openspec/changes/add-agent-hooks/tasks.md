@@ -35,7 +35,7 @@ first.
   - exit code 1 instead of 2 for an invalid `qgate hook` command line.
 
   Verify that the 2.3 tests pass and every existing test passes unchanged.
-- [ ] 2.5 Check that the tests bite. Break each of these, one at a time, and confirm that a test fails for each:
+- [x] 2.5 Check that the tests bite. Break each of these, one at a time, and confirm that a test fails for each:
   - the loop guard (block even when `stop_hook_active` is `true`);
   - the level split (send every finding to the model);
   - the error path (block with the error as `reason`);
@@ -45,7 +45,7 @@ first.
 
 ## 3. Docs and verification
 
-- [ ] 3.1 Update `README.md`:
+- [x] 3.1 Update `README.md`:
   - a "With Claude Code" section: the `.claude/settings.json` entry, what the agent and the user see, `--base` and `--fail-on`, the one-round rule, and that committing accepts a change;
   - the warning that `claude -p` and SDK sessions run a repository's hooks without asking;
   - a link to the Claude Code hook documentation.
