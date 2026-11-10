@@ -18,9 +18,10 @@ qgate SHALL ship a binary for each of these targets:
 - `x86_64-pc-windows-msvc`;
 - `aarch64-pc-windows-msvc`.
 
-CI SHALL run the workspace's test suite on each of these platforms for
-every pull request, and a failure on any of them SHALL fail the pull
-request's checks.
+CI SHALL run the workspace's test suite on each of these operating
+systems and architectures, with the native host target (glibc on
+Linux), for every pull request. A failure on any of them SHALL fail the
+pull request's checks. The release workflow tests the musl targets.
 
 #### Scenario: A pull request runs the tests everywhere
 
@@ -88,10 +89,11 @@ spaces, the archive's file name.
 ### Requirement: What a released binary guarantees
 
 Every released binary SHALL be built from the tagged commit with
-`--locked`, after the test suite passed on its platform in the same
+`--locked`, after the test suite passed on its target in the same
 workflow run. `qgate --version` SHALL print `qgate <version>`. Linux
 binaries SHALL be statically linked, so they need no particular C
-library.
+library. Windows binaries SHALL link the C runtime statically, so they
+need no Visual C++ Redistributable.
 
 #### Scenario: The version
 
@@ -101,7 +103,12 @@ library.
 #### Scenario: A static Linux binary
 
 - **WHEN** `file` inspects the `qgate` binary from a Linux archive
-- **THEN** it reports the binary as statically linked
+- **THEN** it reports `statically linked` or `static-pie linked`, and not `dynamically linked`
+
+#### Scenario: A Windows binary without the C runtime DLL
+
+- **WHEN** the import table of `qgate.exe` from a Windows archive is listed
+- **THEN** it names no `VCRUNTIME` DLL
 
 #### Scenario: Tests failing on one platform
 

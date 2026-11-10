@@ -57,7 +57,17 @@ would cost a runner and add nothing.
 
 The job runs the native host target (glibc on Linux), as developers
 and `cargo install` users do. The release workflow (D3) tests the musl
-targets that it ships.
+targets that it ships. That workflow runs on pull requests only when
+release files change. So a change that breaks only under musl would
+first show at tag time. This gap is accepted: qgate has no
+libc-specific code, and the spike passed the full suite under musl.
+
+**Required checks.** The repository's "Protect main" ruleset makes
+checks block a merge. It must list the five `test (<runner>)` checks
+next to `fmt, clippy, test` and `MSRV (Rust 1.85)`. Otherwise a red or
+still-running platform check would not stop a merge. The check names
+come from the runner labels, so a runner change (see Risks) means
+changing the ruleset too. (Added in review of PR 1.)
 
 *Alternative:* a separate workflow. One `ci.yml` keeps every
 pull-request check in one place and one status list.
@@ -69,7 +79,10 @@ pull-request check in one place and one status list.
   status. On Windows, `TerminateProcess` leaves exit code 1. The test
   will:
   - assert `GitError::Command` on every platform;
-  - assert `status: None` only under `cfg(unix)`.
+  - assert `status: None` under `cfg(unix)`, and `status: Some(1)`
+    under `cfg(windows)`. Rust's `Child::kill` calls
+    `TerminateProcess(handle, 1)`. The Windows assertion was added in
+    review of PR 1.
 
   The library does not change: on both systems, it reports the process
   as failed.
@@ -93,10 +106,11 @@ pull-request check in one place and one status list.
           v
   +----------------+      +--------------------------------------+      +-----------------+
   | version        | ---> | build (matrix of 6 targets)          | ---> | publish         |
-  | tag == Cargo   |      |  test --target T, build --release,   |      | tags only:      |
-  | (tags only)    |      |  pack, check --version, upload       |      | SHA256SUMS,     |
-  +----------------+      +--------------------------------------+      | draft release   |
-                                                                         +-----------------+
+  | tag: tag ==    |      |  test --target T, build --release,   |      | tags only:      |
+  |   Cargo        |      |  check version and linking, pack,    |      | SHA256SUMS,     |
+  | else: test the |      |  upload                              |      | draft release   |
+  |   script       |      +--------------------------------------+      +-----------------+
+  +----------------+
 ```
 
 - **`version`:** runs `.github/scripts/check-version.sh "$GITHUB_REF_NAME"`.
@@ -123,21 +137,55 @@ pull-request check in one place and one status list.
   1. install `musl-tools` (Linux only);
   2. `cargo test --workspace --locked --target <T>`;
   3. `cargo build --release --locked -p qgate-cli --target <T>`;
-  4. check that the built binary's `--version` output is
-     `qgate <version>`, and on Linux that `file` says it is statically
-     linked;
+  4. check the built binary:
+     - its `--version` output is `qgate <version>`;
+     - on Linux, `file` reports `statically linked` or `static-pie
+       linked`, and not `dynamically linked`. musl gives `static-pie`
+       on x64 (spike);
+     - on Windows, `llvm-readobj --coff-imports` (from rustup's
+       `llvm-tools` component) lists no `VCRUNTIME` DLL;
   5. pack the archive (D4);
   6. upload it as a workflow artifact.
 
   `fail-fast: true` here: one failing target stops the release.
+
+  **Windows links the C runtime statically.** By default the MSVC
+  targets need `VCRUNTIME140.dll` from the Visual C++ Redistributable.
+  It is not part of Windows, but it is on GitHub's runner images, so
+  CI would not notice. Server Core containers, fresh arm64 machines and
+  some self-hosted agents do not have it.
+  - The Windows matrix entries set
+    `RUSTFLAGS: -C target-feature=+crt-static` for the test and build
+    steps, as ripgrep's releases do.
+  - It is set in the workflow, not in `.cargo/config.toml`. A
+    `RUSTFLAGS` variable makes Cargo ignore the config's rustflags, so
+    a flag in both places could be silently dropped.
+  - It applies only to release builds. Developers and
+    `cargo install` keep the default.
+
+  (Added in review of PR 1.)
+
+  **`release.yml` does not set `-D warnings`,** and builds with the
+  `stable` toolchain of the day. Lints were enforced when the commit
+  merged, and a lint that appears between merge and tag must not block
+  a release. A compiler release that breaks the build would fail the
+  release before anything is published. It is then fixed like any other
+  build failure.
 - **`publish`:** runs only for a tag push, after every `build` job
   succeeded. It holds the only `contents: write` permission in the
   workflow. It:
   1. downloads the six archives;
   2. writes `SHA256SUMS` with `sha256sum` in the archives' directory,
      sorted by file name;
-  3. runs `gh release create "$TAG" --draft --title "qgate <version>"
-     --generate-notes` with the seven files.
+  3. if a release for the tag already exists, deletes it when it is a
+     draft, which is a re-run after a failed upload, and fails when it
+     is published, since a published version is never replaced;
+  4. runs `gh release create "$TAG" --draft --title "qgate <version>"
+     --generate-notes --repo "$GITHUB_REPOSITORY"` with the seven
+     files. `GH_TOKEN` is the job's `GITHUB_TOKEN`. There is no
+     checkout, so `--repo` names the repository.
+
+  (Steps 3 and 4's `--repo` and `GH_TOKEN` were added in review of PR 1.)
 
   The workflow's other jobs get `contents: read`.
 - **Triggers:**
@@ -177,6 +225,15 @@ with `7z a -tzip`; 7-Zip is on both Windows runner images. All steps
 use `shell: bash`, which the Windows images also have (Git Bash). The
 packing is a few lines in the workflow, not a script, because it has
 no logic worth testing apart from the archive check in D6.
+
+**Checksum commands for the README** (added in review of PR 1), with
+`<archive>` being the downloaded file:
+- **Linux:** `sha256sum --check --ignore-missing SHA256SUMS`;
+- **macOS:** `grep " <archive>$" SHA256SUMS | shasum -a 256 --check`.
+  `shasum` ships with macOS, `sha256sum` does not;
+- **Windows (PowerShell):** compare
+  `(Get-FileHash <archive> -Algorithm SHA256).Hash` with the archive's
+  line in `SHA256SUMS`, case-insensitively.
 
 ### D5. Release profile and version
 
@@ -260,6 +317,33 @@ Decisions and results recorded during apply.
   path is built with `Path::new(CWD).join("sub/dir")`, so each platform
   compares its own separator.
 
+- **Review of PR 1.** The `reviewer` subagent found the PR's code
+  correct. It also found nine problems, mostly in the approved spec and
+  design, which PR 2 would have inherited. All nine were addressed in
+  PR 1:
+  1. **The platform checks were not required** by the "Protect main"
+     ruleset → D1 and task 1.4, which needs Ervin's approval.
+  2. **`file` prints `static-pie linked` for the x64 musl binary,** so a
+     check for `statically linked` would have failed every release →
+     the spec and D3 accept both and reject `dynamically linked`.
+  3. **Windows binaries would have needed the Visual C++
+     Redistributable** → `+crt-static` for the Windows release builds
+     (D3), a spec requirement and scenario, and an import check. This
+     changes the approved design, so it went back to Ervin.
+  4. **The spec said CI tests "each of these platforms"** while D1
+     tests glibc → the spec names the host target, and D1 accepts the
+     musl gap.
+  5. **The Windows branch of the killed-process test** asserted no exit
+     code → it asserts `Some(1)` (D2).
+  6. **D3's diagram said the `version` job ran on tags only** → it now
+     shows the script test on other triggers.
+  7. **`publish` was not safe to re-run,** and `gh` lacked `--repo` →
+     D3, steps 3 and 4.
+  8. **`-D warnings` and the toolchain in `release.yml`** were not
+     decided → D3: no `-D warnings`, and `stable`.
+  9. **`sha256sum` is not on macOS or Windows** → D4 names a command
+     for each OS.
+
 ## Risks / Trade-offs
 
 - **[GitHub retires `macos-15-intel`, the last x64 macOS image]** →
@@ -267,7 +351,9 @@ Decisions and results recorded during apply.
   (`--target x86_64-apple-darwin`), and its tests would run under
   Rosetta 2, if the runner image still has it. Otherwise only the build
   would run there. The release workflow names its runners in one
-  matrix, so the move is a one-line change plus that decision.
+  matrix, so the move is a one-line change plus that decision. The
+  `ci.yml` check `test (macos-15-intel)` changes its name with the
+  runner, so the ruleset's required checks (D1) must change with it.
 - **[Unsigned binaries]** →
   - On macOS, Gatekeeper blocks a binary downloaded with a browser
     until its quarantine attribute is removed. `curl` downloads are not

@@ -1540,6 +1540,17 @@ mod tests {
             matches!(result, Err(GitError::Command { status: None, .. })),
             "{result:?}"
         );
+        #[cfg(windows)]
+        assert!(
+            matches!(
+                result,
+                Err(GitError::Command {
+                    status: Some(1),
+                    ..
+                })
+            ),
+            "{result:?}"
+        );
     }
 
     #[test]

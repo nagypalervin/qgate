@@ -23,6 +23,8 @@ This change spans three pull requests (design D6).
   Verify that they still pass locally.
 - [x] 1.3 Add the `platforms` job to `.github/workflows/ci.yml` (design D1). It runs `cargo test --workspace --locked` on `ubuntu-24.04-arm`, `macos-latest`, `macos-15-intel`, `windows-latest` and `windows-11-arm`, with `fail-fast: false` and `Swatinem/rust-cache`. Open PR 1 and verify that all its checks pass. Record the job durations in `design.md`.
 
+- [ ] 1.4 Make the five `test (<runner>)` checks required in the "Protect main" ruleset, next to the two that already are (design D1). This is a repository setting, so do it with Ervin's approval. Verify with `gh api` that the ruleset lists all seven checks. (Added in review of PR 1.)
+
 ## 2. Release workflow (PR 2, `change/add-release-binaries-2`)
 
 - [ ] 2.1 Write `.github/scripts/check-version.sh <tag>` (design D3). Run it locally against the current version in four ways:
@@ -37,11 +39,14 @@ This change spans three pull requests (design D6).
 - [ ] 2.3 Write `.github/workflows/release.yml` (design D3, D4):
   - the `version`, `build` and `publish` jobs;
   - triggers on tags, on pull requests that change release files, and `workflow_dispatch`;
+  - the per-target checks of the built binary: `--version`, static Linux binaries (`statically linked` or `static-pie linked`), and no `VCRUNTIME` import on Windows;
+  - `RUSTFLAGS: -C target-feature=+crt-static` for the Windows targets, and no `-D warnings`;
+  - a `publish` that deletes an existing draft for the tag, refuses a published one, and passes `--repo` and `GH_TOKEN` to `gh`;
   - permissions: `contents: write` only for `publish`;
   - concurrency per ref;
   - third-party actions pinned to commit SHAs.
 - [ ] 2.4 Update `README.md`:
-  - "Try it" installs from a release on Linux, macOS and Windows, with the checksum check;
+  - "Try it" installs from a release on Linux, macOS and Windows, with the checksum commands from design D4;
   - building from source stays as the second way;
   - a note on unsigned binaries: `xattr` on macOS, `Unblock-File` on Windows;
   - the roadmap's M4 row becomes "in progress".
@@ -49,7 +54,7 @@ This change spans three pull requests (design D6).
   - the names and directory layout of the archives;
   - a `SHA256SUMS` built as `publish` would, which passes `sha256sum --check`;
   - that the `aarch64-unknown-linux-musl` binary runs here, prints `qgate 0.1.0`, and `file` reports it as statically linked;
-  - from the job logs, that every target's `--version` check passed and both Linux binaries are static;
+  - from the job logs, that every target's `--version` check passed, both Linux binaries are static, and neither Windows binary imports a `VCRUNTIME` DLL;
   - that the `version` job tested the script, with a matching and a wrong tag.
 
   Record the results in `design.md`.
