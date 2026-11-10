@@ -54,7 +54,7 @@ Commit messages and PR bodies are written to files first.
 
 ## 2. The CLI, end-to-end scenarios and the README (PR 2)
 
-- [ ] 2.1 Write failing tests in `crates/qgate-cli/tests/revisions.rs`, building temporary repositories as the existing tests do:
+- [x] 2.1 Write failing tests in `crates/qgate-cli/tests/revisions.rs`, building temporary repositories as the existing tests do:
   - **"Working tree as head", every scenario:**
     - Uncommitted edit;
     - Without the flag;
@@ -89,16 +89,16 @@ Commit messages and PR bodies are written to files first.
   - **`check-command` "Working tree".**
 
   Verify they fail.
-- [ ] 2.2 Write failing tests in `crates/qgate-cli/tests/check.rs` for the new "Invalid invocation" scenarios: working tree without base, with `--head`, with two files. Verify they fail.
-- [ ] 2.3 Implement `--worktree` in `qgate-cli` (D3, D4):
-  - the flag with `requires("base")` and `conflicts_with("head")`;
+- [x] 2.2 Write failing tests in `crates/qgate-cli/tests/check.rs` for the new "Invalid invocation" scenarios: working tree without base, with `--head`, with two files. Verify they fail.
+- [x] 2.3 Implement `--worktree` in `qgate-cli` (D3, D4):
+  - the flag with `requires("base")`, conflicting with `--head` and the two files (and `--head` now conflicting with the two files too; see design, Implementation Notes);
   - the third usage line and the help text;
   - the snapshot taken before the diff;
   - the head label in `git_message`;
   - `GitError::WorkTree` printed through its `Display` ("cannot take a snapshot of the working tree: ...").
 
   Verify the 2.1 and 2.2 tests pass, and that every existing test passes unchanged.
-- [ ] 2.4 Update `README.md`:
+- [x] 2.4 Update `README.md`:
   - a "Checking uncommitted work" section: what counts, that nothing in the repository changes, `--base HEAD --worktree` for only the uncommitted changes, and the advice to ignore large generated files;
   - the option in "Try it".
 

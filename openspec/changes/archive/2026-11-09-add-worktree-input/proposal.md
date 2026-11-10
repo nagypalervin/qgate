@@ -110,4 +110,8 @@ tree as that head, so their text does not change.
     commit id.
 - **Specs:** `revision-input`, `check-command`, `configuration` (deltas).
 - **Docs:** README.
-- **Users:** none affected. The option is new and the default is unchanged.
+- **Users:** the option is new and the default is unchanged. One
+  invocation changes: `qgate check a.ts b.ts --head x` used to ignore
+  `--head` and compare the two files; it is now the usage error that
+  "Invalid invocation" already required (`--head` without `--base`), with
+  exit code 2.

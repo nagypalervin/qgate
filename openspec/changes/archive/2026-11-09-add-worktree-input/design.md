@@ -172,14 +172,14 @@ The CLI then passes the commit id as the head to the existing calls.
 ### D4. CLI shape
 
 - **Flag:** `--worktree` is a flag that `requires("base")` and
-  `conflicts_with("head")`.
+  conflicts with `--head` and with the two files.
 - **Usage lines:** a third line, `qgate check --base <rev> --worktree
   [--fail-on <level>]`.
 - **Help text:** "Check the working tree (uncommitted and untracked files)
   instead of --head".
-- **Two-file form:** the existing `conflicts_with_all(["before", "after"])`
-  on `--base` already rejects `--worktree` together with two files, because
-  `--worktree` requires `--base`.
+- **Two-file form:** `--worktree` and `--head` each conflict with the two
+  files themselves. The requirement on `--base` is not enough (see
+  Implementation Notes, PR 2).
 
 ### D5. Where the code goes
 
@@ -336,3 +336,39 @@ None. The option is new and the default is unchanged.
   export `GIT_DIR` to hooks of a plain `.git` repository. The test also
   shows that a plain `git add` does run `post-index-change` there, so the
   test would see the hook if the snapshot ran it.
+- **PR 2: `requires("base")` does not reject the two-file form.** D4 first
+  relied on it. clap drops a requirement when the required argument
+  conflicts with one that was given, and `--base` conflicts with the two
+  files. So `qgate check a.ts b.ts --worktree` ran a two-file check. The
+  same was already true of `--head`: `qgate check a.ts b.ts --head x` ran
+  and ignored `--head`, although "Invalid invocation" makes `--head`
+  without `--base` a usage error. Both flags now conflict with the two
+  files explicitly, and `head_with_two_files` covers the old case.
+- **PR 2: the head as the CLI sees it.** `check_revisions` takes the head as
+  the user gave it (`--head <rev>` or `--worktree`) and turns it into a
+  `Head`: the revision git reads and whether it is a snapshot. Only
+  `git_message` uses the flag, for the two rewrites D3 names. The
+  snapshot's own errors skip `git_message`, so an unknown `HEAD` never
+  gets the shallow-clone hint, even with `--base HEAD`. A mutation for each
+  of the three, and for the two-file conflict, fails a test.
+- **PR 2: "Committed and uncommitted changes together" uses a forbid
+  rule.** The scenario's committed change is a new import, which is a
+  finding only under a rule, so the test commits `qgate.toml` with one.
+- **Review round 1 of PR 2:**
+  - **Duplication's head was untested.** Reading `HEAD`'s files instead of
+    the snapshot's passed every test, because the copy test only paired
+    two changed files. A new scenario and test, "Copy of a file deleted
+    from disk", fail under that mutation.
+  - **Hooks:** `git add` and `commit-tree` never run `pre-commit` or
+    `post-commit`, so the end-to-end test guarded nothing. The scenario
+    and the test now include `post-index-change`, the hook `git add` runs.
+    The test checks that a plain `git add` does run it, and fails when the
+    snapshot keeps the repository's hooks.
+  - **Weak tests:** the "changes nothing" tests now also check that the
+    staged, unstaged and untracked changes were reported, and "Ignored
+    file" has an edit next to the ignored one. "Deleted from disk" now
+    says the base does not have the file, so a missed deletion shows.
+  - **`--head` with two files:** a scenario in `check-command` and the
+    proposal's Users line now state the behaviour change.
+  - **README:** names the ignore rules, the file-system monitor, the
+    two-week prune and the files an interrupted check can leave.

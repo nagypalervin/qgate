@@ -387,6 +387,48 @@ fn head_without_base() {
     assert_eq!(out.status.code(), Some(2));
 }
 
+// A usage error, not clap's "unexpected argument": the flag exists and the
+// combination is what is wrong.
+fn assert_usage_error(args: &[&str], expected: &str) {
+    let out = qgate(args);
+    let err = stderr(&out);
+    assert!(err.contains(expected), "{args:?}: {err}");
+    assert!(!err.contains("unexpected argument"), "{args:?}: {err}");
+    assert_eq!(stdout(&out), "", "{args:?}");
+    assert_eq!(out.status.code(), Some(2), "{args:?}");
+}
+
+#[test]
+fn working_tree_without_base() {
+    assert_usage_error(&["check", "--worktree"], "--base");
+}
+
+#[test]
+fn working_tree_and_head_together() {
+    assert_usage_error(
+        &["check", "--base", "main", "--head", "feature", "--worktree"],
+        "cannot be used with",
+    );
+}
+
+#[test]
+fn working_tree_with_two_files() {
+    assert_usage_error(
+        &["check", "same.ts", "same.ts", "--worktree"],
+        "cannot be used with",
+    );
+}
+
+#[test]
+fn head_with_two_files() {
+    // `--head` without `--base`, found while adding `--worktree`: clap
+    // ignored the requirement next to two files.
+    assert_usage_error(
+        &["check", "same.ts", "same.ts", "--head", "feature"],
+        "cannot be used with",
+    );
+}
+
 #[test]
 fn unknown_fail_on_level() {
     let out = qgate(&["check", "same.ts", "same.ts", "--fail-on", "info"]);
@@ -401,13 +443,15 @@ fn unknown_fail_on_level() {
 }
 
 #[test]
-fn help_shows_both_forms() {
+fn help_shows_every_form() {
     let out = qgate(&["check", "--help"]);
     let help = stdout(&out);
-    // Both forms name --fail-on, so a usage error shows the opt-out.
+    // Every form names --fail-on, so a usage error shows the opt-out.
     for form in [
         "qgate check <before> <after> [--fail-on <level>]\n",
         "qgate check --base <rev> [--head <rev>] [--fail-on <level>]\n",
+        "qgate check --base <rev> --worktree [--fail-on <level>]\n",
+        "Check the working tree (uncommitted and untracked files) instead of --head",
     ] {
         assert!(help.contains(form), "{help}");
     }

@@ -75,6 +75,12 @@ argument: print a usage message to standard error and exit with code 2.
 - **THEN** standard error shows a usage error
 - **AND** the exit code is 2
 
+#### Scenario: Head with two files
+
+- **WHEN** the user runs `qgate check before.ts after.ts --head feature`
+- **THEN** standard error shows a usage error
+- **AND** the exit code is 2
+
 #### Scenario: Unknown fail-on level
 
 - **WHEN** the user runs `qgate check a.ts b.ts --fail-on info`
