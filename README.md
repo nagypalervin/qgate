@@ -124,8 +124,9 @@ snapshot includes every untracked file that is not ignored, so list large
 generated files (build output, bundles) in `.gitignore`.
 
 A check that is killed midway (by a timeout, say) can leave a copy of
-the index named `qgate-index-*` in the git directory; the next
-`--worktree` check removes copies more than a day old.
+the index named `qgate-snapshot-index-*` (`qgate-index-*` from earlier
+versions) in the git directory; the next `--worktree` check removes
+copies more than a day old.
 
 ### With Claude Code
 

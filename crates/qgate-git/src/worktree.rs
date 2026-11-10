@@ -50,6 +50,17 @@ const SNAPSHOT_IDENTITY: [(&str, &str); 6] = [
     ("GIT_COMMITTER_DATE", "@0 +0000"),
 ];
 
+/// The name every private index starts with, followed by
+/// `-<pid>-<seconds>-<nanoseconds>-<n>`. Earlier versions used
+/// [`LEGACY_STEM`]; a new name must not start with it, because their
+/// clean-up removes such copies by modification time, which is now the
+/// index's (design D2 of `fix-racy-worktree-snapshot`).
+const STEM: &str = "qgate-snapshot-index";
+
+/// The name earlier versions gave their private indexes, followed by
+/// `-<pid>-<nanoseconds>-<n>`.
+const LEGACY_STEM: &str = "qgate-index";
+
 /// Numbers private indexes, so threads of one process never share one.
 static NEXT_INDEX: AtomicUsize = AtomicUsize::new(0);
 
@@ -136,13 +147,7 @@ impl PrivateIndex {
     /// `head`'s tree if there is no index yet.
     fn create(repo: &Repository, head: &str) -> Result<Self, GitError> {
         // `--git-path` follows `GIT_INDEX_FILE` and linked work trees.
-        let args = [
-            "rev-parse",
-            "--git-path",
-            "index",
-            "--git-path",
-            "qgate-index",
-        ];
+        let args = ["rev-parse", "--git-path", "index", "--git-path", STEM];
         let out = repo.git(&args)?;
         if !out.status.success() {
             return Err(command_error(&args, &out));
@@ -160,22 +165,38 @@ impl PrivateIndex {
         };
         let real = absolute(real);
         let stem = absolute(stem);
-        remove_stale(&stem);
+        if let Some(dir) = stem.parent() {
+            remove_stale(dir);
+        }
         let (index, mut file) = Self::reserve(stem.as_os_str())?;
         let copy_error = |e: std::io::Error| GitError::WorkTree {
             detail: format!("cannot copy the index {}: {e}", real.display()),
         };
         match File::open(&real) {
             Ok(mut source) => {
-                // Copied through the reserved handle, and dated now: the age
-                // is how `remove_stale` tells a copy in use from one left
-                // behind, and `std::fs::copy` keeps the source's (often
-                // days-old) time on some platforms.
                 std::io::copy(&mut source, &mut file).map_err(copy_error)?;
-                // Writing through the handle already dates it now; this
-                // makes it explicit. A file system that cannot set times
-                // must not stop the check, so a failure is ignored.
-                let _ = file.set_modified(SystemTime::now());
+                // The copy keeps the index's time, so git trusts no more of
+                // its recorded file times than it trusts in the index itself
+                // (design D1 of `fix-racy-worktree-snapshot`). Dated now, an
+                // entry git would read again ("racily clean") would be taken
+                // as unchanged. The copy's age for `remove_stale` comes from
+                // its name instead. A copy that cannot keep the time is an
+                // error, not a risk of missing an edit (design D3).
+                let time = source.metadata().and_then(|m| m.modified()).map_err(|e| {
+                    GitError::WorkTree {
+                        detail: format!(
+                            "cannot read the modification time of the index {}: {e}",
+                            real.display()
+                        ),
+                    }
+                })?;
+                let date_error = |e: std::io::Error| time_error(&index.path, &e.to_string());
+                file.set_modified(time).map_err(date_error)?;
+                let kept = file
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .map_err(date_error)?;
+                check_kept_time(&index.path, time, kept)?;
             }
             Err(e) if e.kind() == ErrorKind::NotFound => {
                 drop(file);
@@ -187,20 +208,24 @@ impl PrivateIndex {
         Ok(index)
     }
 
-    /// A new, empty file named `<stem>-<pid>-<nanoseconds>-<n>`, with its
-    /// open handle. It is created exclusively, so no other process uses the
-    /// same name, not even one with the same pid in another container that
-    /// shares the repository; a name whose lock file exists is skipped.
+    /// A new, empty file named `<stem>-<pid>-<seconds>-<nanoseconds>-<n>`,
+    /// with its open handle. The seconds since 1970 date the copy for
+    /// [`remove_stale`], since its modification time is the index's.
+    ///
+    /// It is created exclusively, so no other process uses the same name,
+    /// not even one with the same pid in another container that shares the
+    /// repository; a name whose lock file exists is skipped.
     /// Another run's private index is only ever removed by
     /// [`remove_stale`], once it is a day old.
     fn reserve(stem: &OsStr) -> Result<(Self, File), GitError> {
-        let nanos = SystemTime::now()
+        let since_epoch = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.subsec_nanos());
+            .unwrap_or_default();
+        let (secs, nanos) = (since_epoch.as_secs(), since_epoch.subsec_nanos());
         for _ in 0..RESERVE_ATTEMPTS {
             let mut name = stem.to_os_string();
             name.push(format!(
-                "-{}-{nanos}-{}",
+                "-{}-{secs}-{nanos}-{}",
                 std::process::id(),
                 NEXT_INDEX.fetch_add(1, Ordering::Relaxed)
             ));
@@ -240,30 +265,86 @@ impl Drop for PrivateIndex {
 }
 
 /// Remove the private indexes, and their lock files, that interrupted runs
-/// left next to `stem` more than [`STALE_AFTER`] ago. Errors are ignored:
-/// a file that cannot be removed now can be removed by a later run.
-fn remove_stale(stem: &Path) {
-    let (Some(dir), Some(name)) = (stem.parent(), stem.file_name()) else {
-        return;
-    };
-    let prefix = format!("{}-", name.to_string_lossy());
+/// left in `dir` more than [`STALE_AFTER`] ago. Errors are ignored: a file
+/// that cannot be removed now can be removed by a later run.
+///
+/// A copy's age comes from the seconds in its name (design D2 of
+/// `fix-racy-worktree-snapshot`). Copies that earlier versions named
+/// [`LEGACY_STEM`] are judged by their modification time, which those
+/// versions set when they made them. Any other name is kept.
+fn remove_stale(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     let now = SystemTime::now();
     for entry in entries.flatten() {
-        if !entry.file_name().to_string_lossy().starts_with(&prefix) {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let name = name.strip_suffix(".lock").unwrap_or(&name);
+        let started = if let Some(rest) = after_stem(name, STEM) {
+            match numbers(rest).as_deref() {
+                Some([_pid, secs, _nanos, _n]) => secs
+                    .parse()
+                    .ok()
+                    .and_then(|secs| UNIX_EPOCH.checked_add(Duration::from_secs(secs))),
+                _ => None,
+            }
+        } else if let Some(rest) = after_stem(name, LEGACY_STEM) {
+            match numbers(rest).as_deref() {
+                Some([_pid, _nanos, _n]) => entry.metadata().and_then(|m| m.modified()).ok(),
+                _ => None,
+            }
+        } else {
             continue;
-        }
-        let stale = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|modified| now.duration_since(modified).ok())
+        };
+        let stale = started
+            .and_then(|time| now.duration_since(time).ok())
             .is_some_and(|age| age > STALE_AFTER);
         if stale {
             let _ = std::fs::remove_file(entry.path());
         }
+    }
+}
+
+/// What follows `<stem>-` in `name`, if `name` starts with it.
+fn after_stem<'a>(name: &'a str, stem: &str) -> Option<&'a str> {
+    name.strip_prefix(stem)?.strip_prefix('-')
+}
+
+/// The `-`-separated parts of `text`, if each is a decimal number.
+fn numbers(text: &str) -> Option<Vec<&str>> {
+    let parts: Vec<&str> = text.split('-').collect();
+    parts
+        .iter()
+        .all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        .then_some(parts)
+}
+
+/// `Ok` unless the private index at `path`, which should have the index's
+/// time `wanted`, reads back the later time `kept`. An earlier time is
+/// safe: git then compares the content of at least the files it would
+/// compare with the index itself. A later one would let it trust files it
+/// must read (design D3). So would a time within the first second of 1970:
+/// git takes an index time of 0 whole seconds as no time at all.
+fn check_kept_time(path: &Path, wanted: SystemTime, kept: SystemTime) -> Result<(), GitError> {
+    let whole_seconds = kept.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    if kept > wanted {
+        Err(time_error(path, "the file system stored a later time"))
+    } else if whole_seconds == 0 {
+        Err(time_error(path, "the file system stored no time"))
+    } else {
+        Ok(())
+    }
+}
+
+/// The error for a private index at `path` that cannot keep the index's
+/// time, for `reason`.
+fn time_error(path: &Path, reason: &str) -> GitError {
+    GitError::WorkTree {
+        detail: format!(
+            "cannot give the private index {} the index's modification time: {reason}",
+            path.display()
+        ),
     }
 }
 
@@ -336,7 +417,7 @@ mod tests {
             .expect("the git directory")
             .map(|entry| entry.expect("an entry").file_name())
             .map(|name| name.to_string_lossy().into_owned())
-            .filter(|name| name.starts_with("qgate-index"))
+            .filter(|name| name.starts_with(STEM) || name.starts_with(LEGACY_STEM))
             .collect()
     }
 
@@ -519,17 +600,127 @@ mod tests {
         repo.git(&["worktree", "remove", "--force", linked_arg]);
     }
 
+    /// Set a file's modification time.
+    fn set_modified(path: &std::path::Path, time: SystemTime) {
+        File::options()
+            .write(true)
+            .open(path)
+            .and_then(|f| f.set_modified(time))
+            .unwrap_or_else(|e| panic!("cannot date {}: {e}", path.display()));
+    }
+
+    /// An edit to `src/a.ts` that git sees as racily clean (design D4 of
+    /// `fix-racy-worktree-snapshot`): the file keeps its size and inode, and
+    /// its modification time equals both the one its index entry recorded
+    /// and the index file's own. Ctime, which cannot be set, is not trusted.
+    fn racy_edit(repo: &TestRepo) {
+        repo.git(&["config", "core.trustctime", "false"]);
+        let then = SystemTime::now() - Duration::from_secs(60 * 60);
+        repo.write("src/a.ts", "export const a = 1;\n");
+        set_modified(&repo.dir.join("src/a.ts"), then);
+        repo.commit("base");
+        // `std::fs::write` truncates in place, so the inode stays the same.
+        repo.write("src/a.ts", "export const a = 2;\n");
+        set_modified(&repo.dir.join("src/a.ts"), then);
+        set_modified(&repo.dir.join(".git/index"), then);
+    }
+
     #[test]
-    fn private_index_is_dated_now_even_when_the_index_is_old() {
+    fn snapshot_sees_a_racily_clean_edit() {
+        let repo = TestRepo::new();
+        racy_edit(&repo);
+
+        let snapshot = snapshot(&repo);
+        let paths: Vec<String> = repository(&repo)
+            .changed_files("HEAD", &snapshot)
+            .expect("changes")
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+
+        // Git itself sees the edit, so the snapshot must too.
+        assert_eq!(repo.git(&["diff-files", "--name-only"]), "src/a.ts");
+        assert_eq!(paths, vec!["src/a.ts"]);
+    }
+
+    #[test]
+    fn snapshot_sees_a_racily_clean_edit_with_a_split_index() {
+        let repo = TestRepo::new();
+        repo.git(&["config", "core.splitIndex", "true"]);
+        racy_edit(&repo);
+        let git_dir = repo.dir.join(".git");
+        let shared = std::fs::read_dir(&git_dir)
+            .expect("the git directory")
+            .filter_map(Result::ok)
+            .any(|e| e.file_name().to_string_lossy().starts_with("sharedindex."));
+        assert!(shared, "the repository has no split index");
+
+        let snapshot = snapshot(&repo);
+        let paths: Vec<String> = repository(&repo)
+            .changed_files("HEAD", &snapshot)
+            .expect("changes")
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+
+        assert_eq!(repo.git(&["diff-files", "--name-only"]), "src/a.ts");
+        assert_eq!(paths, vec!["src/a.ts"]);
+    }
+
+    #[test]
+    fn snapshot_sees_a_racily_clean_edit_in_a_linked_worktree() {
+        /// Removes the linked work tree even when an assertion fails.
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let repo = TestRepo::new();
+        repo.git(&["config", "core.trustctime", "false"]);
+        repo.write("src/a.ts", "export const a = 1;\n");
+        repo.commit("base");
+        let linked = crate::test_support::scratch_dir("linked");
+        let _cleanup = Cleanup(linked.clone());
+        std::fs::remove_dir(&linked).expect("an empty directory to replace");
+        let linked_arg = linked.to_str().expect("UTF-8");
+        repo.git(&["worktree", "add", "-q", "-b", "side", linked_arg]);
+        let linked_git_dir =
+            PathBuf::from(repo.git(&["-C", linked_arg, "rev-parse", "--absolute-git-dir"]));
+        // As in `racy_edit`, for the linked work tree's own index: the
+        // refresh records `then` for the unchanged file.
+        let then = SystemTime::now() - Duration::from_secs(60 * 60);
+        set_modified(&linked.join("src/a.ts"), then);
+        repo.git(&["-C", linked_arg, "update-index", "--refresh"]);
+        std::fs::write(linked.join("src/a.ts"), "export const a = 2;\n").expect("edit");
+        set_modified(&linked.join("src/a.ts"), then);
+        set_modified(&linked_git_dir.join("index"), then);
+
+        let in_linked = Repository::discover(&linked).expect("a repository");
+        let taken = in_linked.worktree_snapshot().expect("a snapshot");
+        let paths: Vec<String> = in_linked
+            .changed_files("HEAD", &taken)
+            .expect("changes")
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+
+        assert_eq!(
+            repo.git(&["-C", linked_arg, "diff-files", "--name-only"]),
+            "src/a.ts"
+        );
+        assert_eq!(paths, vec!["src/a.ts"]);
+        repo.git(&["worktree", "remove", "--force", linked_arg]);
+    }
+
+    #[test]
+    fn private_index_keeps_the_index_time_and_survives_clean_up() {
         let repo = TestRepo::new();
         repo.write("src/a.ts", "export const a = 1;\n");
         repo.commit("base");
-        let two_days_ago = SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60);
-        File::options()
-            .write(true)
-            .open(repo.dir.join(".git/index"))
-            .and_then(|f| f.set_modified(two_days_ago))
-            .expect("date the index two days back");
+        let three_days_ago = SystemTime::now() - Duration::from_secs(3 * 24 * 60 * 60);
+        set_modified(&repo.dir.join(".git/index"), three_days_ago);
         let head = repo.git(&["rev-parse", "HEAD"]);
 
         let index = PrivateIndex::create(&repository(&repo), &head).expect("a private index");
@@ -537,13 +728,49 @@ mod tests {
         let modified = std::fs::metadata(&index.path)
             .and_then(|m| m.modified())
             .expect("the private index's time");
-        let age = SystemTime::now()
-            .duration_since(modified)
-            .unwrap_or(Duration::ZERO);
-        assert!(age < Duration::from_secs(60 * 60), "dated {age:?} ago");
-        // So another run's clean-up leaves it alone.
-        remove_stale(&index.path.with_file_name("qgate-index"));
+        assert_eq!(modified, three_days_ago);
+        // Earlier versions remove `qgate-index-*` files by their time, which
+        // is now the index's, so the name must not start with that.
+        let name = index.path.file_name().expect("a name").to_string_lossy();
+        assert!(name.starts_with("qgate-snapshot-index-"), "{name}");
+        assert!(!name.starts_with("qgate-index-"), "{name}");
+        // Its name says it was made now, so another run's clean-up leaves
+        // it alone.
+        remove_stale(index.path.parent().expect("the git directory"));
         assert!(index.path.exists());
+    }
+
+    #[test]
+    fn a_later_or_missing_time_read_back_is_an_error() {
+        let path = std::path::Path::new("/repo/.git/qgate-snapshot-index-1-2-3-4");
+        let wanted = UNIX_EPOCH + Duration::from_nanos(1_794_321_680_421_856_783);
+        assert!(check_kept_time(path, wanted, wanted).is_ok());
+        // A file system that stores whole seconds: an earlier time only
+        // makes git compare more files.
+        let coarser = UNIX_EPOCH + Duration::from_secs(1_794_321_680);
+        assert!(check_kept_time(path, wanted, coarser).is_ok());
+
+        // Git ignores an index time of 0 whole seconds, and with it the
+        // racy check.
+        let Err(GitError::WorkTree { detail }) =
+            check_kept_time(path, wanted, UNIX_EPOCH + Duration::from_nanos(5))
+        else {
+            panic!("a time of 0 whole seconds must be a work tree error");
+        };
+        assert!(
+            detail.ends_with("the file system stored no time"),
+            "{detail}"
+        );
+
+        let later = UNIX_EPOCH + Duration::from_secs(1_794_321_681);
+        let Err(GitError::WorkTree { detail }) = check_kept_time(path, wanted, later) else {
+            panic!("a later time must be a work tree error");
+        };
+        assert_eq!(
+            detail,
+            "cannot give the private index /repo/.git/qgate-snapshot-index-1-2-3-4 the \
+             index's modification time: the file system stored a later time"
+        );
     }
 
     #[test]
@@ -552,30 +779,81 @@ mod tests {
         repo.write("src/a.ts", "export const a = 1;\n");
         repo.commit("base");
         let git_dir = repo.dir.join(".git");
-        let two_days_ago = SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60);
+        let now = SystemTime::now();
+        let ago = |secs: u64| now - Duration::from_secs(secs);
+        let since_epoch = |time: SystemTime| {
+            time.duration_since(UNIX_EPOCH)
+                .expect("after 1970")
+                .as_secs()
+        };
+        let (minute, two_days, three_days) = (60, 2 * 24 * 60 * 60, 3 * 24 * 60 * 60);
         let file = |name: &str, modified: Option<SystemTime>| {
             let path = git_dir.join(name);
             std::fs::write(&path, "left behind").expect("write");
             if let Some(time) = modified {
-                std::fs::File::options()
-                    .write(true)
-                    .open(&path)
-                    .and_then(|f| f.set_modified(time))
-                    .expect("set the modification time");
+                set_modified(&path, time);
             }
             path
         };
-        let old = file("qgate-index-1-2-3", Some(two_days_ago));
-        let old_lock = file("qgate-index-1-2-3.lock", Some(two_days_ago));
-        let recent = file("qgate-index-4-5-6", None);
-        let unrelated = file("qgate-indexer", Some(two_days_ago));
+        let named = |secs: u64, suffix: &str| format!("qgate-snapshot-index-1-{secs}-2-3{suffix}");
+        // Named by this version: the seconds in the name count.
+        let old = file(&named(since_epoch(ago(two_days)), ""), None);
+        let old_lock = file(&named(since_epoch(ago(two_days)), ".lock"), None);
+        let recent = file(
+            &format!("qgate-snapshot-index-4-{}-5-6", since_epoch(ago(minute))),
+            Some(ago(three_days)),
+        );
+        let recent_lock = file(
+            &format!(
+                "qgate-snapshot-index-4-{}-5-6.lock",
+                since_epoch(ago(minute))
+            ),
+            Some(ago(three_days)),
+        );
+        let future = file(
+            &format!(
+                "qgate-snapshot-index-7-{}-8-9",
+                since_epoch(now + Duration::from_secs(three_days))
+            ),
+            Some(ago(three_days)),
+        );
+        // Named by earlier versions: the modification time counts.
+        let legacy_old = file("qgate-index-7-8-9", Some(ago(two_days)));
+        let legacy_old_lock = file("qgate-index-7-8-9.lock", Some(ago(two_days)));
+        let legacy_recent = file("qgate-index-10-11-12", None);
+        // Not a private index's name.
+        let unparsable = file("qgate-snapshot-index-backup", Some(ago(two_days)));
+        let too_short = file("qgate-snapshot-index-1-2-3", Some(ago(two_days)));
+        let legacy_unparsable = file("qgate-index-backup", Some(ago(two_days)));
+        let legacy_too_short = file("qgate-index-1-2", Some(ago(two_days)));
+        let unrelated = file("qgate-indexer", Some(ago(two_days)));
 
         snapshot(&repo);
 
-        assert!(!old.exists(), "the stale private index is still there");
-        assert!(!old_lock.exists(), "the stale lock is still there");
-        assert!(recent.exists(), "a recent private index was removed");
-        assert!(unrelated.exists(), "an unrelated file was removed");
+        for (path, why) in [
+            (&old, "the stale private index is still there"),
+            (&old_lock, "the stale lock is still there"),
+            (&legacy_old, "an earlier version's stale copy is there"),
+            (&legacy_old_lock, "an earlier version's stale lock is there"),
+        ] {
+            assert!(!path.exists(), "{why}");
+        }
+        for (path, why) in [
+            (&recent, "a recent private index was removed"),
+            (&recent_lock, "a recent private index's lock was removed"),
+            (&future, "a private index from the future was removed"),
+            (
+                &legacy_recent,
+                "an earlier version's recent copy was removed",
+            ),
+            (&unparsable, "a file with another name was removed"),
+            (&too_short, "a file with another name was removed"),
+            (&legacy_unparsable, "a file with another name was removed"),
+            (&legacy_too_short, "a file with another name was removed"),
+            (&unrelated, "an unrelated file was removed"),
+        ] {
+            assert!(path.exists(), "{why}");
+        }
     }
 
     #[test]
