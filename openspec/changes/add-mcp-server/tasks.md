@@ -71,7 +71,7 @@ planning artifacts.
   - the exit codes, with a closed output pipe ending the server with 0.
 
   Verify that the 2.1 tests pass and every existing test passes unchanged.
-- [ ] 2.3 Check that the tests bite. Break each of these, one at a time, and confirm that a test fails for each:
+- [x] 2.3 Check that the tests bite. Break each of these, one at a time, and confirm that a test fails for each:
   - era selection (always add `resultType`);
   - version check (accept any `_meta` version);
   - the result (drop the text block, or report only failing findings);

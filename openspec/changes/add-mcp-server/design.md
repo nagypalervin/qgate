@@ -353,6 +353,24 @@ Decisions made during apply:
 - **Rust 1.85:** the `qgate-cli` tests pass on the MSRV toolchain
   locally too.
 
+- **The tests bite (task 2.3).** Each mutation of `mcp.rs` was run
+  with `cargo test -p qgate-cli --no-fail-fast`, then reverted. Every
+  one fails unit tests and end-to-end tests:
+
+  | Mutation | Unit tests failing | End-to-end tests failing |
+  |---|---|---|
+  | Always add `resultType` | 2 | `a_whole_old_era_session`, `ping` |
+  | Accept any `_meta` version | 1 | `a_future_revision` |
+  | Drop the text block | 1 | `one_failing_finding`, `the_report_is_the_check_commands_report` |
+  | Report only failing findings | 1 | `the_report_is_the_check_commands_report` |
+  | Protocol error instead of `isError` | 3 | `a_value_that_is_not_a_string`, `outside_a_repository`, `invalid_configuration`, `unknown_base` |
+  | Ignore `directory` | 2 | `a_relative_directory`, `another_directory` |
+  | Ignore `--fail-on` | 1 | `the_teams_level` |
+  | Answer notifications | 2 | `a_cancellation`, `a_whole_old_era_session`, `ping` |
+
+  The task names seven checks. "The result" covers two mutations: the
+  dropped text block and the failing findings only.
+
 ## Risks / Trade-offs
 
 - **[The 2026-07-28 revision is four months old, and clients differ in
