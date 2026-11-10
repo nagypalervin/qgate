@@ -1,9 +1,10 @@
 //! The `qgate` command.
 //!
 //! Thin by design: it parses arguments, reads files or asks `qgate-git`
-//! for changed files and `qgate.toml`, wires the configuration into the
-//! analyzers, and picks exit codes; parsing, analysis and rendering live in
-//! the library crates.
+//! for changed files and `qgate.toml` (of a revision, or of a snapshot of
+//! the working tree), wires the configuration into the analyzers, and
+//! picks exit codes; parsing, analysis and rendering live in the library
+//! crates.
 //!
 //! Exit codes: `2` when the check could not run (an invalid invocation or
 //! input), else `1` when a finding is at or above the `--fail-on` level,
@@ -17,7 +18,7 @@ use std::process::ExitCode;
 
 use clap::builder::PossibleValue;
 use clap::error::ErrorKind as ClapErrorKind;
-use clap::{Arg, ArgMatches, Command, ValueEnum, value_parser};
+use clap::{Arg, ArgAction, ArgMatches, Command, ValueEnum, value_parser};
 use qgate_analyzers::architecture::{ArchitectureAnalyzer, ForbidRule};
 use qgate_analyzers::complexity::ComplexityAnalyzer;
 use qgate_analyzers::duplication::{ChangedSource, DuplicationIndex};
@@ -110,7 +111,8 @@ fn check_command() -> Command {
         .about("Report what got worse between two versions of TypeScript code")
         .override_usage(
             "qgate check <before> <after> [--fail-on <level>]\n       \
-             qgate check --base <rev> [--head <rev>] [--fail-on <level>]",
+             qgate check --base <rev> [--head <rev>] [--fail-on <level>]\n       \
+             qgate check --base <rev> --worktree [--fail-on <level>]",
         )
         .arg(
             Arg::new("before")
@@ -137,7 +139,18 @@ fn check_command() -> Command {
                 .long("head")
                 .value_name("rev")
                 .help("The revision to check (default: HEAD); needs --base")
-                .requires("base"),
+                .requires("base")
+                // clap drops `requires` when the required argument conflicts
+                // with one given, as --base does with two files.
+                .conflicts_with_all(["before", "after"]),
+        )
+        .arg(
+            Arg::new("worktree")
+                .long("worktree")
+                .action(ArgAction::SetTrue)
+                .help("Check the working tree (uncommitted and untracked files) instead of --head")
+                .requires("base")
+                .conflicts_with_all(["head", "before", "after"]),
         )
         .arg(
             Arg::new("fail-on")
@@ -175,9 +188,14 @@ fn main() -> ExitCode {
         }
         let result = match args.get_one::<String>("base") {
             Some(base) => {
-                let head = args
-                    .get_one::<String>("head")
-                    .map_or("HEAD", String::as_str);
+                let head = if args.get_flag("worktree") {
+                    HeadArg::WorkTree
+                } else {
+                    HeadArg::Revision(
+                        args.get_one::<String>("head")
+                            .map_or("HEAD", String::as_str),
+                    )
+                };
                 check_revisions(base, head)
             }
             None => check(args),
@@ -268,12 +286,46 @@ fn sort(findings: &mut [Finding]) {
     findings.sort_by(|a, b| key(a).cmp(&key(b)));
 }
 
-/// Run `qgate check --base <base> --head <head>` in the repository that
-/// contains the current directory, and return the sorted findings.
-fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
+/// The head of a revision check as the user gave it.
+#[derive(Debug, Clone, Copy)]
+enum HeadArg<'a> {
+    /// `--head <rev>`, or `HEAD` by default.
+    Revision(&'a str),
+    /// `--worktree`.
+    WorkTree,
+}
+
+/// The head a revision check reads, and how its messages name it (design
+/// D3 of `add-worktree-input`).
+struct Head {
+    /// The revision git reads: the user's, or the id of the working
+    /// tree's snapshot.
+    revision: String,
+    /// Whether `revision` is a snapshot of the working tree, which
+    /// messages call `HEAD` or "the working tree", never by its id.
+    worktree: bool,
+}
+
+/// Run `qgate check --base <base>` with `--head <rev>` or `--worktree` in
+/// the repository that contains the current directory, and return the
+/// sorted findings.
+fn check_revisions(base: &str, head: HeadArg<'_>) -> Result<Vec<Finding>, String> {
     let cwd =
         std::env::current_dir().map_err(|e| format!("cannot read the current directory: {e}"))?;
-    let repo = Repository::discover(&cwd).map_err(|e| git_message(&e, base))?;
+    let repo = Repository::discover(&cwd).map_err(|e| e.to_string())?;
+    let head = match head {
+        HeadArg::Revision(revision) => Head {
+            revision: revision.to_owned(),
+            worktree: false,
+        },
+        // Before the diff, which then reads the snapshot like any commit.
+        // Its errors name `HEAD` or the working tree, and an unknown
+        // `HEAD` here is no shallow clone, even with `--base HEAD`.
+        HeadArg::WorkTree => Head {
+            revision: repo.worktree_snapshot().map_err(|e| e.to_string())?,
+            worktree: true,
+        },
+    };
     // The diff first: it checks both revisions and their merge base, so an
     // unknown base (a shallow clone) is reported as such, never hidden
     // behind a broken qgate.toml.
@@ -281,10 +333,10 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
         changed: files,
         deleted,
     } = repo
-        .changes(base, head)
-        .map_err(|e| git_message(&e, base))?;
+        .changes(base, &head.revision)
+        .map_err(|e| git_message(&e, base, &head))?;
     // Checked before any file is analyzed.
-    let architecture = architecture_analyzer(&load_config(&repo, base, head)?)?;
+    let architecture = architecture_analyzer(&load_config(&repo, base, &head)?)?;
     let mut analyzers: Vec<&dyn Analyzer> = vec![&ComplexityAnalyzer];
     if !architecture.is_empty() {
         analyzers.push(&architecture);
@@ -323,7 +375,7 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
         findings.extend(duplication(
             &repo,
             base,
-            head,
+            &head,
             &analyzed,
             &left,
             &changed_paths,
@@ -342,12 +394,14 @@ fn check_revisions(base: &str, head: &str) -> Result<Vec<Finding>, String> {
 fn duplication(
     repo: &Repository,
     base: &str,
-    head: &str,
+    head: &Head,
     changes: &[FileChange],
     left: &[(String, BlobId)],
     changed_paths: &HashSet<String>,
 ) -> Result<Vec<Finding>, String> {
-    let mut reader = repo.blob_reader().map_err(|e| git_message(&e, base))?;
+    let mut reader = repo
+        .blob_reader()
+        .map_err(|e| git_message(&e, base, head))?;
     // The base tokens of supported files that are gone (deleted, or
     // renamed to another language); one that cannot be read or parsed
     // counts as empty.
@@ -387,7 +441,9 @@ fn duplication(
         after: &[],
     }));
     let mut index = DuplicationIndex::new(&sources);
-    let tree = repo.files_at(head).map_err(|e| git_message(&e, base))?;
+    let tree = repo
+        .files_at(&head.revision)
+        .map_err(|e| git_message(&e, base, head))?;
     for file in tree {
         if changed_paths.contains(&file.path) {
             continue;
@@ -417,11 +473,12 @@ fn read_source(reader: &mut BlobReader, id: &BlobId) -> Result<Option<Vec<u8>>, 
 }
 
 /// The configuration as the head revision has it (ADR 0003): uncommitted
-/// changes do not count, and a missing file is an empty configuration.
-fn load_config(repo: &Repository, base: &str, head: &str) -> Result<Config, String> {
+/// changes count only when the head is the working tree, and a missing
+/// file is an empty configuration.
+fn load_config(repo: &Repository, base: &str, head: &Head) -> Result<Config, String> {
     match repo
-        .file_at(head, CONFIG_FILE)
-        .map_err(|e| git_message(&e, base))?
+        .file_at(&head.revision, CONFIG_FILE)
+        .map_err(|e| git_message(&e, base, head))?
     {
         Some(bytes) => qgate_config::parse(&bytes).map_err(|e| format!("{CONFIG_FILE}: {e}")),
         None => Ok(Config::default()),
@@ -572,12 +629,27 @@ fn language_of(path: &str) -> Option<Language> {
 
 /// The message for a git error. An unknown `base` gets the shallow-clone
 /// hint; an unknown head or an option-like value would be misled by it.
-fn git_message(error: &GitError, base: &str) -> String {
+/// A snapshot of the working tree is named `HEAD` or "the working tree",
+/// never by its id.
+fn git_message(error: &GitError, base: &str, head: &Head) -> String {
     match error {
         GitError::UnknownRevision { revision }
             if revision == base && !revision.starts_with('-') =>
         {
             format!("{error}; {SHALLOW_CLONE_HINT}")
+        }
+        GitError::NoMergeBase {
+            base,
+            head: revision,
+        } if head.worktree && *revision == head.revision => GitError::NoMergeBase {
+            base: base.clone(),
+            head: "HEAD".to_owned(),
+        }
+        .to_string(),
+        GitError::NotARegularFile { path, revision }
+            if head.worktree && *revision == head.revision =>
+        {
+            format!("`{path}` is not a regular file in the working tree")
         }
         _ => error.to_string(),
     }

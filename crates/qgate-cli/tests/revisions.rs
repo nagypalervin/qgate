@@ -1,7 +1,7 @@
-//! End-to-end tests for `qgate check --base <rev> [--head <rev>]`, one per
-//! scenario of the `revision-input` spec and the revision-mode scenarios of
-//! the `check-command` spec. Each test builds a throwaway git repository and
-//! runs the built binary in it (design D5).
+//! End-to-end tests for `qgate check --base <rev> [--head <rev> |
+//! --worktree]`, one per scenario of the `revision-input` spec and the
+//! revision-mode scenarios of the `check-command` spec. Each test builds a
+//! throwaway git repository and runs the built binary in it (design D5).
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -1145,4 +1145,382 @@ fn a_javascript_rename_does_not_hide_a_new_copy() {
     repo.commit("rename and copy");
     let out = repo.qgate(&["--base", "HEAD~1"]);
     assert_eq!(stdout(&out), COPY_FINDING, "{}", stderr(&out));
+}
+
+// revision-input: Working tree as head (add-worktree-input)
+
+/// A repository with `f` in `src/a.ts` at complexity 2 committed on
+/// `main`, which stays checked out.
+fn worktree_repo() -> Repo {
+    let repo = Repo::new();
+    repo.write("src/a.ts", function("f", 1));
+    repo.commit("base");
+    repo
+}
+
+const NO_REGRESSIONS: &str = "No regressions found.\n";
+
+#[test]
+fn uncommitted_edit() {
+    // Also check-command "Working tree".
+    let repo = worktree_repo();
+    repo.write("src/a.ts", function("f", 3));
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(stdout(&out), F_INCREASE, "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn without_the_flag_uncommitted_edits_are_not_seen() {
+    let repo = worktree_repo();
+    repo.write("src/a.ts", function("f", 3));
+    let out = repo.qgate(&["--base", "main"]);
+    assert_eq!(stdout(&out), NO_REGRESSIONS, "{}", stderr(&out));
+}
+
+#[test]
+fn committed_and_uncommitted_changes_together() {
+    let repo = Repo::new();
+    repo.write("qgate.toml", RULE);
+    repo.write("src/domain/order.ts", ORDER);
+    repo.write("src/b.ts", function("g", 1));
+    repo.commit("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("src/domain/order.ts", ORDER_WITH_BUTTON);
+    repo.commit("committed import");
+    repo.write("src/b.ts", function("g", 3));
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(
+        stdout(&out),
+        format!(
+            "warning src/b.ts:1  g: cyclomatic complexity 2 -> 4 (+2)  \
+             [complexity/cyclomatic-increase]\n{BUTTON_FINDING}"
+        ),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn untracked_new_file() {
+    let repo = worktree_repo();
+    repo.write("src/new.ts", function("big", 11) + &function("small", 2));
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(
+        stdout(&out),
+        "warning src/new.ts:1  big: new function, cyclomatic complexity 12  \
+         [complexity/cyclomatic-new]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn ignored_file() {
+    let repo = Repo::new();
+    repo.write(".gitignore", "dist/\n");
+    repo.commit("base");
+    repo.write("dist/out.ts", function("huge", 29));
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(stdout(&out), NO_REGRESSIONS, "{}", stderr(&out));
+}
+
+#[test]
+fn the_disk_version_wins_over_the_staged_one() {
+    let repo = worktree_repo();
+    repo.write("src/a.ts", function("f", 2));
+    repo.git(&["add", "src/a.ts"]);
+    repo.write("src/a.ts", function("f", 8));
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    let report = stdout(&out);
+    assert!(
+        report.contains("f: cyclomatic complexity 2 -> 9 (+7)"),
+        "{report}{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn file_moved_without_git() {
+    let repo = Repo::new();
+    repo.write(
+        "src/old.ts",
+        function("f", 1) + &function("g", 2) + &padding(20),
+    );
+    repo.commit("base");
+    std::fs::rename(repo.dir.join("src/old.ts"), repo.dir.join("src/new.ts")).expect("move");
+    repo.write(
+        "src/new.ts",
+        function("f", 2) + &function("g", 2) + &padding(20),
+    );
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(
+        stdout(&out),
+        "warning src/new.ts:1  f: cyclomatic complexity 2 -> 3 (+1)  \
+         [complexity/cyclomatic-increase]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn deleted_from_disk() {
+    let repo = worktree_repo();
+    repo.write("src/legacy.ts", function("huge", 30));
+    repo.commit("legacy");
+    repo.remove("src/legacy.ts");
+    // An edit next to the deletion shows that the working tree was read.
+    repo.write("src/a.ts", function("f", 3));
+    let out = repo.qgate(&["--base", "main~1", "--worktree"]);
+    assert_eq!(stdout(&out), F_INCREASE, "{}", stderr(&out));
+}
+
+#[test]
+fn files_git_does_not_look_at() {
+    let repo = Repo::new();
+    repo.write("src/a.ts", function("f", 1));
+    repo.write("src/b.ts", function("g", 1));
+    repo.write("src/c.ts", function("h", 1));
+    repo.commit("base");
+    repo.git(&["update-index", "--assume-unchanged", "src/a.ts"]);
+    repo.git(&["update-index", "--skip-worktree", "src/b.ts"]);
+    repo.write("src/a.ts", function("f", 3));
+    repo.write("src/b.ts", function("g", 3));
+    repo.write("src/c.ts", function("h", 3));
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(
+        stdout(&out),
+        "warning src/c.ts:1  h: cyclomatic complexity 2 -> 4 (+2)  \
+         [complexity/cyclomatic-increase]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+// revision-input: The working tree replaces the head everywhere
+
+#[test]
+fn copy_of_an_uncommitted_file() {
+    let repo = Repo::new();
+    repo.write("src/orders/format.ts", ORDER);
+    repo.commit("base");
+    repo.write("src/utils/date.ts", DATE_HELPER);
+    repo.write("src/orders/format.ts", RENAMED_COPY);
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    let report = stdout(&out);
+    assert!(
+        report.contains("src/orders/format.ts")
+            && report.contains("src/utils/date.ts")
+            && report.contains("[duplication/duplicate-block]"),
+        "{report}{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn only_the_uncommitted_changes() {
+    let repo = Repo::new();
+    repo.commit("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("src/a.ts", function("committed", 11));
+    repo.commit("committed function");
+    // Not `function` again: a second copy of its shape is a duplicate.
+    let chain: Vec<String> = (0..12).map(|i| format!("c[{i}]")).collect();
+    repo.write(
+        "src/b.ts",
+        format!(
+            "export function uncommitted(c: boolean[]): boolean {{\n  return {};\n}}\n",
+            chain.join(" && ")
+        ),
+    );
+    let out = repo.qgate(&["--base", "HEAD", "--worktree"]);
+    assert_eq!(
+        stdout(&out),
+        "warning src/b.ts:1  uncommitted: new function, cyclomatic complexity 12  \
+         [complexity/cyclomatic-new]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn clean_working_tree() {
+    let repo = feature_repo();
+    repo.git(&["checkout", "-q", "feature"]);
+    let worktree = repo.qgate(&["--base", "main", "--worktree"]);
+    let head = repo.qgate(&["--base", "main"]);
+    assert_eq!(stdout(&worktree), F_INCREASE, "{}", stderr(&worktree));
+    assert_eq!(worktree.stdout, head.stdout);
+    assert_eq!(worktree.status.code(), head.status.code());
+}
+
+// revision-input: Checking the working tree changes nothing
+
+/// A repository with a staged, an unstaged and an untracked change.
+fn repo_with_every_kind_of_change() -> Repo {
+    let repo = Repo::new();
+    repo.write("src/a.ts", function("f", 1));
+    repo.write("src/b.ts", function("g", 1));
+    repo.commit("base");
+    repo.write("src/a.ts", function("f", 3));
+    repo.git(&["add", "src/a.ts"]);
+    repo.write("src/b.ts", function("g", 3));
+    repo.write("src/c.ts", function("h", 3));
+    repo
+}
+
+#[test]
+fn staged_changes_stay_staged() {
+    let repo = repo_with_every_kind_of_change();
+    let state = || {
+        (
+            repo.git(&["status", "--porcelain"]),
+            repo.git(&["diff", "--cached"]),
+        )
+    };
+    let before = state();
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(state(), before);
+}
+
+#[test]
+fn no_commit_appears() {
+    let repo = repo_with_every_kind_of_change();
+    let state = || {
+        (
+            repo.git(&["rev-parse", "HEAD"]),
+            repo.git(&["for-each-ref"]),
+            repo.git(&["reflog", "HEAD"]),
+        )
+    };
+    let before = state();
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(state(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn hooks_do_not_run() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let repo = repo_with_every_kind_of_change();
+    let mut markers = Vec::new();
+    for hook in ["pre-commit", "post-commit"] {
+        let marker = repo.dir.join(format!("{hook}.ran"));
+        let script = repo.dir.join(".git/hooks").join(hook);
+        repo.write(
+            &format!(".git/hooks/{hook}"),
+            format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+        );
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("make the hook executable");
+        markers.push(marker);
+    }
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    for marker in &markers {
+        assert!(!marker.exists(), "{} exists", marker.display());
+    }
+}
+
+// revision-input: Working tree errors
+
+/// The check failed with exit code 2 and empty standard output; returns
+/// standard error.
+fn failed(out: &Output) -> String {
+    assert_eq!(stdout(out), "", "{}", stderr(out));
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(out));
+    stderr(out)
+}
+
+/// Whether `text` holds a full object id, which no message should show.
+fn has_object_id(text: &str) -> bool {
+    text.split(|c: char| !c.is_ascii_hexdigit())
+        .any(|word| word.len() >= 40)
+}
+
+#[test]
+fn repository_without_commits() {
+    for base in ["main", "HEAD"] {
+        let repo = Repo::new();
+        repo.write("src/a.ts", function("f", 1));
+        let out = repo.qgate(&["--base", base, "--worktree"]);
+        let err = failed(&out);
+        assert!(err.contains("unknown revision `HEAD`"), "{base}: {err}");
+        assert!(!err.contains("fetch-depth"), "{base}: {err}");
+    }
+}
+
+#[test]
+fn qgate_toml_is_not_a_regular_file_on_disk() {
+    let repo = repo_with_config(RULE);
+    repo.remove("qgate.toml");
+    repo.write("qgate.toml/inner", RULE);
+    let out = repo.qgate(&["--base", "HEAD~1", "--worktree"]);
+    let err = failed(&out);
+    assert!(
+        err.contains("`qgate.toml` is not a regular file in the working tree"),
+        "{err}"
+    );
+    assert!(!has_object_id(&err), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_file_in_the_working_tree() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let repo = worktree_repo();
+    repo.write("src/secret.ts", function("s", 1));
+    let secret = repo.dir.join("src/secret.ts");
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+    if std::fs::read(&secret).is_ok() {
+        // Running as root: nothing is unreadable.
+        return;
+    }
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    let err = failed(&out);
+    assert!(
+        err.contains("cannot take a snapshot of the working tree") && err.contains("src/secret.ts"),
+        "{err}"
+    );
+}
+
+#[test]
+fn unrelated_histories_with_the_working_tree() {
+    let repo = worktree_repo();
+    repo.git(&["checkout", "-q", "--orphan", "other"]);
+    repo.commit("unrelated");
+    repo.git(&["checkout", "-q", "main"]);
+    let out = repo.qgate(&["--base", "other", "--worktree"]);
+    let err = failed(&out);
+    assert!(
+        err.contains("`other` and `HEAD` have no merge base"),
+        "{err}"
+    );
+    assert!(!has_object_id(&err), "{err}");
+}
+
+// configuration: Configuration from the head revision, with --worktree
+
+#[test]
+fn uncommitted_configuration_counts_with_the_working_tree() {
+    let repo = Repo::new();
+    repo.write("src/domain/order.ts", ORDER);
+    repo.commit("base");
+    repo.write("qgate.toml", RULE);
+    repo.write("src/domain/order.ts", ORDER_WITH_BUTTON);
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(stdout(&out), BUTTON_FINDING, "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn invalid_configuration_on_disk() {
+    let repo = repo_with_config(RULE);
+    repo.write("qgate.toml", "broken [");
+    let err = failed(&repo.qgate(&["--base", "HEAD~1", "--worktree"]));
+    assert!(err.contains("qgate.toml"), "{err}");
 }
