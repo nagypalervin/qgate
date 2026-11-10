@@ -6,13 +6,17 @@
 //! picks exit codes; parsing, analysis and rendering live in the library
 //! crates.
 //!
-//! Exit codes: `2` when the check could not run (an invalid invocation or
-//! input), else `1` when a finding is at or above the `--fail-on` level,
-//! else `0`.
+//! Exit codes of `qgate check`: `2` when the check could not run (an
+//! invalid invocation or input), else `1` when a finding is at or above the
+//! `--fail-on` level, else `0`. `qgate hook` speaks an agent's hook
+//! protocol instead (see the `hook` module): `0`, or `1` for an invalid
+//! invocation, never `2`.
+
+mod hook;
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{ErrorKind, Write as _};
+use std::io::{ErrorKind, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -150,6 +154,40 @@ fn command() -> Command {
         .about("Detects where your codebase starts to break under fast, AI-assisted development")
         .version(env!("CARGO_PKG_VERSION"))
         .subcommand(check_command())
+        .subcommand(hook_command())
+}
+
+/// `qgate hook <agent>`: run from a coding agent's hooks (the
+/// `agent-hooks` spec).
+fn hook_command() -> Command {
+    Command::new("hook")
+        .about("Run from a coding agent's hooks: check its uncommitted work")
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("claude-code")
+                .about(
+                    "Answer a Claude Code Stop hook: send the agent back once with \
+                     what its uncommitted work made worse",
+                )
+                .arg(
+                    Arg::new("base")
+                        .long("base")
+                        .value_name("rev")
+                        .help("Check the working tree against this revision")
+                        .default_value("HEAD"),
+                )
+                .arg(
+                    Arg::new("fail-on")
+                        .long("fail-on")
+                        .value_name("level")
+                        .help(
+                            "Send the agent back on a finding at or above this level; \
+                             the user sees the others",
+                        )
+                        .value_parser(value_parser!(FailOn))
+                        .default_value(DEFAULT_FAIL_ON.name()),
+                ),
+        )
 }
 
 fn check_command() -> Command {
@@ -226,9 +264,26 @@ fn main() -> ExitCode {
         // Help and version also arrive here, with exit code 0.
         Err(err) => {
             let _ = err.print();
-            return ExitCode::from(u8::try_from(err.exit_code()).unwrap_or(INVALID));
+            let code = u8::try_from(err.exit_code()).unwrap_or(INVALID);
+            // Claude Code sends a hook's standard error to the model on exit
+            // code 2; a broken settings entry is for the user (design D4 of
+            // `add-agent-hooks`). The top-level command has no options other
+            // than `--help` and `--version`, so a hook command line always
+            // starts with `hook`; a global option would have to change this.
+            let in_hook = std::env::args_os().nth(1).is_some_and(|arg| arg == "hook");
+            return ExitCode::from(if in_hook && code == INVALID {
+                FAILED
+            } else {
+                code
+            });
         }
     };
+
+    if let Some(("hook", hook_args)) = matches.subcommand() {
+        if let Some(("claude-code", args)) = hook_args.subcommand() {
+            return claude_code_hook(args);
+        }
+    }
 
     if let Some(("check", args)) = matches.subcommand() {
         let two_files = args.contains_id("before") && args.contains_id("after");
@@ -250,7 +305,9 @@ fn main() -> ExitCode {
                             .map_or("HEAD", String::as_str),
                     )
                 };
-                check_revisions(base, head)
+                std::env::current_dir()
+                    .map_err(|e| format!("cannot read the current directory: {e}"))
+                    .and_then(|cwd| check_revisions(&cwd, base, head))
             }
             None => check(args),
         };
@@ -275,6 +332,53 @@ fn main() -> ExitCode {
     }
     let _ = command.print_help();
     ExitCode::SUCCESS
+}
+
+/// `qgate hook claude-code`: read the hook input, check the working tree
+/// of the project, and answer in Claude Code's hook protocol. Every
+/// outcome exits with 0; errors go to the user in the response.
+fn claude_code_hook(args: &ArgMatches) -> ExitCode {
+    let base = args
+        .get_one::<String>("base")
+        .map_or("HEAD", String::as_str);
+    let fail_on = args
+        .get_one::<FailOn>("fail-on")
+        .copied()
+        .unwrap_or(DEFAULT_FAIL_ON);
+    let mut text = String::new();
+    let response = match std::io::stdin()
+        .read_to_string(&mut text)
+        .map_err(|e| format!("cannot read the hook input: {e}"))
+        .and_then(|_| hook::parse_input(&text))
+    {
+        Ok(input) => {
+            let result =
+                project_dir(&input).and_then(|dir| check_revisions(&dir, base, HeadArg::WorkTree));
+            hook::respond(result, input.stop_hook_active(), base, fail_on)
+        }
+        Err(message) => hook::Response::error(&message),
+    };
+    match write_stdout(&response.output()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(message) => {
+            // Not 2: Claude Code would send it to the model.
+            let _ = writeln!(std::io::stderr(), "error: {message}");
+            ExitCode::from(FAILED)
+        }
+    }
+}
+
+/// The directory the hook checks (design D2 of `add-agent-hooks`):
+/// `CLAUDE_PROJECT_DIR`, else the input's `cwd`, else the current
+/// directory.
+fn project_dir(input: &hook::Input) -> Result<PathBuf, String> {
+    if let Some(dir) = std::env::var_os("CLAUDE_PROJECT_DIR").filter(|dir| !dir.is_empty()) {
+        return Ok(PathBuf::from(dir));
+    }
+    if let Some(cwd) = input.cwd() {
+        return Ok(cwd.clone());
+    }
+    std::env::current_dir().map_err(|e| format!("cannot read the current directory: {e}"))
 }
 
 /// Write the report to standard output. A reader that stops early (as in
@@ -365,12 +469,9 @@ struct Head {
 }
 
 /// Run `qgate check --base <base>` with `--head <rev>` or `--worktree` in
-/// the repository that contains the current directory, and return the
-/// sorted findings.
-fn check_revisions(base: &str, head: HeadArg<'_>) -> Result<Vec<Finding>, String> {
-    let cwd =
-        std::env::current_dir().map_err(|e| format!("cannot read the current directory: {e}"))?;
-    let repo = Repository::discover(&cwd).map_err(|e| e.to_string())?;
+/// the repository that contains `dir`, and return the sorted findings.
+fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Finding>, String> {
+    let repo = Repository::discover(dir).map_err(|e| e.to_string())?;
     let head = match head {
         HeadArg::Revision(revision) => Head {
             revision: revision.to_owned(),

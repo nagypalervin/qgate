@@ -149,6 +149,7 @@ dependencies = [
  "qgate-git",
  "qgate-lang",
  "qgate-report",
+ "serde",
  "serde_json",
 ]
 
