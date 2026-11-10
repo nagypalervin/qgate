@@ -91,7 +91,7 @@ Commit messages and PR bodies are written to files first.
   Verify they fail.
 - [x] 2.2 Write failing tests in `crates/qgate-cli/tests/check.rs` for the new "Invalid invocation" scenarios: working tree without base, with `--head`, with two files. Verify they fail.
 - [x] 2.3 Implement `--worktree` in `qgate-cli` (D3, D4):
-  - the flag with `requires("base")` and `conflicts_with("head")`;
+  - the flag with `requires("base")`, conflicting with `--head` and the two files (and `--head` now conflicting with the two files too; see design, Implementation Notes);
   - the third usage line and the help text;
   - the snapshot taken before the diff;
   - the head label in `git_message`;

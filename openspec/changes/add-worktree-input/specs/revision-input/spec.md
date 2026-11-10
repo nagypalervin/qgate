@@ -55,7 +55,7 @@ count as unchanged. The before side SHALL be the merge base of `--base` and
 
 #### Scenario: Deleted from disk
 
-- **GIVEN** the tracked `src/legacy.ts` was deleted from disk without `git rm`
+- **GIVEN** the checked-out branch added `src/legacy.ts` with a function of complexity 30, and it was then deleted from disk without `git rm`
 - **WHEN** the user runs `qgate check --base main --worktree`
 - **THEN** no finding is reported for `src/legacy.ts`
 
@@ -77,6 +77,12 @@ against.
 - **GIVEN** an untracked `src/util.ts` contains a 60-token block, and the uncommitted `src/a.ts` copies it
 - **WHEN** the user runs `qgate check --base main --worktree`
 - **THEN** a `duplication/duplicate-block` finding is reported that names both files
+
+#### Scenario: Copy of a file deleted from disk
+
+- **GIVEN** the checked-out branch committed `src/old.ts` with a 60-token block, `src/old.ts` was then deleted from disk, and an untracked `src/b.ts` holds the same block
+- **WHEN** the user runs `qgate check --base main --worktree`
+- **THEN** no `duplication/duplicate-block` finding is reported
 
 #### Scenario: Only the uncommitted changes
 
@@ -113,9 +119,9 @@ git asks which files changed.
 
 #### Scenario: Hooks do not run
 
-- **GIVEN** the repository has a `pre-commit` and a `post-commit` hook that write a file when they run
+- **GIVEN** the repository has `pre-commit`, `post-commit` and `post-index-change` hooks that write a file when they run
 - **WHEN** the user runs `qgate check --base main --worktree`
-- **THEN** neither file exists after the check
+- **THEN** none of the files exists after the check
 
 #### Scenario: Split index
 

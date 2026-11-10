@@ -354,3 +354,22 @@ None. The option is new and the default is unchanged.
 - **PR 2: "Committed and uncommitted changes together" uses a forbid
   rule.** The scenario's committed change is a new import, which is a
   finding only under a rule, so the test commits `qgate.toml` with one.
+- **Review round 1 of PR 2:**
+  - **Duplication's head was untested.** Reading `HEAD`'s files instead of
+    the snapshot's passed every test, because the copy test only paired
+    two changed files. A new scenario and test, "Copy of a file deleted
+    from disk", fail under that mutation.
+  - **Hooks:** `git add` and `commit-tree` never run `pre-commit` or
+    `post-commit`, so the end-to-end test guarded nothing. The scenario
+    and the test now include `post-index-change`, the hook `git add` runs.
+    The test checks that a plain `git add` does run it, and fails when the
+    snapshot keeps the repository's hooks.
+  - **Weak tests:** the "changes nothing" tests now also check that the
+    staged, unstaged and untracked changes were reported, and "Ignored
+    file" has an edit next to the ignored one. "Deleted from disk" now
+    says the base does not have the file, so a missed deletion shows.
+  - **`--head` with two files:** a scenario in `check-command` and the
+    proposal's Users line now state the behaviour change.
+  - **README:** names the ignore rules, the file-system monitor, the
+    two-week prune and the files an interrupted check can leave.
+

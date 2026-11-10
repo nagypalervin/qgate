@@ -1217,12 +1217,14 @@ fn untracked_new_file() {
 
 #[test]
 fn ignored_file() {
-    let repo = Repo::new();
+    let repo = worktree_repo();
     repo.write(".gitignore", "dist/\n");
-    repo.commit("base");
+    repo.commit("ignore dist");
     repo.write("dist/out.ts", function("huge", 29));
+    // An edit next to it shows that the working tree was read.
+    repo.write("src/a.ts", function("f", 3));
     let out = repo.qgate(&["--base", "main", "--worktree"]);
-    assert_eq!(stdout(&out), NO_REGRESSIONS, "{}", stderr(&out));
+    assert_eq!(stdout(&out), F_INCREASE, "{}", stderr(&out));
 }
 
 #[test]
@@ -1265,13 +1267,15 @@ fn file_moved_without_git() {
 
 #[test]
 fn deleted_from_disk() {
+    // `main` has no legacy.ts, so a missed deletion would report it.
     let repo = worktree_repo();
+    repo.git(&["checkout", "-q", "-b", "feature"]);
     repo.write("src/legacy.ts", function("huge", 30));
     repo.commit("legacy");
     repo.remove("src/legacy.ts");
     // An edit next to the deletion shows that the working tree was read.
     repo.write("src/a.ts", function("f", 3));
-    let out = repo.qgate(&["--base", "main~1", "--worktree"]);
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
     assert_eq!(stdout(&out), F_INCREASE, "{}", stderr(&out));
 }
 
@@ -1314,6 +1318,29 @@ fn copy_of_an_uncommitted_file() {
             && report.contains("[duplication/duplicate-block]"),
         "{report}{}",
         stderr(&out)
+    );
+}
+
+#[test]
+fn duplication_compares_against_the_working_tree() {
+    // HEAD has the helper in old.ts, which is gone from disk: a block
+    // pasted into a new file is no copy of anything in the working tree.
+    let repo = Repo::new();
+    repo.commit("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("src/old.ts", DATE_HELPER);
+    repo.commit("helper");
+    repo.remove("src/old.ts");
+    repo.write("src/b.ts", format!("// moved\n{DATE_HELPER}"));
+    let out = repo.qgate(&["--base", "main", "--worktree"]);
+    assert_eq!(stdout(&out), NO_REGRESSIONS, "{}", stderr(&out));
+    // Back on disk, the two files share the block.
+    repo.git(&["checkout", "--", "src/old.ts"]);
+    let restored = repo.qgate(&["--base", "main", "--worktree"]);
+    assert!(
+        stdout(&restored).contains("[duplication/duplicate-block]"),
+        "{}",
+        stdout(&restored)
     );
 }
 
@@ -1365,8 +1392,22 @@ fn repo_with_every_kind_of_change() -> Repo {
     repo.write("src/a.ts", function("f", 3));
     repo.git(&["add", "src/a.ts"]);
     repo.write("src/b.ts", function("g", 3));
-    repo.write("src/c.ts", function("h", 3));
+    repo.write("src/c.ts", function("h", 11));
     repo
+}
+
+/// The check ran and saw the staged, the unstaged and the untracked
+/// change of `repo_with_every_kind_of_change`.
+fn assert_saw_every_change(out: &Output) {
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(out));
+    let report = stdout(out);
+    for expected in [
+        "src/a.ts:1  f: cyclomatic complexity 2 -> 4",
+        "src/b.ts:1  g: cyclomatic complexity 2 -> 4",
+        "src/c.ts:1  h: new function",
+    ] {
+        assert!(report.contains(expected), "missing {expected:?}: {report}");
+    }
 }
 
 #[test]
@@ -1379,8 +1420,7 @@ fn staged_changes_stay_staged() {
         )
     };
     let before = state();
-    let out = repo.qgate(&["--base", "main", "--worktree"]);
-    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_saw_every_change(&repo.qgate(&["--base", "main", "--worktree"]));
     assert_eq!(state(), before);
 }
 
@@ -1395,8 +1435,7 @@ fn no_commit_appears() {
         )
     };
     let before = state();
-    let out = repo.qgate(&["--base", "main", "--worktree"]);
-    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_saw_every_change(&repo.qgate(&["--base", "main", "--worktree"]));
     assert_eq!(state(), before);
 }
 
@@ -1407,7 +1446,8 @@ fn hooks_do_not_run() {
 
     let repo = repo_with_every_kind_of_change();
     let mut markers = Vec::new();
-    for hook in ["pre-commit", "post-commit"] {
+    // post-index-change is the one `git add` would run.
+    for hook in ["pre-commit", "post-commit", "post-index-change"] {
         let marker = repo.dir.join(format!("{hook}.ran"));
         let script = repo.dir.join(".git/hooks").join(hook);
         repo.write(
@@ -1418,11 +1458,13 @@ fn hooks_do_not_run() {
             .expect("make the hook executable");
         markers.push(marker);
     }
-    let out = repo.qgate(&["--base", "main", "--worktree"]);
-    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_saw_every_change(&repo.qgate(&["--base", "main", "--worktree"]));
     for marker in &markers {
         assert!(!marker.exists(), "{} exists", marker.display());
     }
+    // The hooks work: a plain `git add` runs post-index-change.
+    repo.git(&["add", "-A"]);
+    assert!(markers[2].exists(), "the hook never runs");
 }
 
 // revision-input: Working tree errors

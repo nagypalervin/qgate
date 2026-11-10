@@ -85,7 +85,8 @@ a commit of all your changes would contain:
 - **Tracked files as they are on disk**, staged or not; a file deleted
   from disk counts as deleted, and a file moved with a plain `mv` is
   still a rename.
-- **Untracked files**, unless `.gitignore` excludes them.
+- **Untracked files**, unless git ignores them (`.gitignore`,
+  `.git/info/exclude` or `core.excludesFile`).
 - **`qgate.toml` as it is on disk.**
 - Files marked `skip-worktree` or `assume-unchanged` count as unchanged,
   as git sees them.
@@ -100,10 +101,17 @@ qgate check --base HEAD --worktree
 
 **Nothing in the repository changes:** the index (what you staged),
 `HEAD`, branches, the stash and your files stay as they are, and no git
-hook runs. qgate writes a snapshot of the working tree into git's object
-store as objects that no branch refers to; `git gc` removes them later.
-That snapshot includes every untracked file that is not ignored, so list
-large generated files (build output, bundles) in `.gitignore`.
+hook runs (a configured file-system monitor, `core.fsmonitor`, may still
+be asked what changed). qgate writes a snapshot of the working tree into
+git's object store as objects that no branch refers to; `git gc` prunes
+them once they are old enough (two weeks by default). Under a clean
+filter such as Git LFS, the filter stores its copy as usual. That
+snapshot includes every untracked file that is not ignored, so list large
+generated files (build output, bundles) in `.gitignore`.
+
+A check that is killed midway (by a timeout, say) can leave a copy of
+the index named `qgate-index-*` in the git directory; the next
+`--worktree` check removes copies more than a day old.
 
 ### Duplicated code
 
