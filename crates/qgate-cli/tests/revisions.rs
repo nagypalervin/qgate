@@ -8,7 +8,8 @@ mod support;
 use std::process::{Command, Output};
 
 use support::{
-    Repo, feature_repo, function, isolate, padding, qgate_in, scratch_dir, stderr, stdout,
+    DATE_HELPER, RENAMED_COPY, Repo, feature_repo, function, isolate, padding, qgate_in,
+    scratch_dir, stderr, stdout,
 };
 
 const F_INCREASE: &str =
@@ -850,25 +851,6 @@ fn renamed_from_another_unsupported_extension_is_added() {
 }
 
 // duplication-analysis, end to end
-
-const DATE_HELPER: &str = "export function formatDate(d: Date): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, \"0\");
-  const day = String(d.getDate()).padStart(2, \"0\");
-  return `${year}-${month}-${day}`;
-}
-";
-
-const RENAMED_COPY: &str = "// Orders, with a copy of the date helper under other names.
-import { Order } from \"./order\";
-
-export function formatOrderDate(when: Date): string {
-  const y = when.getFullYear();
-  const m = String(when.getMonth() + 1).padStart(2, \"0\");
-  const dd = String(when.getDate()).padStart(2, \"0\");
-  return `${y}/${m}/${dd}`;
-}
-";
 
 const COPY_FINDING: &str = "warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 \
                             (lines 4-9, 68 tokens)  [duplication/duplicate-block]\n";

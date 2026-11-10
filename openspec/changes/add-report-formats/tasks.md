@@ -48,13 +48,13 @@ Commit messages and PR bodies are written to files first.
   - the schema uses only the supported keywords.
 
   Add `serde_json` as a dev-dependency of `qgate-cli`. Verify that the helper tests pass.
-- [ ] 2.4 Write failing end-to-end tests, one per scenario:
+- [x] 2.4 Write failing end-to-end tests, one per scenario:
   - `report-formats`: Default is text, JSON in every form, One finding, No findings, New function, Finding without a line, Duplicate block, Characters JSON must escape, Complexity values, Several files, Failing run, Never failing, Unknown base revision, Summary line on standard error, Reports match the published schema, Path from the two-file form;
   - `check-command`: Unknown format;
   - `duplication-analysis`: Range and related locations.
 
   Each one builds a temporary repository as the existing tests do. Verify that they fail.
-- [ ] 2.5 Add `--format` to `qgate-cli` (design D6): the value enum, the help text, `[--format <format>]` in every usage line, and the summary passed to `render_json`. Verify that the 2.4 tests pass and every existing test passes unchanged.
+- [x] 2.5 Add `--format` to `qgate-cli` (design D6): the value enum, the help text, `[--format <format>]` in every usage line, and the summary passed to `render_json`. Verify that the 2.4 tests pass and every existing test passes unchanged.
 - [ ] 2.6 Check that the tests bite. Break each of these, one at a time, and confirm that a test fails for each:
   - integer output (always write floats);
   - leaving out empty fields (write `null`);

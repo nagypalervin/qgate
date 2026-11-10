@@ -248,6 +248,17 @@ mechanical, and the compiler finds them all.
     they moved from `revisions.rs` to `tests/support/mod.rs`, unchanged
     except for `pub`. The schema helper is `tests/support/schema.rs`,
     and its own tests are `tests/schema.rs`.
+- **PR 2: `--format` and the end-to-end tests (tasks 2.4, 2.5).**
+  - The CLI's `Format::render` picks the renderer and fills in
+    `ReportSummary` from `FailOn`, so `main` stays one call.
+  - The JSON scenarios are in `tests/json.rs`; "Unknown format" is in
+    `tests/check.rs`, next to "Unknown fail-on level".
+  - "Range and related locations" uses a seven-line helper, so the new
+    copy spans lines 12-18 and the existing ones start where the
+    duplication spec's scenarios put them. The duplicate block fixtures
+    of `revisions.rs` moved to `tests/support/` with the other helpers.
+  - The usage lines name `[--format <format>]` before `[--fail-on
+    <level>]`, in every form, and the help test checks all three.
 
 ## Risks / Trade-offs
 

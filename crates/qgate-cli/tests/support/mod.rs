@@ -168,3 +168,24 @@ pub fn feature_repo() -> Repo {
     repo.git(&["checkout", "-q", "main"]);
     repo
 }
+
+/// A 68-token helper, lines 1-6.
+pub const DATE_HELPER: &str = "export function formatDate(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, \"0\");
+  const day = String(d.getDate()).padStart(2, \"0\");
+  return `${year}-${month}-${day}`;
+}
+";
+
+/// `DATE_HELPER` under other names, at lines 4-9.
+pub const RENAMED_COPY: &str = "// Orders, with a copy of the date helper under other names.
+import { Order } from \"./order\";
+
+export function formatOrderDate(when: Date): string {
+  const y = when.getFullYear();
+  const m = String(when.getMonth() + 1).padStart(2, \"0\");
+  const dd = String(when.getDate()).padStart(2, \"0\");
+  return `${y}/${m}/${dd}`;
+}
+";
