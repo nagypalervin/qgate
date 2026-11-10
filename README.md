@@ -312,12 +312,20 @@ The job fails when the pull request adds an Error finding. Use
 without failing the job.
 
 For a later step or another tool, write the report as JSON to a file
-instead; the exit code is the same:
+instead. The exit code is the same, so the step still fails the job, and
+GitHub Actions then skips the later steps: give the ones that read the
+report `if: ${{ !cancelled() }}`, or they run only when there is nothing
+to report.
 
 ```yaml
 - run: qgate check --base "origin/$BASE_REF" --format json > qgate-report.json
   env:
     BASE_REF: ${{ github.base_ref }}
+- uses: actions/upload-artifact@v4
+  if: ${{ !cancelled() }}
+  with:
+    name: qgate-report
+    path: qgate-report.json
 ```
 
 qgate has no release binaries yet (planned for M4); until then, install

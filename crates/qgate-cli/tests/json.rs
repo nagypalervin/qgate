@@ -256,14 +256,18 @@ fn complexity_values() {
 
 #[test]
 fn several_files() {
-    let b = format!("{}{}", padding(4), function("g", 3));
-    let a = format!("{}{}", padding(39), function("f", 3));
+    // A copy in a.ts and a complexity increase in b.ts: duplication
+    // findings come after every file's own findings, so only sorting puts
+    // a.ts first.
     let repo = change(
         &[
-            ("src/a.ts", &format!("{}{}", padding(39), function("f", 1))),
+            ("src/utils/date.ts", DATE_HELPER),
             ("src/b.ts", &format!("{}{}", padding(4), function("g", 1))),
         ],
-        &[("src/b.ts", &b), ("src/a.ts", &a)],
+        &[
+            ("src/a.ts", &format!("{}{RENAMED_COPY}", padding(36))),
+            ("src/b.ts", &format!("{}{}", padding(4), function("g", 3))),
+        ],
     );
     let out = repo.qgate(&["--base", "main", "--format", "json"]);
     let report = report(&out);

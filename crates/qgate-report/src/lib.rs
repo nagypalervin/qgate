@@ -98,30 +98,33 @@ impl<'a> From<&'a Finding> for JsonFinding<'a> {
             message: &f.message,
             path: path_text(&f.location),
             line: f.location.line,
-            end_line: f.location.end_line,
+            // A range needs its start.
+            end_line: f.location.line.and(f.location.end_line),
             metric: f.metric.as_ref().and_then(JsonMetric::new),
-            related: f.related.iter().map(JsonLocation::from).collect(),
+            related: f.related.iter().filter_map(JsonLocation::new).collect(),
         }
     }
 }
 
-/// A related location.
+/// A related location. It always has a line, as the schema requires.
 #[derive(Serialize)]
 struct JsonLocation {
     path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    line: Option<u32>,
+    line: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     end_line: Option<u32>,
 }
 
-impl From<&Location> for JsonLocation {
-    fn from(location: &Location) -> Self {
-        Self {
+impl JsonLocation {
+    /// The location as JSON, or `None` if it has no line. The core type
+    /// promises one; leaving out a location that breaks that promise keeps
+    /// the report valid against the published schema.
+    fn new(location: &Location) -> Option<Self> {
+        Some(Self {
             path: path_text(location),
-            line: location.line,
+            line: location.line?,
             end_line: location.end_line,
-        }
+        })
     }
 }
 
@@ -344,6 +347,27 @@ mod tests {
         assert!(
             only(&render_json(&[f], DEFAULT))
                 .ends_with(",\"related\":[{\"path\":\"b.ts\",\"line\":3}]}")
+        );
+    }
+
+    #[test]
+    fn json_related_location_without_a_line_is_left_out() {
+        let mut f = finding("r/x", "m", at("a.ts", Some(1), None), None);
+        f.related = vec![at("b.ts", None, Some(4)), at("c.ts", Some(2), None)];
+        assert!(
+            only(&render_json(&[f.clone()], DEFAULT))
+                .ends_with(",\"related\":[{\"path\":\"c.ts\",\"line\":2}]}")
+        );
+        f.related.truncate(1);
+        assert!(!render_json(&[f], DEFAULT).contains("related"));
+    }
+
+    #[test]
+    fn json_end_line_without_a_line_is_left_out() {
+        let f = finding("r/x", "m", at("a.ts", None, Some(4)), None);
+        assert_eq!(
+            only(&render_json(&[f], DEFAULT)),
+            "{\"rule\":\"r/x\",\"severity\":\"warning\",\"message\":\"m\",\"path\":\"a.ts\"}"
         );
     }
 

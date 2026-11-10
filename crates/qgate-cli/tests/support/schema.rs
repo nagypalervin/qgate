@@ -1,7 +1,8 @@
 //! A JSON Schema validator for `docs/schema/report-v1.json`, just large
 //! enough for that schema (design D8 of `add-report-formats`). It knows the
-//! keywords in [`ASSERTIONS`]; `keywords_outside` finds any other one, so a
-//! test fails before this validator skips a rule silently.
+//! keywords in [`ASSERTIONS`] with the value shapes the schema uses;
+//! `unsupported` finds any other keyword or shape, so a test fails before
+//! this validator skips a rule silently.
 //!
 //! Stricter than JSON Schema in one way: `integer` means a JSON number
 //! written without a fraction or exponent, because qgate promises that.
@@ -18,7 +19,7 @@ pub const ASSERTIONS: &[&str] = &[
     "const",
     "minimum",
     "minItems",
-    "minProperties",
+    "anyOf",
     "$ref",
 ];
 
@@ -106,13 +107,17 @@ fn check(root: &Value, schema: &Value, instance: &Value, at: &str, errors: &mut 
             fail(format!("fewer than {min} items"));
         }
     }
-    let object = instance.as_object();
-    if let (Some(min), Some(object)) = (schema.get("minProperties").and_then(Value::as_u64), object)
-    {
-        if (object.len() as u64) < min {
-            fail(format!("fewer than {min} properties"));
+    if let Some(branches) = schema.get("anyOf").and_then(Value::as_array) {
+        let matches = |branch: &Value| {
+            let mut branch_errors = Vec::new();
+            check(root, branch, instance, at, &mut branch_errors);
+            branch_errors.is_empty()
+        };
+        if !branches.iter().any(matches) {
+            fail(format!("{instance} matches none of anyOf"));
         }
     }
+    let object = instance.as_object();
     if let (Some(required), Some(object)) =
         (schema.get("required").and_then(Value::as_array), object)
     {
@@ -139,32 +144,63 @@ fn check(root: &Value, schema: &Value, instance: &Value, at: &str, errors: &mut 
 }
 
 /// Every keyword in `schema` that is neither in [`ASSERTIONS`] nor in
-/// [`ANNOTATIONS`], with where it is.
-pub fn keywords_outside(schema: &Value) -> Vec<String> {
+/// [`ANNOTATIONS`], and every value of a shape `check` does not read, with
+/// where it is.
+pub fn unsupported(schema: &Value) -> Vec<String> {
     let mut found = Vec::new();
-    walk(schema, "$", &mut found);
+    walk(schema, schema, "$", &mut found);
     found
 }
 
-fn walk(schema: &Value, at: &str, found: &mut Vec<String>) {
+fn walk(root: &Value, schema: &Value, at: &str, found: &mut Vec<String>) {
     let Some(schema) = schema.as_object() else {
         found.push(format!("{at}: not an object"));
         return;
     };
     for (key, value) in schema {
-        if !ASSERTIONS.contains(&key.as_str()) && !ANNOTATIONS.contains(&key.as_str()) {
-            found.push(format!("{at}.{key}"));
-        }
-        match key.as_str() {
-            // Maps of subschemas.
-            "properties" | "$defs" => {
-                for (name, sub) in value.as_object().into_iter().flatten() {
-                    walk(sub, &format!("{at}.{key}.{name}"), found);
+        let here = format!("{at}.{key}");
+        let shape_ok = match key.as_str() {
+            "type" => value.as_str().is_some_and(|t| {
+                [
+                    "object", "array", "string", "number", "integer", "boolean", "null",
+                ]
+                .contains(&t)
+            }),
+            "properties" | "$defs" => value.as_object().is_some_and(|subs| {
+                for (name, sub) in subs {
+                    walk(root, sub, &format!("{here}.{name}"), found);
                 }
+                true
+            }),
+            "items" => {
+                walk(root, value, &here, found);
+                true
             }
-            "items" => walk(value, &format!("{at}.items"), found),
-            // Values, not schemas.
-            _ => {}
+            "anyOf" => value.as_array().is_some_and(|branches| {
+                for (i, branch) in branches.iter().enumerate() {
+                    walk(root, branch, &format!("{here}[{i}]"), found);
+                }
+                !branches.is_empty()
+            }),
+            "required" => value
+                .as_array()
+                .is_some_and(|keys| keys.iter().all(Value::is_string)),
+            "enum" => value.is_array(),
+            "minimum" => value.is_number(),
+            "minItems" => value.is_u64(),
+            "$ref" => value
+                .as_str()
+                .and_then(|target| target.strip_prefix("#/$defs/"))
+                .is_some_and(|name| root.get("$defs").and_then(|d| d.get(name)).is_some()),
+            "$schema" | "$id" | "title" | "description" => value.is_string(),
+            "const" => true,
+            _ => {
+                found.push(here);
+                continue;
+            }
+        };
+        if !shape_ok {
+            found.push(format!("{here}: unsupported value {value}"));
         }
     }
 }

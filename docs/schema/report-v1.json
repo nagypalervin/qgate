@@ -68,7 +68,7 @@
     "metric": {
       "description": "The measured value before and after the change. `before` is absent for a new item, `after` for a removed one.",
       "type": "object",
-      "minProperties": 1,
+      "anyOf": [{ "required": ["before"] }, { "required": ["after"] }],
       "properties": {
         "before": { "type": "number" },
         "after": { "type": "number" }

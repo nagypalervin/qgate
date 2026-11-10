@@ -5,7 +5,7 @@
 mod support;
 
 use serde_json::{Value, json};
-use support::schema::{keywords_outside, report_v1, validate};
+use support::schema::{report_v1, unsupported, validate};
 
 /// A report with every key the schema knows.
 fn full_report() -> Value {
@@ -58,21 +58,47 @@ fn assert_rejected(edit: impl FnOnce(&mut Value)) {
 
 #[test]
 fn the_schema_uses_only_supported_keywords() {
-    assert_eq!(keywords_outside(&report_v1()), Vec::<String>::new());
+    assert_eq!(unsupported(&report_v1()), Vec::<String>::new());
 }
 
 #[test]
-fn the_keyword_guard_finds_an_unsupported_keyword() {
+fn the_guard_finds_an_unsupported_keyword() {
     let mut schema = report_v1();
     schema["$defs"]["line"]["maximum"] = json!(10);
     schema["properties"]["findings"]["items"]["pattern"] = json!("x");
+    schema["$defs"]["metric"]["anyOf"][1]["minProperties"] = json!(1);
     assert_eq!(
-        keywords_outside(&schema),
+        unsupported(&schema),
         [
             "$.$defs.line.maximum",
-            "$.properties.findings.items.pattern"
+            "$.$defs.metric.anyOf[1].minProperties",
+            "$.properties.findings.items.pattern",
         ]
     );
+}
+
+#[test]
+fn the_guard_finds_a_value_shape_the_helper_does_not_read() {
+    for (pointer, value) in [
+        ("/$defs/line/type", json!(["integer"])),
+        ("/$defs/line/type", json!("int")),
+        ("/$defs/line/minimum", json!("1")),
+        ("/$defs/location/required", json!([1])),
+        ("/$defs/finding/properties/severity/enum", json!("error")),
+        ("/$defs/finding/properties/related/minItems", json!(-1)),
+        ("/$defs/finding/properties/line/$ref", json!("#/$defs/nope")),
+        (
+            "/properties/summary/$ref",
+            json!({"$ref": "#/$defs/summary"}),
+        ),
+        ("/$defs/metric/anyOf", json!([])),
+    ] {
+        let mut schema = report_v1();
+        *schema.pointer_mut(pointer).expect(pointer) = value.clone();
+        let found = unsupported(&schema);
+        assert_eq!(found.len(), 1, "{pointer} = {value}: {found:?}");
+        assert!(found[0].contains("unsupported value"), "{found:?}");
+    }
 }
 
 #[test]
@@ -83,6 +109,15 @@ fn a_valid_report_is_accepted() {
         "findings": [],
         "summary": {"count": 0, "failing": 0, "fail_on": "never"}
     }));
+}
+
+#[test]
+fn a_metric_with_one_value_is_accepted() {
+    for metric in [json!({"before": 3}), json!({"after": 12})] {
+        let mut report = full_report();
+        report["findings"][0]["metric"] = metric;
+        assert_valid(&report);
+    }
 }
 
 #[test]
@@ -158,5 +193,6 @@ fn what_version_1_rules_out_is_rejected() {
     assert_rejected(|r| r["findings"][0]["severity"] = json!("critical"));
     assert_rejected(|r| r["findings"][0]["line"] = json!(0));
     assert_rejected(|r| r["findings"][0]["metric"] = json!({}));
+    assert_rejected(|r| r["findings"][0]["metric"] = json!({"unit": "x"}));
     assert_rejected(|r| r["findings"][1]["related"] = json!([]));
 }

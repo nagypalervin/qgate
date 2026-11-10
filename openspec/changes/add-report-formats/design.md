@@ -234,9 +234,9 @@ mechanical, and the compiler finds them all.
     every caller would have to handle.
 - **PR 2: the schema and its test helper (task 2.3).**
   - The schema also uses `minItems` (a `related` array is never empty)
-    and `minProperties` (a `metric` always has a value), because the
-    spec promises both. The helper supports these two keywords as well,
-    ten in all.
+    and `anyOf` (a `metric` has `before` or `after`), because the spec
+    promises both. The helper supports these two keywords as well, ten
+    in all (`anyOf` replaced `minProperties` in review, see below).
   - The helper treats `integer` more strictly than JSON Schema: `1.0`
     is not an integer there, because qgate promises integers without a
     fraction. A standard validator accepts more, never less.
@@ -271,6 +271,26 @@ mechanical, and the compiler finds them all.
   code as text, also when failing), an unknown base (empty standard
   output, exit 2) and `--format text` against the default. The roadmap
   marks M3 as in progress.
+- **Review round 1 of PR 2:** no blockers. Fixed:
+  - **README, "In CI":** a failing step skips the later ones in GitHub
+    Actions, so the example now gives the step that reads the report
+    `if: ${{ !cancelled() }}`.
+  - **The schema helper's guard checks value shapes too,** not only
+    keyword names: a `type` array, a `$ref` to a missing definition or a
+    non-numeric `minimum` would otherwise have been skipped silently.
+    `keywords_outside` became `unsupported`.
+  - **`metric` in the schema is exact:** `anyOf` with `required`
+    (`before` or `after`) replaces `minProperties`, which an unknown key
+    alone would have satisfied. The helper supports `anyOf` instead of
+    `minProperties`, still ten keywords; Python `jsonschema` agrees.
+  - **The renderer enforces what the schema requires:** a related
+    location without a line is left out (`JsonLocation::line` is a
+    `u32`), and an `end_line` is written only with a `line`. Analyzers
+    never produce either today.
+  - **"Several files" now needs the sort:** the finding in `src/a.ts` is
+    a duplicate block, which is collected after every file's own
+    findings, so without sorting `src/b.ts` would come first. Checked by
+    removing the sort.
 
 ## Risks / Trade-offs
 
