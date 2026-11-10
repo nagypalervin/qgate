@@ -86,6 +86,15 @@ The failing test raced the clock. The new tests set the times themselves:
   Deleting the call to the comparison is not caught. A real refusal cannot be provoked on the CI file system, so no test reaches that path.
 - **Split index.** The racy edit is also caught with `core.splitIndex=true`, and the test fails when the copy is dated now. Git compares the entries with the time of the main index file, which the copy keeps.
 
+- **Verification (task 3.1).**
+  - **The hand reproduction from the proposal,** with the new release build: a +7 increase in a file that kept its size, dated exactly as its index entry and the index.
+    - `qgate check --base HEAD --worktree` reports it, and the hook blocks. That holds 7 seconds after the setup, when the old build reported `No regressions found.` in the same setup.
+    - No private index is left behind.
+  - **The loop proves nothing on this machine.** `snapshot_in_a_linked_worktree` passed 300 times out of 300 with the fix. It also passed 300 out of 300 with the old code from `main`, built in a temporary work tree.
+    - The CI runner's timing does not occur on this development machine (Linux 7.0, ARM64 VM).
+    - The evidence is the deterministic tests instead: both fail on the old code and pass on the new.
+    - `snapshot_sees_a_racily_clean_edit` also passed 300 times out of 300.
+
 ## Risks / Trade-offs
 
 - **[Split index]** With `core.splitIndex`, entries can live in a `sharedindex.*` file, which has its own time.

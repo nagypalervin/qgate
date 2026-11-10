@@ -35,7 +35,7 @@ first.
 
 ## 3. Verification
 
-- [ ] 3.1 Run the hand reproduction from the proposal against the new release build: `qgate check --base HEAD --worktree` reports the +7 increase, and the hook blocks. Also run `snapshot_in_a_linked_worktree` 300 times in a loop and confirm that it does not fail. Record both results in `design.md`.
+- [x] 3.1 Run the hand reproduction from the proposal against the new release build: `qgate check --base HEAD --worktree` reports the +7 increase, and the hook blocks. Also run `snapshot_in_a_linked_worktree` 300 times in a loop and confirm that it does not fail. Record both results in `design.md`.
 
 ## Workflow follow-up
 
