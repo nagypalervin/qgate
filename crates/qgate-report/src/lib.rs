@@ -44,8 +44,10 @@ mod tests {
             location: Location {
                 path: "src/orders.ts".into(),
                 line: Some(42),
+                end_line: None,
             },
             metric: None,
+            related: Vec::new(),
         };
         assert_eq!(
             render_text(&[f]),

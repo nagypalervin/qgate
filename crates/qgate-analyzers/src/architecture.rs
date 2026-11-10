@@ -163,8 +163,10 @@ impl Analyzer for ArchitectureAnalyzer {
                     location: Location {
                         path: change.path.clone(),
                         line: Some(line),
+                        end_line: None,
                     },
                     metric: None,
+                    related: Vec::new(),
                 }
             })
             .collect()
