@@ -204,6 +204,18 @@ the required behaviour.
   - committed work is not checked again, but `--base main` sees it;
   - `--fail-on never` and `--fail-on warning` behave as documented;
   - an invalid `qgate.toml` goes to the user.
+- **Measurement (task 3.2), within the budget of D6.** In a generated
+  repository of 2,000 TypeScript files (about 100,000 lines, varied
+  structure), with the release build on this development machine (an
+  ARM64 Linux VM with 4 cores):
+  - **a turn with no change:** 0.01 s. The whole snapshot runs (an
+    `strace` showed `add -A`, `write-tree`, `commit-tree`, `diff` and
+    `ls-tree`); git is that fast on a clean index;
+  - **a turn with one changed file:** 0.60 s, almost all of it the
+    duplication index over the other 1,999 files;
+  - **a turn with one new file** (a copy of another): 0.60 s.
+
+  No shortcut is needed.
 
 ## Risks / Trade-offs
 

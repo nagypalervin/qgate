@@ -51,7 +51,7 @@ first.
   - a link to the Claude Code hook documentation.
 
   Run every README command in a temporary repository and verify that it behaves as documented.
-- [ ] 3.2 Measure the hook in a generated repository of about 2,000 TypeScript files: a turn with no change, and a turn with one changed file (design D6). Record the times in `design.md`. If the no-change turn takes more than 2 seconds, stop and revisit the design before going on.
+- [x] 3.2 Measure the hook in a generated repository of about 2,000 TypeScript files: a turn with no change, and a turn with one changed file (design D6). Record the times in `design.md`. If the no-change turn takes more than 2 seconds, stop and revisit the design before going on.
 - [ ] 3.3 With the human's agreement, because it runs a real Claude Code session, check the hook by hand in a temporary repository with the README's settings entry:
   - a regression that blocks the stop, and the model's fix;
   - a Warning shown to the user;
