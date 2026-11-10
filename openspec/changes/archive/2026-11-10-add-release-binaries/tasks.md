@@ -61,7 +61,7 @@ This change spans three pull requests (design D6).
 
 ## 3. First release and archive (after PR 2 merges)
 
-- [ ] 3.1 Ask Ervin to push the tag `v0.1.0`. When the release workflow finishes, check the draft release `qgate 0.1.0`:
+- [x] 3.1 Ask Ervin to push the tag `v0.1.0`. When the release workflow finishes, check the draft release `qgate 0.1.0`:
   - six archives and `SHA256SUMS`;
   - `sha256sum --check` on downloaded assets;
   - the Linux arm64 binary prints `qgate 0.1.0`;
