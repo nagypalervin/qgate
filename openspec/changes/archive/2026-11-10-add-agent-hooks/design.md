@@ -242,6 +242,8 @@ the required behaviour.
   - **A deliberate block is labelled as an error.** Claude Code also
     raised a "Stop hook error occurred" notification, even though qgate
     exited with 0 and Claude Code recorded the outcome as a success.
+    The README says that this label is the block, in words that do not
+    depend on the exact text.
   - **Notices are prefixed.** Every line of a `systemMessage` was shown
     with a "Stop says: " prefix.
 

@@ -147,7 +147,8 @@ committed yet, as `qgate check --base HEAD --worktree` would:
 
 - **A finding at or above `--fail-on`** (an Error, by default) sends the
   agent back once, with the findings and the request to fix them or to
-  tell you why a change is intended.
+  tell you why a change is intended. Claude Code may show this as a
+  "Stop hook error"; it is the block, not a failure of qgate.
 - **One round only.** Whatever remains after that round is shown to you,
   and the agent may stop: you decide.
 - **Findings below the level** (Warnings, by default) are shown to you,
