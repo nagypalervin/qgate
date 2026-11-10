@@ -394,6 +394,45 @@ Decisions and results recorded during apply.
     `Select-String -SimpleMatch` to find the archive's line, and
     PowerShell's case-insensitive `-ne` to compare.
 
+- **The release rehearsal on PR 2 (#11), task 2.5, 2026-11-10.** The
+  `Release` run 42889564523 passed every job on its first run, and
+  `publish` was skipped as intended.
+
+  | Job | Duration |
+  |---|---|
+  | `version` | 6 s |
+  | `build`, Linux x64 musl | 58 s |
+  | `build`, Linux arm64 musl | 1 min 11 s |
+  | `build`, macOS arm64 | 2 min 11 s |
+  | `build`, macOS x64 | 4 min 10 s |
+  | `build`, Windows x64 | 3 min 17 s |
+  | `build`, Windows arm64 | 4 min 30 s |
+  | `checksums` | 5 s |
+
+  The agent downloaded the seven artifacts and checked them:
+  - **Archive names:** the six follow `qgate-0.1.0-<target>.tar.gz` /
+    `.zip`, at 1.5 to 1.8 MB each.
+  - **Layout:** each archive holds exactly
+    `qgate-0.1.0-<target>/` with the binary (`qgate.exe` on Windows),
+    `README.md`, `LICENSE-MIT` and `LICENSE-APACHE`. The Unix binaries
+    are executable.
+  - **`SHA256SUMS`:** a copy computed locally the way the job does was
+    byte-identical, and `sha256sum --check` reported all six `OK`.
+  - **The `aarch64-unknown-linux-musl` binary here:**
+    - `file` reported it as statically linked and stripped (5.8 MB);
+    - `--version` printed `qgate 0.1.0`;
+    - `check --base HEAD --worktree` found the complexity increase in
+      a scratch repository.
+  - **From the job logs:**
+    - every target printed `qgate 0.1.0`;
+    - `file` reported x64 musl as `static-pie linked` and arm64 musl
+      as `statically linked`, and the check accepted both;
+    - both Windows binaries import only `KERNEL32.dll`, `ntdll.dll`,
+      `bcryptprimitives.dll` and `api-ms-win-core-synch-l1-2-0.dll`, so
+      no `VCRUNTIME`;
+    - `version` accepted `v0.1.0` and rejected `v0.1.0.1` with a message
+      naming both versions.
+
 ## Risks / Trade-offs
 
 - **[GitHub retires `macos-15-intel`, the last x64 macOS image]** →

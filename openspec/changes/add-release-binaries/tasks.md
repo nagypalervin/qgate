@@ -50,7 +50,7 @@ This change spans three pull requests (design D6).
   - building from source stays as the second way;
   - a note on unsigned binaries: `xattr` on macOS, `Unblock-File` on Windows;
   - the roadmap's M4 row becomes "in progress".
-- [ ] 2.5 Open PR 2 and rehearse the release (design D6). Download the six archives from the workflow run and verify:
+- [x] 2.5 Open PR 2 and rehearse the release (design D6). Download the six archives from the workflow run and verify:
   - the names and directory layout of the archives;
   - a `SHA256SUMS` built as `publish` would, which passes `sha256sum --check`;
   - that the `aarch64-unknown-linux-musl` binary runs here, prints `qgate 0.1.0`, and `file` reports it as statically linked;
