@@ -216,11 +216,30 @@ Describe 'Sync-QgateComment' {
 
 Describe 'Get-AzureErrorMessage' {
     It 'names the permission and the identity for TF401027' {
-        $body = '{"message":"TF401027: You need the Git ''PullRequestContribute'' permission to perform this action. Details: identity ''Build\\abc'', scope ''repository''."}'
+        # The shape Azure DevOps answered with in task 1.8: indented JSON,
+        # the backslash escaped, and every ' escaped as a JSON unicode
+        # escape (backslash, u0027), built here so no editor folds it back.
+        $quote = [char] 92 + 'u0027'
+        $body = @'
+{
+  "$id": "1",
+  "innerException": null,
+  "message": "TF401027: You need the Git QPullRequestContributeQ permission to perform this action. Details: identity QBuild\\0000-project-idQ, scope QrepositoryQ.",
+  "typeKey": "GitNeedsPermissionException",
+  "errorCode": 0
+}
+'@ -creplace 'Q', $quote
         $message = Get-AzureErrorMessage -Method 'POST' -Uri 'https://x/threads' -StatusCode 403 -Body $body
         $message | Should -BeLike "*'Contribute to pull requests'*"
         $message | Should -BeLike '*Build Service*'
-        $message | Should -BeLike '*Build\abc*'
+        $message | Should -BeLike '*(Build\0000-project-id)*'
+    }
+
+    It 'reports the message of a JSON answer, not the whole document' {
+        $body = '{"$id":"1","message":"TF400898: An internal error occurred.","typeKey":"X"}'
+        $message = Get-AzureErrorMessage -Method 'GET' -Uri 'https://x/threads' -StatusCode 500 -Body $body
+        $message | Should -BeLike '*: TF400898: An internal error occurred.'
+        $message | Should -Not -BeLike '*typeKey*'
     }
 
     It 'says the token was not passed or has expired for 401' {

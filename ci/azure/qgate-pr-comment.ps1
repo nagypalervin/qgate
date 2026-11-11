@@ -107,8 +107,18 @@ function Get-AzureErrorMessage {
         [string] $Body
     )
 
+    # Azure DevOps answers with a JSON document; its message is the readable
+    # part, and only decoding it turns the escaped quotes back into quotes.
+    try {
+        $document = $Body | ConvertFrom-Json -ErrorAction Stop
+        $message = $document.PSObject.Properties['message']
+        if ($null -ne $message -and $message.Value -is [string]) { $Body = $message.Value }
+    } catch {
+        Write-Debug "qgate: the answer is not JSON: $_"
+    }
+
     if ($StatusCode -eq 403 -and $Body -match 'TF401027') {
-        $identity = if ($Body -match "identity '([^']+)'") { " ($($Matches[1] -replace '\\\\', '\'))" } else { '' }
+        $identity = if ($Body -match "identity '([^']+)'") { " ($($Matches[1]))" } else { '' }
         return "qgate: the build identity$identity may not comment on pull requests. " +
         "Give the project's Build Service the 'Contribute to pull requests' permission on this repository " +
         "(Project settings > Repositories > <repository> > Security)."
@@ -216,5 +226,6 @@ if ($MyInvocation.InvocationName -ne '.') {
         'closed' { 'updated and closed the qgate comment' }
         'none' { 'no findings and no qgate comment; nothing to write' }
     }
-    Write-Host "qgate: $what ($($parsed.Count) findings, $($parsed.Failing) at or above $($parsed.FailOn))"
+    $noun = if ($parsed.Count -eq 1) { 'finding' } else { 'findings' }
+    Write-Host "qgate: $what ($($parsed.Count) $noun, $($parsed.Failing) at or above $($parsed.FailOn))"
 }

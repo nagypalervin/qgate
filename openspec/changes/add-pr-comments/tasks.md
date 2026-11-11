@@ -47,12 +47,12 @@ D10).
   - locally (1.4);
   - in CI (1.6).
 - [ ] 1.6 Add the `pester (<os>)` job to `.github/workflows/ci.yml` for `ubuntu-latest` and `windows-latest`. Open PR 1 and verify that both pass. With Ervin's approval, make both checks required in the "Protect main" ruleset and verify the ruleset with `gh api`.
-- [ ] 1.7 Release packaging and version (design D6):
+- [x] 1.7 Release packaging and version (design D6):
   - `release.yml` packs the script and triggers on `ci/azure/**`;
   - the version becomes `0.2.0`, with `Cargo.lock` following.
 
   Verify from the PR's release rehearsal that all six archives contain `qgate-pr-comment.ps1`, and that the rehearsal's Linux arm64 binary prints `qgate 0.2.0` and renders `--format markdown`.
-- [ ] 1.8 Run the script against the real API (design D5). Push the PR's script and hand-written reports to a rehearsal branch, then run it in the rehearsal pipeline on both agents:
+- [x] 1.8 Run the script against the real API (design D5). Push the PR's script and hand-written reports to a rehearsal branch, then run it in the rehearsal pipeline on both agents:
   - create (findings, no thread);
   - update and reactivate;
   - close (no findings);

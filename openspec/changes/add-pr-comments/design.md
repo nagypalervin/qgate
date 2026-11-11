@@ -355,3 +355,66 @@ crate, so the dependency rules and ADRs are unaffected.
   could ship either major version, and Pester 6 may change semantics.
   The CI job installs exactly 5.9.1. The tests require it with
   `#Requires`, and the local runs use the same version.
+- **The Markdown step uses the gate's level, not `--fail-on never`
+  (changes D7, found while preparing task 1.8).** With `--fail-on
+  never`, every comment would say "none at or above `never`" instead of
+  naming the level that gates the pull request. Step 2 of the README
+  job therefore:
+  - runs `qgate check --format markdown` with the same `--fail-on` as
+    the gate (by default, none);
+  - accepts exit code 1, which means findings;
+  - still fails on 2, when the check could not run.
+
+  In bash that is `|| [ $? -eq 1 ]`; in PowerShell, a check of
+  `$LASTEXITCODE`. The spec is unchanged: `--fail-on never` still works
+  as specified, and is simply not what the README job uses.
+
+- **Error answers are read as JSON (found in task 1.8).** Azure DevOps
+  answers a failed call with a JSON document. Its `message` escapes every
+  `'` as a JSON unicode escape, so the TF401027 pattern found the
+  permission but not the identity. The script now decodes the body and
+  works with its `message`; a body that is not JSON is used as it is.
+  This also keeps other errors to the readable sentence instead of the
+  whole document. The Pester test uses the answer's real shape.
+
+## Verification on PR 1
+
+- **CI (task 1.6).** Every check passed on commit `9997745`, including
+  `pester (ubuntu-latest)` and `pester (windows-latest)`.
+  `Install-Module Pester -RequiredVersion 5.9.1` worked on both runners.
+- **The release rehearsal (task 1.7),** run 43013632502:
+  - all six archives hold `qgate-pr-comment.ps1`, and the Linux arm64
+    archive also holds `qgate`, `README.md` and the two licenses;
+  - the packed script is byte-identical to the committed one;
+  - the Linux arm64 binary prints `qgate 0.2.0` and renders
+    `--format markdown` (marker `count=1 failing=1 fail_on=error`) and
+    `--format azure`.
+- **The script against the real API (task 1.8),** in the rehearsal
+  project. Pull request 1350 ran on `ubuntu-latest` (build 1312) and
+  pull request 1351 on `windows-latest` (build 1311). Each build ran
+  the committed script five times against qgate-generated reports and
+  read the threads back after every run:
+
+  | Step | Report | Script said | Threads afterwards (both agents) |
+  |---|---|---|---|
+  | 1 | clean, no thread | nothing to write | 0 |
+  | 2 | 1 finding, `error` | created | 1, active |
+  | 3 | 1 finding, `warning` | updated | the same thread, active, new text |
+  | 4 | clean | updated and closed | the same thread, closed, "No regressions found." |
+  | 5 | 1 finding, `error` | updated | the same thread, active again |
+
+  The thread ids were 4531 on Linux and 4530 on Windows.
+
+  **Without the permission** (Ervin removed the Build Service's
+  "Contribute to pull requests" permission), pull request 1350, `ubuntu-latest`,
+  thread 4531 active with one finding:
+  - build 1313, the script as committed in `9997745`: the step failed
+    and named the permission and the Build Service, but not the
+    identity (see the decision above);
+  - build 1314 printed the raw answer: 403 with TF401027 in a JSON
+    `message`;
+  - build 1315, the fixed script: the step failed with "the build
+    identity (`Build\<project id>`) may not comment on pull requests.
+    Give the project's Build Service the 'Contribute to pull requests'
+    permission on this repository". Thread 4531 kept its text and its
+    active status, so nothing was written partially.
