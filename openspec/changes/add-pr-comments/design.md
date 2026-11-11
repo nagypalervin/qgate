@@ -337,3 +337,21 @@ crate, so the dependency rules and ADRs are unaffected.
 - **[The gate runs after the comment]** A permission problem hides the
   gate's annotations for that build. → The error message says exactly
   what to fix, and the job still fails, so nothing merges unchecked.
+
+## Decisions during apply
+
+- **The local tools (task 1.4)** are installed under the user's home,
+  without `sudo`:
+  - **PowerShell 7.6.9,** the version on the hosted agents (spike), not
+    7.7.0, which was one day old. The arm64 archive's SHA-256 matched
+    the release's `hashes.sha256` and GitHub's asset digest
+    (`02eb9991…85f2`). It lives in `~/.local/opt/powershell-7.6.9`,
+    linked from `~/.local/bin/pwsh`.
+  - **Pester 5.9.1** comes from the PowerShell Gallery
+    (`Install-Module -Scope CurrentUser`). The PowerShell archive does
+    not include Pester.
+- **Pester is pinned to 5.9.1, not "5.5 or later, preinstalled"
+  (changes D5).** The Gallery's newest Pester is 6.2.0. A runner image
+  could ship either major version, and Pester 6 may change semantics.
+  The CI job installs exactly 5.9.1. The tests require it with
+  `#Requires`, and the local runs use the same version.

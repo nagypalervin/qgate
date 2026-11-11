@@ -24,6 +24,8 @@ work here matters as much as what you produce.
 - `crates/qgate-config`: reads `qgate.toml` into plain data (ADR 0003).
   No I/O; knows nothing about analysis.
 - `crates/qgate-cli`: the `qgate` binary. Thin; wires the others together.
+- `ci/`: files the CI integrations ship in the release archives, e.g.
+  `ci/azure/qgate-pr-comment.ps1` (PowerShell, tested with Pester). Not a crate.
 - `docs/adr/`: architecture decision records. Read them before changing structure.
 
 Dependencies flow one way: `cli -> report, analyzers -> lang -> core`,

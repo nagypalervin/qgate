@@ -40,10 +40,10 @@ D10).
   - the usage error for `--format xml` naming all four values.
 
   Update `qgate-report`'s module doc.
-- [ ] 1.4 Install PowerShell 7 locally; Ervin agreed on 2026-11-11 (design D5, proposal):
+- [x] 1.4 Install PowerShell 7 locally; Ervin agreed on 2026-11-11 (design D5, proposal):
   - install it from the official release archive after checking its SHA-256;
   - verify that `pwsh --version` reports 7.4 or later.
-- [ ] 1.5 Write `ci/azure/qgate-pr-comment.Tests.ps1` (Pester 5.5+, mocked `Invoke-RestMethod`) for every case in design D4 and D5, then `ci/azure/qgate-pr-comment.ps1` until the tests pass:
+- [x] 1.5 Write `ci/azure/qgate-pr-comment.Tests.ps1` (Pester 5.5+, mocked `Invoke-RestMethod`) for every case in design D4 and D5, then `ci/azure/qgate-pr-comment.ps1` until the tests pass:
   - locally (1.4);
   - in CI (1.6).
 - [ ] 1.6 Add the `pester (<os>)` job to `.github/workflows/ci.yml` for `ubuntu-latest` and `windows-latest`. Open PR 1 and verify that both pass. With Ervin's approval, make both checks required in the "Protect main" ruleset and verify the ruleset with `gh api`.
@@ -60,7 +60,7 @@ D10).
   - one run with the permission removed by Ervin, checking that the message names the permission and the Build Service.
 
   Record the results in `design.md`.
-- [ ] 1.9 Add the `ci/` line to `CLAUDE.md`'s "Layout" and to the README's "Repository layout" (design D9).
+- [x] 1.9 Add the `ci/` line to `CLAUDE.md`'s "Layout" and to the README's "Repository layout" (design D9).
 
 ## 2. Release 0.2.0 (between the pull requests)
 
