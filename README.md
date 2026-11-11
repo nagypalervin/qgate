@@ -546,10 +546,11 @@ to report.
 ### In Azure Pipelines
 
 For a repository in Azure Repos, add a `qgate` job to the `jobs:` of the
-pipeline that builds your pull requests. It runs only in pull request
-builds, next to your other jobs, and fails when the pull request adds an
-Error. It needs no token or service connection. On a Microsoft-hosted
-Linux agent:
+pipeline that builds your pull requests, and a branch policy that runs
+the pipeline for them ([below](#azure-branch-policy)). The job runs only
+in pull request builds, next to your other jobs, and fails when the
+pull request adds an Error. It needs no token or service connection. On
+a Microsoft-hosted Linux agent:
 
 ```yaml
 - job: qgate
@@ -610,8 +611,11 @@ If your pipeline has `steps:` at the top level and no `jobs:`, move your
 `pool` and `steps` into a job of their own first (`jobs:` with
 `- job: build`), then add the `qgate` job beside it.
 
-**Making it a merge gate.** The YAML `pr:` trigger does not apply to
-Azure Repos; a branch policy runs the pipeline for pull requests:
+<a id="azure-branch-policy"></a>**The branch policy is required.** In Azure
+Repos, the YAML `pr:` trigger does not apply: only a build validation
+policy makes a pull request build. Without one, the `qgate` job is
+skipped in every build and the pipeline stays green, so it looks as if
+qgate found nothing. To add the policy:
 
 1. In *Repos → Branches*, open *Branch policies* from the menu of `main`.
 2. Under *Build validation*, select *+*.
@@ -620,7 +624,8 @@ Azure Repos; a branch policy runs the pipeline for pull requests:
    *Immediately when main is updated*.
 5. Save.
 
-A pull request whose `qgate` job fails can then not be completed.
+*Required* is what makes it a merge gate: a pull request whose `qgate`
+job fails can then not be completed.
 
 Keep in mind:
 
@@ -628,10 +633,13 @@ Keep in mind:
   the commit it builds, without the target branch. The pull request
   build checks out the merge of the pull request into its target, so
   `--base origin/<target>` checks exactly what the merge would change.
-- **The first lines of each install step are needed.** A script step in
-  Azure Pipelines goes on after a failing command, in bash and in
-  PowerShell alike; without them a failed checksum check would not stop
-  the install. Start any lines you add to a step the same way.
+- **The first lines of each install step are needed.** A bash step in
+  Azure Pipelines goes on after a failing command: without
+  `set -euo pipefail`, a failed download or checksum check would not stop
+  the install. A PowerShell step goes on after a failing native command,
+  such as `git` or `curl.exe`; the second line stops it. The PowerShell
+  block calls none, but a command you add later would slip through
+  without it. Start any script step you add the same way.
 - **Findings are in the job's log.** The pull request shows the failed
   build; open it to see the findings.
 - **`--fail-on`** works as in GitHub Actions: add `--fail-on warning` or

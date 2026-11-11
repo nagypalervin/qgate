@@ -145,8 +145,13 @@ default (proposal).
   for the later steps.
 - **The version is pinned (`v=0.1.0`), as in the rest of the README.**
   A CI gate must not change behaviour because of a new release. The
-  README now holds the version in four install blocks. Updating them is
-  part of a release and stays manual (proposal, out of scope).
+  README now holds the version in six install blocks:
+  - three in "Try it";
+  - one in GitHub Actions;
+  - two in Azure Pipelines.
+
+  Updating them is part of a release and stays manual (proposal, out of
+  scope). The design first said four; the review counted six.
 - **The target is the x64 one on both hosted agents.** The README names
   the arm64 targets for self-hosted arm64 agents.
 
@@ -282,7 +287,11 @@ YAML block of the README section "In Azure Pipelines" and wrote each as
 > jobs:
 ```
 
-**Scenario 4's added line** is the only change to the README's text:
+**Scenario 5** changes one value: the pinned version becomes `0.0.0`,
+which has no release (`v=0.0.0` on Linux, `$v = "0.0.0"` on Windows).
+
+**Scenario 4's added line** is the only other change to the README's
+text:
 
 - **Linux:** this line goes after the `curl` line:
   ```
@@ -301,6 +310,7 @@ YAML block of the README section "In Azure Pipelines" and wrote each as
 | 2 | README only | PR 1342, build 1294. `No regressions found.`, job succeeded. Policy **approved**. | PR 1345, build 1301. Same. Policy **approved**. |
 | 3 | Manual run on `r-<os>/clean` | Build 1302: job `qgate` **skipped**, build succeeded. | Build 1304: same. |
 | 4 | Corrupted archive | PR 1343, build 1297. `qgate-0.1.0-x86_64-unknown-linux-musl.tar.gz: FAILED`, install step failed, check step skipped (`SucceededNode()` false). Policy rejected. | PR 1346, build 1303. `checksum mismatch` thrown, install step failed, check step skipped. Policy rejected. |
+| 5 | Failed download (added in review) | PR 1347, build 1306. `curl: (22) The requested URL returned error: 404`, install step failed, check step skipped. Policy rejected. | PR 1348, build 1307. `Invoke-WebRequest : Not Found`, install step failed, check step skipped. Policy rejected. |
 
 **Also observed:**
 - **CI builds on every pushed branch.** The README job has no
@@ -314,3 +324,42 @@ YAML block of the README section "In Azure Pipelines" and wrote each as
 - **In the Windows log, qgate's summary line can come before the
   finding.** stderr and stdout reach the log separately. The text
   format's order on stdout is unchanged.
+
+## Review of the pull request
+
+The `reviewer` subagent found no blocker. It raised four should-fix
+items and four nits:
+
+- **Fixed: the PowerShell claim (should-fix).** The README said a
+  PowerShell step goes on after a failing command, so that without the
+  first lines a bad checksum would not stop the install. That is wrong
+  for the Windows block, whose `throw` always stops it. The spike showed
+  only that *native* commands slip through. The note now says this, and
+  why the second line is there.
+- **Fixed: the branch policy (should-fix).** In Azure Repos the policy
+  is the only thing that makes a pull request build at all. Without it
+  the job is skipped in every build, and the pipeline stays green. The
+  README presented the policy as an extra that turns the job into a
+  gate. It now says that the policy is required, and that *Required*
+  makes it block. The intro links to it.
+- **Fixed: the manual-run scenario (should-fix).** The spec said "by
+  hand on `main`", but the rehearsal ran it on a rehearsal branch. The
+  scenario now says "on a branch". The rehearsal's CI builds became a
+  second scenario, "A CI build after a push".
+- **Planned: the journal and the archive (should-fix).** They are not on
+  the branch yet, and are the next step (D8).
+- **Rehearsed: a failed download (nit).** The requirement named it, but
+  no scenario covered it. A scenario was added and rehearsed as
+  scenario 5 above.
+- **Fixed: the log line (nit).** The spec quoted the finding line with
+  one space after `error`, while the text format pads the severity
+  column. The scenario now refers to the format instead of quoting it.
+- **Fixed: the version count (nit).** The README holds the version in six
+  install blocks, not four (D5).
+- **For Ervin to decide: the organization (nit).** The planning
+  artifacts name the Azure DevOps organization and the token's location
+  and scopes, in a public repository.
+
+After the fixes, both README jobs still extract byte for byte to the
+rehearsed pipeline files. Only the prose changed.
+

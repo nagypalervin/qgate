@@ -50,6 +50,12 @@ before unpacking, so it neither installs nor runs qgate.
 - **WHEN** the Windows job's install step runs
 - **THEN** the step fails before unpacking and `qgate check` does not run
 
+#### Scenario: A release that cannot be downloaded
+
+- **GIVEN** the pinned version has no release, so the download gets HTTP 404
+- **WHEN** the install step of either job runs
+- **THEN** the step fails before unpacking and `qgate check` does not run
+
 ### Requirement: Checking a pull request in Azure Pipelines
 
 In a pull request build, the documented job SHALL run `qgate check` on
@@ -62,7 +68,7 @@ or above the `--fail-on` level, and the findings SHALL be in the job log.
 - **GIVEN** a pull request into `main` that raises a function's cyclomatic complexity enough for an error finding
 - **WHEN** its pull request build runs the documented job, on either agent
 - **THEN** the job fails
-- **AND** its log shows the finding's line, `error <path>:<line>  <message>  [complexity/cyclomatic-increase]`
+- **AND** its log shows the finding's line in the text format of the `check-command` capability: severity `error`, the path and line, the message and `[complexity/cyclomatic-increase]`
 
 #### Scenario: A pull request without findings
 
@@ -85,10 +91,16 @@ request whose documented job fails SHALL be blocked from completing.
 ### Requirement: Only pull request builds in Azure Pipelines
 
 The documented job SHALL run only when the build reason is a pull
-request. For any other build, such as a push to `main` or a manual run,
-the job SHALL be skipped and SHALL not fail the build.
+request. For any other build, such as a CI build after a push or a
+manual run, the job SHALL be skipped and SHALL not fail the build.
 
-#### Scenario: A manual run on main
+#### Scenario: A manual run
 
-- **WHEN** the pipeline with the documented job is run by hand on `main`
+- **WHEN** the pipeline with the documented job is run by hand on a branch
+- **THEN** the `qgate` job is skipped and the build does not fail because of it
+
+#### Scenario: A CI build after a push
+
+- **GIVEN** the pipeline has a CI trigger for the pushed branch
+- **WHEN** a push to that branch starts a build
 - **THEN** the `qgate` job is skipped and the build does not fail because of it
