@@ -66,14 +66,10 @@ fn location_text(location: &Location) -> String {
     }
 }
 
-/// The message, followed by the related locations that have a line.
+/// The message, followed by every related location (the path alone for
+/// one without a line).
 fn finding_text(f: &Finding) -> String {
-    let related: Vec<String> = f
-        .related
-        .iter()
-        .filter(|l| l.line.is_some())
-        .map(location_text)
-        .collect();
+    let related: Vec<String> = f.related.iter().map(location_text).collect();
     if related.is_empty() {
         f.message.clone()
     } else {
@@ -294,7 +290,7 @@ mod tests {
         assert_eq!(
             rows(&md),
             [
-                "| warning | src/b.ts:4 | 12 duplicated lines; also at src/a.ts:10, src/c.ts:3 | duplication/duplicate-block |"
+                "| warning | src/b.ts:4 | 12 duplicated lines; also at src/a.ts:10, src/c.ts:3, src/no-line.ts | duplication/duplicate-block |"
             ]
         );
     }

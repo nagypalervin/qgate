@@ -74,6 +74,42 @@ BeforeAll {
             return [pscustomobject]@{ id = 1 }
         }
     }
+
+    # A 403 answer to a thread write without the permission, in the shape
+    # Azure DevOps sent in task 1.8.
+    function New-PermissionAnswer {
+        # Indented JSON, the backslash escaped, and every ' escaped as a
+        # JSON unicode escape (backslash, u0027), built here so no editor
+        # folds it back.
+        $quote = [char] 92 + 'u0027'
+        @'
+{
+  "$id": "1",
+  "innerException": null,
+  "message": "TF401027: You need the Git QPullRequestContributeQ permission to perform this action. Details: identity QBuild\\0000-project-idQ, scope QrepositoryQ.",
+  "typeKey": "GitNeedsPermissionException",
+  "errorCode": 0
+}
+'@ -creplace 'Q', $quote
+    }
+
+    # The error record Invoke-RestMethod throws for an HTTP error answer.
+    function New-HttpError([int] $Status, [string] $Body) {
+        $response = [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode] $Status)
+        $exception = [Microsoft.PowerShell.Commands.HttpResponseException]::new(
+            "Response status code does not indicate success: $Status.", $response)
+        $record = [System.Management.Automation.ErrorRecord]::new(
+            $exception, 'WebCmdletWebResponseException', 'InvalidOperation', $null)
+        if ($Body) { $record.ErrorDetails = [System.Management.Automation.ErrorDetails]::new($Body) }
+        $record
+    }
+}
+
+Describe 'The script' {
+    It 'has help that Get-Help finds' {
+        $help = Get-Help (Join-Path $PSScriptRoot 'qgate-pr-comment.ps1')
+        "$($help.Synopsis)" | Should -BeLike 'Posts a qgate Markdown report*'
+    }
 }
 
 Describe 'Read-QgateReport' {
@@ -212,23 +248,110 @@ Describe 'Sync-QgateComment' {
 
         Sync-QgateComment -Context $script:Context -Report $report | Should -Be 'created'
     }
+
+    It 'updates the comment with the lowest id when the thread has replies' {
+        $thread = New-Thread -Id 7 -Qgate
+        $thread.comments = @([pscustomobject]@{ id = 9; content = 'a reply' }, [pscustomobject]@{ id = 4; content = 'old' })
+        Use-FakeApi -Existing @($thread)
+        $report = Read-QgateReport -Path (New-ReportFile -Count 1 -Failing 1)
+
+        Sync-QgateComment -Context $script:Context -Report $report | Should -Be 'updated'
+
+        $script:Calls[1].Uri | Should -BeExactly "$($script:ThreadsUrl)/7/comments/4?api-version=7.1"
+    }
+
+    It 'says so when a qgate thread has no comment' {
+        $thread = New-Thread -Id 7 -Qgate
+        $thread.comments = @()
+        Use-FakeApi -Existing @($thread)
+        $report = Read-QgateReport -Path (New-ReportFile -Count 1 -Failing 1)
+
+        { Sync-QgateComment -Context $script:Context -Report $report } | Should -Throw 'qgate: the qgate thread 7 has no comment*'
+        $script:Calls.Count | Should -Be 1
+    }
+
+    It 'says so when the answer is not a thread list' {
+        Mock Invoke-RestMethod { '<html>Sign in</html>' }
+        $report = Read-QgateReport -Path (New-ReportFile -Count 1 -Failing 1)
+
+        { Sync-QgateComment -Context $script:Context -Report $report } | Should -Throw 'qgate: Azure DevOps did not answer with a thread list*'
+    }
+}
+
+Describe 'Invoke-Azure' {
+    BeforeEach { Set-PipelineVariables; $script:Context = Get-PipelineContext }
+    AfterEach { Clear-PipelineVariables }
+
+    It 'turns the 403 of a missing permission into the permission message' {
+        Mock Invoke-RestMethod { throw (New-HttpError -Status 403 -Body (New-PermissionAnswer)) }
+
+        { Invoke-Azure -Context $script:Context -Method Post -Uri 'https://x/threads' -Body @{} } |
+            Should -Throw "qgate: the build identity (Build\0000-project-id) may not comment*'Contribute to pull requests'*"
+    }
+
+    It 'falls back to the exception message without error details' {
+        Mock Invoke-RestMethod { throw (New-HttpError -Status 500) }
+
+        { Invoke-Azure -Context $script:Context -Method Get -Uri 'https://x/threads' } |
+            Should -Throw 'qgate: Azure DevOps answered 500 to GET https://x/threads: Response status code*'
+    }
+
+    It 'reports a failure without an answer' {
+        Mock Invoke-RestMethod { throw [System.Net.Http.HttpRequestException]::new('name not resolved') }
+
+        { Invoke-Azure -Context $script:Context -Method Get -Uri 'https://x/threads' } |
+            Should -Throw 'qgate: no answer from Azure DevOps to GET https://x/threads: name not resolved'
+    }
+}
+
+Describe 'Invoke-QgatePrComment' {
+    BeforeEach { Set-PipelineVariables }
+    AfterEach { Clear-PipelineVariables }
+
+    BeforeAll {
+        # Runs the script's main part; returns its exit code and host lines.
+        function Invoke-Main([string] $Report) {
+            $out = @(& { Invoke-QgatePrComment -Report $Report } 6>&1)
+            [pscustomobject]@{
+                Code  = @($out | Where-Object { $_ -is [int] })
+                Lines = @($out | Where-Object { $_ -is [System.Management.Automation.InformationRecord] } | ForEach-Object { "$($_.MessageData)" })
+            }
+        }
+    }
+
+    It 'says what it did and returns 0' {
+        Use-FakeApi -Existing @()
+
+        $run = Invoke-Main -Report (New-ReportFile -Count 1 -Failing 1)
+
+        $run.Code | Should -Be @(0)
+        $run.Lines | Should -Be @('qgate: created the qgate comment (1 finding, 1 at or above error)')
+    }
+
+    It 'reports a failure as one unwrapped build error and returns 1' {
+        Mock Invoke-RestMethod { throw (New-HttpError -Status 403 -Body (New-PermissionAnswer)) }
+
+        $run = Invoke-Main -Report (New-ReportFile -Count 1 -Failing 1)
+
+        $run.Code | Should -Be @(1)
+        $run.Lines | Should -HaveCount 1
+        $run.Lines[0] | Should -BeLike "##vso``[task.logissue type=error``]qgate: the build identity (Build\0000-project-id) may not comment*'Contribute to pull requests'*"
+    }
+
+    It 'escapes line breaks and percent signs in the build error' {
+        Remove-Item env:SYSTEM_ACCESSTOKEN
+
+        $run = Invoke-Main -Report (New-ReportFile -Count 1 -Failing 1)
+
+        $run.Code | Should -Be @(1)
+        $run.Lines | Should -HaveCount 1
+        $run.Lines[0] | Should -BeLike '*SYSTEM_ACCESSTOKEN is not set; add to this step:%0A  env:%0A*'
+    }
 }
 
 Describe 'Get-AzureErrorMessage' {
     It 'names the permission and the identity for TF401027' {
-        # The shape Azure DevOps answered with in task 1.8: indented JSON,
-        # the backslash escaped, and every ' escaped as a JSON unicode
-        # escape (backslash, u0027), built here so no editor folds it back.
-        $quote = [char] 92 + 'u0027'
-        $body = @'
-{
-  "$id": "1",
-  "innerException": null,
-  "message": "TF401027: You need the Git QPullRequestContributeQ permission to perform this action. Details: identity QBuild\\0000-project-idQ, scope QrepositoryQ.",
-  "typeKey": "GitNeedsPermissionException",
-  "errorCode": 0
-}
-'@ -creplace 'Q', $quote
+        $body = New-PermissionAnswer
         $message = Get-AzureErrorMessage -Method 'POST' -Uri 'https://x/threads' -StatusCode 403 -Body $body
         $message | Should -BeLike "*'Contribute to pull requests'*"
         $message | Should -BeLike '*Build Service*'

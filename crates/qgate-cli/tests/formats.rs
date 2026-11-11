@@ -137,7 +137,7 @@ fn markdown_no_findings() {
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
 }
 
-// Requirement: Exit codes and errors with JSON (in every format)
+// Requirement: Exit codes and errors in every format
 
 #[test]
 fn markdown_never_failing() {
@@ -157,6 +157,31 @@ fn markdown_never_failing() {
     );
     assert!(md.contains("| error | src/domain/order.ts:1 |"), "{md}");
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+}
+
+// Scenario "A finding at the level", end to end: the CLI counts the
+// failing findings at the level it was given.
+#[test]
+fn markdown_at_warning() {
+    let repo = error_and_warning();
+    let out = repo.qgate(&[
+        "--base",
+        "main",
+        "--format",
+        "markdown",
+        "--fail-on",
+        "warning",
+    ]);
+    let md = stdout(&out);
+    assert!(
+        md.starts_with("<!-- qgate count=2 failing=2 fail_on=warning -->\n"),
+        "{md}"
+    );
+    assert!(
+        md.contains("\n2 findings, 2 at or above `warning`.\n"),
+        "{md}"
+    );
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
 }
 
 #[test]

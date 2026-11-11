@@ -1,4 +1,3 @@
-#Requires -Version 7.4
 <#
 .SYNOPSIS
 Posts a qgate Markdown report to an Azure Repos pull request as one
@@ -7,7 +6,11 @@ comment thread, and keeps that thread up to date.
 .DESCRIPTION
 Run it in an Azure Pipelines pull request build, after
 
-    qgate check --base origin/<target> --format markdown --fail-on never > qgate.md
+    qgate check --base origin/<target> --format markdown > qgate.md
+
+with the same --fail-on as the step that gates the build, so the comment
+names that level. That check exits 1 when a finding is at or above the
+level; the step writing qgate.md should accept 1 and fail only on 2.
 
 The script finds the pull request's qgate thread by its `qgate.report`
 property, then:
@@ -25,12 +28,15 @@ needs `System.AccessToken` passed explicitly:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
 The project's Build Service needs the "Contribute to pull requests"
-permission on the repository. Part of qgate (https://github.com/nagypalervin/qgate);
+permission on the repository. A failure is reported as one build error
+and the script exits 1. Part of qgate (https://github.com/nagypalervin/qgate);
 see design D4 of the OpenSpec change add-pr-comments.
 
 .PARAMETER Report
 The output of `qgate check --format markdown`.
 #>
+# After the help block: a line before it hides the help from Get-Help.
+#Requires -Version 7.4
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
@@ -189,7 +195,11 @@ function Sync-QgateComment {
     $url = $Context.ThreadsUrl
     $query = "?api-version=$($script:ApiVersion)"
     $answer = Invoke-Azure -Context $Context -Method Get -Uri "${url}${query}"
-    $mine = @(@($answer.value) | Where-Object { $null -ne $_ -and (Test-QgateThread $_) } | Sort-Object { [int] $_.id })
+    $list = if ($null -ne $answer) { $answer.PSObject.Properties['value'] } else { $null }
+    if ($null -eq $list) {
+        throw "qgate: Azure DevOps did not answer with a thread list to GET ${url}${query}"
+    }
+    $mine = @(@($list.Value) | Where-Object { $null -ne $_ -and (Test-QgateThread $_) } | Sort-Object { [int] $_.id })
     if ($mine.Count -gt 1) {
         $others = ($mine | Select-Object -Skip 1 | ForEach-Object { $_.id }) -join ', '
         Write-Warning "qgate: more than one qgate thread; updating thread $($mine[0].id), leaving $others"
@@ -207,7 +217,15 @@ function Sync-QgateComment {
     }
 
     $thread = $mine[0]
-    $comment = @($thread.comments) | Sort-Object { [int] $_.id } | Select-Object -First 1
+    # The first comment is qgate's; later ones are replies. Ids are not
+    # assumed to start at 1.
+    $comments = $thread.PSObject.Properties['comments']
+    $comment = if ($null -ne $comments) {
+        @($comments.Value) | Where-Object { $null -ne $_ } | Sort-Object { [int] $_.id } | Select-Object -First 1
+    }
+    if ($null -eq $comment) {
+        throw "qgate: the qgate thread $($thread.id) has no comment to update; Azure DevOps answered in a shape this script does not know"
+    }
     Invoke-Azure -Context $Context -Method Patch -Uri "${url}/$($thread.id)/comments/$($comment.id)${query}" `
         -Body @{ content = $Report.Body } | Out-Null
     $status = if ($Report.Count -gt 0) { $script:Active } else { $script:Closed }
@@ -215,17 +233,36 @@ function Sync-QgateComment {
     if ($Report.Count -gt 0) { 'updated' } else { 'closed' }
 }
 
+function Invoke-QgatePrComment {
+    <#
+    The script's work. Says what it did and returns 0, or reports the
+    failure as one build error (a logging command, so the message is
+    neither wrapped nor buried in a stack excerpt) and returns 1.
+    #>
+    param([Parameter(Mandatory)] [string] $Report)
+
+    try {
+        $parsed = Read-QgateReport -Path $Report
+        $context = Get-PipelineContext
+        $done = Sync-QgateComment -Context $context -Report $parsed
+        $what = switch ($done) {
+            'created' { 'created the qgate comment' }
+            'updated' { 'updated the qgate comment' }
+            'closed' { 'updated and closed the qgate comment' }
+            'none' { 'no findings and no qgate comment; nothing to write' }
+        }
+        $noun = if ($parsed.Count -eq 1) { 'finding' } else { 'findings' }
+        Write-Host "qgate: $what ($($parsed.Count) $noun, $($parsed.Failing) at or above $($parsed.FailOn))"
+        0
+    } catch {
+        # A logging command's message escapes %, CR and LF.
+        $message = $_.Exception.Message.Replace('%', '%AZP25').Replace("`r", '%0D').Replace("`n", '%0A')
+        Write-Host "##vso[task.logissue type=error]$message"
+        1
+    }
+}
+
 # Run unless dot-sourced (the tests load the functions that way).
 if ($MyInvocation.InvocationName -ne '.') {
-    $parsed = Read-QgateReport -Path $Report
-    $context = Get-PipelineContext
-    $done = Sync-QgateComment -Context $context -Report $parsed
-    $what = switch ($done) {
-        'created' { 'created the qgate comment' }
-        'updated' { 'updated the qgate comment' }
-        'closed' { 'updated and closed the qgate comment' }
-        'none' { 'no findings and no qgate comment; nothing to write' }
-    }
-    $noun = if ($parsed.Count -eq 1) { 'finding' } else { 'findings' }
-    Write-Host "qgate: $what ($($parsed.Count) $noun, $($parsed.Failing) at or above $($parsed.FailOn))"
+    exit (Invoke-QgatePrComment -Report $Report)
 }

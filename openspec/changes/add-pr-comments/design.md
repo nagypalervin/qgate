@@ -166,7 +166,8 @@ read report -> parse marker line (else: "not a qgate Markdown report")
   exist, the script updates the one with the lowest id and logs a
   warning naming the others. It does not close or delete them.
 - **Comment id.** The comment to update is the thread's first comment,
-  `comments[0].id`. The script does not assume the id is 1.
+  the one with the lowest id (see "Decisions during apply"). The script
+  does not assume the id is 1.
 - **Errors.**
   - **403 with `TF401027`:** "The project's Build Service needs the
     'Contribute to pull requests' permission on this repository
@@ -176,7 +177,10 @@ read report -> parse marker line (else: "not a qgate Markdown report")
   - **Any other error:** the method, URL, status and response body.
 
   The script only creates a thread after it has listed the existing
-  ones, so a failure leaves at most the old state, never half a comment.
+  ones. A missing permission fails on the first write, so it leaves the
+  old state. An update is two writes, the comment and then the status,
+  so a network failure between them can leave the new text with the old
+  status until the next build.
 - **Settings:** `Set-StrictMode -Version Latest`,
   `$ErrorActionPreference = "Stop"` and
   `$PSNativeCommandUseErrorActionPreference = $true`. All URLs are built
@@ -376,6 +380,34 @@ crate, so the dependency rules and ADRs are unaffected.
   works with its `message`; a body that is not JSON is used as it is.
   This also keeps other errors to the readable sentence instead of the
   whole document. The Pester test uses the answer's real shape.
+
+- **Review fixes on PR 1.** The `reviewer` subagent's findings led to:
+  - **Comment id:** the lowest id, not `comments[0]`. The API does not
+    promise an order, and later comments are replies. A test covers a
+    thread with a reply.
+  - **Failures as one build error:** the script catches every error,
+    writes it as one `##vso[task.logissue type=error]` line (with `%`,
+    CR and LF escaped) and exits 1. PowerShell's own error layout
+    wrapped the message at about 80 columns and added a source excerpt.
+  - **Unexpected answers:** a thread list without `value`, or a qgate
+    thread without comments, now ends with a qgate message instead of a
+    StrictMode error.
+  - **`#Requires` after the help block:** a line before the help block
+    hid it from `Get-Help`. A test checks the help.
+  - **Tests through `Invoke-Azure`:** the mock throws the error record
+    `Invoke-RestMethod` throws (an `HttpResponseException` with
+    `ErrorDetails`), so the status and body extraction are tested too.
+  - **Related locations without a line** are listed by path in the
+    Markdown report, as the spec says. The JSON report still drops
+    them, because its schema requires a line.
+  - **Limits of the escaping, kept for now:** backslash escapes do not
+    stop autolinks (`https://…`, `www.…`, e-mail addresses), GitHub's
+    `$…$` math, `@` mentions or Azure's `#123` work item links. Such
+    text can occur, for example a path under `src/@types/`, and may
+    then render as a link. This change keeps the escape set of D2; a
+    change that posts the same Markdown on GitHub revisits it.
+  - **PR size:** about 2,400 lines, 880 of them OpenSpec text, as split
+    in D10.
 
 ## Verification on PR 1
 

@@ -1,5 +1,10 @@
 # Spec Delta
 
+## RENAMED Requirements
+
+- FROM: `### Requirement: Exit codes and errors with JSON`
+- TO: `### Requirement: Exit codes and errors in every format`
+
 ## MODIFIED Requirements
 
 ### Requirement: Format option
@@ -26,7 +31,7 @@ annotations.
 - **WHEN** the user runs any of the three forms with `--format markdown` or with `--format azure`
 - **THEN** standard output is the Markdown report or the Azure Pipelines annotations for the same findings
 
-### Requirement: Exit codes and errors with JSON
+### Requirement: Exit codes and errors in every format
 
 The exit codes and the summary line on standard error SHALL be the same
 in every format. When the check cannot run, standard output SHALL stay
