@@ -409,6 +409,16 @@ crate, so the dependency rules and ADRs are unaffected.
   - **PR size:** about 2,400 lines, 880 of them OpenSpec text, as split
     in D10.
 
+- **The x86_64 musl release build runs on `ubuntu-24.04`, not
+  `ubuntu-latest` (Ervin, 2026-11-11).** From 13:50 on 2026-11-11 its
+  "Install musl-tools" step failed three times in a row with
+  `Temporary failure resolving 'archive.ubuntu.com'`, on the
+  `ubuntu-26.04` image `ubuntu-latest` now gets. The same step had
+  passed that morning, and the arm64 build already used
+  `ubuntu-24.04-arm`. A pinned image also keeps the release
+  environment from changing silently. The GitHub status page showed no
+  incident.
+
 ## Verification on PR 1
 
 - **CI (task 1.6).** Every check passed on commit `9997745`, including
