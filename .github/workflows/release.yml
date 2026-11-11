@@ -15,6 +15,7 @@ on:
     paths:
       - .github/workflows/release.yml
       - .github/scripts/**
+      - ci/azure/**
       - Cargo.toml
       - Cargo.lock
   workflow_dispatch:
@@ -183,7 +184,9 @@ jobs:
         run: |
           name="qgate-$VERSION-$TARGET"
           mkdir -p "dist/$name"
-          cp "$BIN" README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          # The Azure Pipelines comment script ships with every binary
+          # (design D6 of add-pr-comments).
+          cp "$BIN" ci/azure/qgate-pr-comment.ps1 README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
           cd dist
           case "$ASSET" in
             *.zip) 7z a -tzip "$ASSET" "$name" > /dev/null ;;
