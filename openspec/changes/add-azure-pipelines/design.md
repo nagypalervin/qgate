@@ -17,7 +17,8 @@ See `proposal.md` for the why and for the spike results.
 - **qgate's `--base`** compares the merge base of `--base` and the head
   with the head (the `revision-input` spec). Its exit codes are 0, 1
   (findings at or above `--fail-on`) and 2 (could not run).
-- **The rehearsal project** is `teamcollabeu/qgate-rehearsal`:
+- **The rehearsal project** is `qgate-rehearsal`, in Ervin's Azure
+  DevOps organization:
   - pipeline 36 runs `/azure-pipelines.yml`;
   - a required build validation policy is on `main`, so `main` takes no
     direct pushes (TF402455);
@@ -179,7 +180,7 @@ default (proposal).
 
 ### D7. The rehearsal
 
-**Where:** the rehearsal project `teamcollabeu/qgate-rehearsal` (pipeline
+**Where:** the rehearsal project `qgate-rehearsal` (pipeline
 36).
 
 **What runs:** the README's jobs, extracted mechanically from the README
@@ -238,8 +239,8 @@ The rehearsal runs before the review, so the reviewer sees the record.
 - **[Copied snippets age]** Partners' copies keep their pinned version
   and miss later fixes to the snippet. → This is the price of D1. The
   README section shows the version in one place per job.
-- **[The rehearsal runs in a real organization]** `teamcollabeu` holds
-  client projects. → The token is scoped to Code and Build and expires
+- **[The rehearsal runs in a real organization]** Ervin's organization
+  holds other projects too. → The token is scoped to Code and Build and expires
   after seven days. It lives outside the repository and is never
   printed. Only the `qgate-rehearsal` project is touched. Admin
   settings stay with Ervin.
@@ -273,9 +274,9 @@ The rehearsal runs before the review, so the reviewer sees the record.
 
 ## Rehearsal record (tasks 2.1 to 2.4)
 
-Run on 2026-11-11 in `teamcollabeu/qgate-rehearsal`, pipeline 36, with
-qgate 0.1.0, on `ubuntu-latest` and `windows-latest`. The spike's pull
-requests 1339 and 1340 were abandoned first.
+Run on 2026-11-11 in the rehearsal project `qgate-rehearsal`, pipeline
+36, with qgate 0.1.0, on `ubuntu-latest` and `windows-latest`. The
+spike's pull requests 1339 and 1340 were abandoned first.
 
 **Extraction.** A script took the first (Linux) and the second (Windows)
 YAML block of the README section "In Azure Pipelines" and wrote each as
@@ -356,9 +357,13 @@ items and four nits:
   column. The scenario now refers to the format instead of quoting it.
 - **Fixed: the version count (nit).** The README holds the version in six
   install blocks, not four (D5).
-- **For Ervin to decide: the organization (nit).** The planning
-  artifacts name the Azure DevOps organization and the token's location
-  and scopes, in a public repository.
+- **Fixed, Ervin's choice: the organization (nit).** The planning
+  artifacts named Ervin's Azure DevOps organization and described its
+  other projects, in a public repository. They now name only the
+  project. The earlier commits on the branch still hold the name, so the
+  pull request is merged with "Squash and merge". The token's local
+  path, scopes and expiry stay: they reveal nothing outside this
+  machine.
 
 After the fixes, both README jobs still extract byte for byte to the
 rehearsed pipeline files. Only the prose changed.

@@ -118,7 +118,7 @@ None. qgate itself does not change.
 - **Docs:** `README.md` only.
 - **Code, CI, workflows:** none in this repository.
 - **Outside the repository:**
-  - the rehearsal project `teamcollabeu/qgate-rehearsal` in Azure DevOps;
+  - the rehearsal project `qgate-rehearsal` in Ervin's Azure DevOps organization;
   - a personal access token in `~/.config/qgate-rehearsal/pat`. Its
     scopes are Code (read and write) and Build (read and execute), and
     it expires seven days after 2026-11-10.

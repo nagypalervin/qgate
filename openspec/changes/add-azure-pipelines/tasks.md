@@ -6,8 +6,8 @@ It has no code.
   `cargo clippy -D warnings` and `cargo test --workspace`.
 - **Commit messages and PR bodies** are written to files first.
 - **Azure DevOps** is reached only through the token file
-  `~/.config/qgate-rehearsal/pat`, and only in the project
-  `teamcollabeu/qgate-rehearsal`. The token is never printed.
+  `~/.config/qgate-rehearsal/pat`, and only in the rehearsal project
+  `qgate-rehearsal`. The token is never printed.
 
 ## 1. README
 
