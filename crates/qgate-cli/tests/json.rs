@@ -333,7 +333,7 @@ fn never_failing() {
     assert_eq!(out.status.code(), Some(0));
 }
 
-// Requirement: Exit codes and errors with JSON
+// Requirement: Exit codes and errors in every format
 
 #[test]
 fn unknown_base_revision() {

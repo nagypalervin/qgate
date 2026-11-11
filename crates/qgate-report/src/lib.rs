@@ -1,10 +1,20 @@
 //! Reporters turn findings into output.
 //!
-//! Two formats exist: plain text for people ([`render_text`]) and the
-//! versioned JSON report for programs ([`render_json`]). Markdown (for pull
-//! request comments) and SARIF follow in M4.
+//! Four formats exist:
+//! - plain text for people ([`render_text`]);
+//! - the versioned JSON report for programs ([`render_json`]);
+//! - Markdown, the body of a pull request comment ([`render_markdown`]);
+//! - Azure Pipelines annotations ([`render_azure`]).
+//!
+//! SARIF follows in M4.
 
 use std::fmt::Write as _;
+
+mod azure;
+mod markdown;
+
+pub use azure::render_azure;
+pub use markdown::{MAX_ROWS, render_markdown};
 
 use qgate_core::{Finding, Location, Metric, Severity};
 use serde::{Serialize, Serializer};

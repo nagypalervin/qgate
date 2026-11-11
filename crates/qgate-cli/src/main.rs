@@ -34,7 +34,7 @@ use qgate_config::Config;
 use qgate_core::{Finding, Location, Severity};
 use qgate_git::{BlobId, BlobReader, ChangedFile, Changes, GitError, Repository};
 use qgate_lang::{FileModel, Language, ParseError, Token};
-use qgate_report::{ReportSummary, render_json, render_text};
+use qgate_report::{ReportSummary, render_azure, render_json, render_markdown, render_text};
 
 /// Exit code for a check that ran and found findings at or above the
 /// `--fail-on` level.
@@ -103,6 +103,10 @@ enum Format {
     Text,
     /// The versioned JSON report (the `report-formats` spec).
     Json,
+    /// The Markdown report, the body of a pull request comment.
+    Markdown,
+    /// Azure Pipelines logging commands, one issue per finding.
+    Azure,
 }
 
 impl Format {
@@ -111,27 +115,29 @@ impl Format {
         match self {
             Self::Text => "text",
             Self::Json => "json",
+            Self::Markdown => "markdown",
+            Self::Azure => "azure",
         }
     }
 
     /// The report for `findings`, which fail the run at the `fail_on` level.
     fn render(self, findings: &[Finding], fail_on: FailOn) -> String {
+        let summary = ReportSummary {
+            failing: fail_on.failing(findings),
+            fail_on: fail_on.name(),
+        };
         match self {
             Self::Text => render_text(findings),
-            Self::Json => render_json(
-                findings,
-                ReportSummary {
-                    failing: fail_on.failing(findings),
-                    fail_on: fail_on.name(),
-                },
-            ),
+            Self::Json => render_json(findings, summary),
+            Self::Markdown => render_markdown(findings, summary),
+            Self::Azure => render_azure(findings),
         }
     }
 }
 
 impl ValueEnum for Format {
     fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Text, Self::Json]
+        &[Self::Text, Self::Json, Self::Markdown, Self::Azure]
     }
 
     fn to_possible_value(&self) -> Option<PossibleValue> {
@@ -262,7 +268,10 @@ fn check_command() -> Command {
             Arg::new("format")
                 .long("format")
                 .value_name("format")
-                .help("How to write the report: text for people, json for programs")
+                .help(
+                    "How to write the report: text for people, json for programs, \
+                     markdown for a pull request comment, azure for Azure Pipelines annotations",
+                )
                 .value_parser(value_parser!(Format))
                 .default_value(DEFAULT_FORMAT.name()),
         )

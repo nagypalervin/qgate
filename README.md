@@ -709,10 +709,11 @@ crates/
   qgate-core/       shared types: Finding, Metric, Severity
   qgate-lang/       language adapters (tree-sitter)
   qgate-analyzers/  architecture, complexity, duplication, tests
-  qgate-report/     terminal, JSON, SARIF, Markdown
+  qgate-report/     text, JSON, Markdown, Azure Pipelines annotations (SARIF later)
   qgate-git/        changed files and blobs, via the `git` command
   qgate-config/     reads qgate.toml
   qgate-cli/        the `qgate` binary
+ci/azure/               the Azure Pipelines comment script, shipped in every release
 docs/adr/               architecture decision records
 docs/journal/           notes on how AI-assisted development went
 openspec/               specs and changes (OpenSpec workflow, see CLAUDE.md)

@@ -86,3 +86,31 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+  pester:
+    # The Azure Pipelines comment script (ci/azure, design D5 of
+    # add-pr-comments), on both operating systems its agents run. Pester
+    # is pinned: runner images may ship another major version.
+    name: pester (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester 5.9.1
+        run: Install-Module Pester -RequiredVersion 5.9.1 -Repository PSGallery -Scope CurrentUser -Force
+
+      - name: Test
+        run: |
+          Import-Module Pester -RequiredVersion 5.9.1
+          $configuration = New-PesterConfiguration
+          $configuration.Run.Path = 'ci/azure'
+          $configuration.Run.Exit = $true
+          $configuration.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $configuration
