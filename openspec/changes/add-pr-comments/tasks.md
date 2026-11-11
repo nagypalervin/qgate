@@ -46,7 +46,7 @@ D10).
 - [x] 1.5 Write `ci/azure/qgate-pr-comment.Tests.ps1` (Pester 5.5+, mocked `Invoke-RestMethod`) for every case in design D4 and D5, then `ci/azure/qgate-pr-comment.ps1` until the tests pass:
   - locally (1.4);
   - in CI (1.6).
-- [ ] 1.6 Add the `pester (<os>)` job to `.github/workflows/ci.yml` for `ubuntu-latest` and `windows-latest`. Open PR 1 and verify that both pass. With Ervin's approval, make both checks required in the "Protect main" ruleset and verify the ruleset with `gh api`.
+- [x] 1.6 Add the `pester (<os>)` job to `.github/workflows/ci.yml` for `ubuntu-latest` and `windows-latest`. Open PR 1 and verify that both pass. With Ervin's approval, make both checks required in the "Protect main" ruleset and verify the ruleset with `gh api`.
 - [x] 1.7 Release packaging and version (design D6):
   - `release.yml` packs the script and triggers on `ci/azure/**`;
   - the version becomes `0.2.0`, with `Cargo.lock` following.

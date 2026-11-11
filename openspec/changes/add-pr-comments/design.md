@@ -414,6 +414,10 @@ crate, so the dependency rules and ADRs are unaffected.
 - **CI (task 1.6).** Every check passed on commit `9997745`, including
   `pester (ubuntu-latest)` and `pester (windows-latest)`.
   `Install-Module Pester -RequiredVersion 5.9.1` worked on both runners.
+  With Ervin's approval both pester checks joined the required checks
+  of the "Protect main" ruleset; `gh api` showed nine required checks
+  and every other rule unchanged. All nine passed again on the review
+  fixes (`bbb1baa`, and `edfa2f0`, which has the same tree).
 - **The release rehearsal (task 1.7),** run 43013632502:
   - all six archives hold `qgate-pr-comment.ps1`, and the Linux arm64
     archive also holds `qgate`, `README.md` and the two licenses;
@@ -421,6 +425,14 @@ crate, so the dependency rules and ADRs are unaffected.
   - the Linux arm64 binary prints `qgate 0.2.0` and renders
     `--format markdown` (marker `count=1 failing=1 fail_on=error`) and
     `--format azure`.
+
+  On the final commit `edfa2f0` (run 43039260051), the macOS and
+  Windows builds passed. Both Linux musl builds could not install
+  `musl-tools`: from about 13:50 UTC on 2026-11-11 the GitHub runners
+  could not resolve the Ubuntu mirrors, which other projects reported
+  the same day. Six retries over two hours failed the same way. The
+  packing step has not changed since `9997745`; task 2.1 checks the
+  archives of the real release.
 - **The script against the real API (task 1.8),** in the rehearsal
   project. Pull request 1350 ran on `ubuntu-latest` (build 1312) and
   pull request 1351 on `windows-latest` (build 1311). Each build ran
@@ -450,3 +462,9 @@ crate, so the dependency rules and ADRs are unaffected.
     Give the project's Build Service the 'Contribute to pull requests'
     permission on this repository". Thread 4531 kept its text and its
     active status, so nothing was written partially.
+
+  **After the review fixes** (`bbb1baa`), pull request 1350, build
+  1316: the script updated thread 4531, closed it on a clean report and
+  reactivated it, each with exit code 0 and "1 finding" in the singular.
+  A step without `SYSTEM_ACCESSTOKEN` ended with exit code 1 and one
+  build error in the build summary, its three lines intact.
