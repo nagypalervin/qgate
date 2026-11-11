@@ -12,7 +12,7 @@ D10).
 
 ## 1. Formats, script, packaging (PR 1, `change/add-pr-comments`)
 
-- [ ] 1.1 Write failing unit tests for `render_markdown` in `crates/qgate-report` (design D2):
+- [x] 1.1 Write failing unit tests for `render_markdown` in `crates/qgate-report` (design D2):
   - one error;
   - no findings;
   - the three summary-sentence forms (none, some, all at or above the level) and singular and plural;
@@ -24,7 +24,7 @@ D10).
   - byte-identical output for the same input.
 
   Then implement `render_markdown` until they pass.
-- [ ] 1.2 Write failing unit tests for `render_azure` (design D3):
+- [x] 1.2 Write failing unit tests for `render_azure` (design D3):
   - one error, one warning;
   - a finding without a line;
   - an Info finding left out;
@@ -32,7 +32,7 @@ D10).
   - each escape in `sourcepath`, `code` and the message.
 
   Then implement it.
-- [ ] 1.3 Add `markdown` and `azure` to `--format` in `qgate-cli` (design D1). Add end-to-end tests in `crates/qgate-cli/tests/`:
+- [x] 1.3 Add `markdown` and `azure` to `--format` in `qgate-cli` (design D1). Add end-to-end tests in `crates/qgate-cli/tests/`:
   - each format in each `check` form;
   - exit code 1 and the stderr summary line with an Error;
   - exit code 0 with `--fail-on never`;
