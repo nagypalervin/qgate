@@ -11,8 +11,8 @@ It has no code.
 
 ## 1. README
 
-- [ ] 1.1 Rename the README section "In CI" to "In GitHub Actions" and change the hook section's link from `#in-ci` to `#in-github-actions` (design D6). Verify with `grep` that no `#in-ci` link is left.
-- [ ] 1.2 Add the section "In Azure Pipelines" after it (design D2 to D6):
+- [x] 1.1 Rename the README section "In CI" to "In GitHub Actions" and change the hook section's link from `#in-ci` to `#in-github-actions` (design D6). Verify with `grep` that no `#in-ci` link is left.
+- [x] 1.2 Add the section "In Azure Pipelines" after it (design D2 to D6):
   - the paragraph on what the job does;
   - the Linux job (bash) and the Windows job (`pwsh`), each with:
     - `fetchDepth: 0`;
@@ -21,16 +21,16 @@ It has no code.
   - the branch policy steps;
   - the notes.
 
-  Verify that the commands in the install steps match the "Try it" blocks, apart from the D4 preamble and the `##vso[task.prependpath]` line.
+  Verify that the commands in the install steps match the existing README blocks, apart from the D4 preamble and the `##vso[task.prependpath]` line: the GitHub Actions block for Linux and the "Try it" block for Windows (see "Decisions during apply" in design).
 
 ## 2. Rehearsal (design D7)
 
-- [ ] 2.1 Prepare the rehearsal project:
+- [x] 2.1 Prepare the rehearsal project:
   - abandon the spike's pull requests 1339 and 1340;
   - write a script in the scratchpad that extracts the two jobs from `README.md` into a pipeline file per OS. Verify that `diff` against the README's YAML blocks shows no difference other than the `jobs:` line.
-- [ ] 2.2 Linux round. Push the extracted Linux pipeline with rehearsal branches and run scenarios 1 to 4 of D7. Verify each expected result from the build logs and the policy evaluations through the REST API.
-- [ ] 2.3 Windows round: the same four scenarios with the extracted Windows pipeline. Verify in the same way.
-- [ ] 2.4 Record the rehearsal in `design.md`:
+- [x] 2.2 Linux round. Push the extracted Linux pipeline with rehearsal branches and run scenarios 1 to 4 of D7. Verify each expected result from the build logs and the policy evaluations through the REST API.
+- [x] 2.3 Windows round: the same four scenarios with the extracted Windows pipeline. Verify in the same way.
+- [x] 2.4 Record the rehearsal in `design.md`:
   - the build ids and each scenario's result;
   - the policy statuses;
   - the line that scenario 4 adds;

@@ -245,3 +245,72 @@ The rehearsal runs before the review, so the reviewer sees the record.
   passed as one argument, and qgate treats revisions only as revisions
   (`revision-input`). → No quoting issue in either shell. Not rehearsed
   beyond `main`.
+
+## Decisions during apply
+
+- **The Linux install step follows the GitHub Actions block, not the
+  "Try it" block (task 1.2).** "Try it" chains its commands with `&&`
+  and installs into `~/.local/bin`, which suits a shell, not a CI step.
+  The GitHub Actions block is the CI form of the same download and
+  check. Compared with `diff`:
+  - **Linux step vs the GitHub Actions install block:** it adds
+    `set -euo pipefail`, and `##vso[task.prependpath]` takes the place
+    of `>> "$GITHUB_PATH"`.
+  - **Windows step vs the "Try it" PowerShell block:** it adds
+    `$PSNativeCommandUseErrorActionPreference = $true` and the
+    `##vso[task.prependpath]` line.
+- **The check step is a block scalar (`bash: |`, `pwsh: |`)** even
+  though it is one line, so that its quotes, `#` and `$(` reach the
+  shell without YAML quoting rules in between.
+- **The branch policy is five steps.** Build expiration is set to
+  "Immediately when main is updated" because the result depends on the
+  target branch.
+
+## Rehearsal record (tasks 2.1 to 2.4)
+
+Run on 2026-11-11 in `teamcollabeu/qgate-rehearsal`, pipeline 36, with
+qgate 0.1.0, on `ubuntu-latest` and `windows-latest`. The spike's pull
+requests 1339 and 1340 were abandoned first.
+
+**Extraction.** A script took the first (Linux) and the second (Windows)
+YAML block of the README section "In Azure Pipelines" and wrote each as
+`azure-pipelines.yml`: the line `jobs:` and the block, unchanged.
+`diff` of each block against its pipeline file:
+
+```
+0a1
+> jobs:
+```
+
+**Scenario 4's added line** is the only change to the README's text:
+
+- **Linux:** this line goes after the `curl` line:
+  ```
+          printf 'x' >> "qgate-$v-$t.tar.gz"
+  ```
+- **Windows:** this line goes after the `SHA256SUMS` download:
+  ```
+          Add-Content -Path "qgate-$v-$t.zip" -Value "x" -NoNewline
+  ```
+
+**Results.** Every scenario gave the expected result:
+
+| # | Scenario | Linux | Windows |
+|---|---|---|---|
+| 1 | Complexity 2 → 8 | PR 1341, build 1293. `qgate check` failed. Log: `error   src/grade.ts:1  grade: cyclomatic complexity 2 -> 8 (+6)  [complexity/cyclomatic-increase]`. Policy **rejected**. | PR 1344, build 1299. Same finding, the step failed with "PowerShell exited with code '1'". Policy **rejected**. |
+| 2 | README only | PR 1342, build 1294. `No regressions found.`, job succeeded. Policy **approved**. | PR 1345, build 1301. Same. Policy **approved**. |
+| 3 | Manual run on `r-<os>/clean` | Build 1302: job `qgate` **skipped**, build succeeded. | Build 1304: same. |
+| 4 | Corrupted archive | PR 1343, build 1297. `qgate-0.1.0-x86_64-unknown-linux-musl.tar.gz: FAILED`, install step failed, check step skipped (`SucceededNode()` false). Policy rejected. | PR 1346, build 1303. `checksum mismatch` thrown, install step failed, check step skipped. Policy rejected. |
+
+**Also observed:**
+- **CI builds on every pushed branch.** The README job has no
+  `trigger:`, so the rehearsal pipeline, which holds only that job,
+  also ran a CI build for each pushed branch (builds 1291, 1292, 1295,
+  1296, 1298, 1300; reason `individualCI`).
+  - In each one, the `qgate` job was skipped and the build succeeded.
+  - This is a second kind of non-PR build that passed scenario 3.
+  - A partner's pipeline keeps its own `trigger:`, so the README adds
+    none.
+- **In the Windows log, qgate's summary line can come before the
+  finding.** stderr and stdout reach the log separately. The text
+  format's order on stdout is unchanged.

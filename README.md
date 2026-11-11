@@ -215,7 +215,8 @@ committed yet, as `qgate check --base HEAD --worktree` would:
   sent to the agent.
 - **Committing accepts a change:** committed work is not checked again in
   the next turns. The whole branch is checked in the pull request (see
-  [In CI](#in-ci)).
+  [In GitHub Actions](#in-github-actions) and
+  [In Azure Pipelines](#in-azure-pipelines)).
 
 Keep in mind:
 
@@ -486,7 +487,7 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
   cannot parse yet (`export type * from`, `import("./x").Foo<T>`), which
   are reported as `input/unparsable` instead.
 
-### In CI
+### In GitHub Actions
 
 Install qgate in the job from a release, outside the checkout, so
 `actions/checkout` does not remove it and qgate does not analyze it. On
@@ -541,6 +542,104 @@ to report.
     name: qgate-report
     path: qgate-report.json
 ```
+
+### In Azure Pipelines
+
+For a repository in Azure Repos, add a `qgate` job to the `jobs:` of the
+pipeline that builds your pull requests. It runs only in pull request
+builds, next to your other jobs, and fails when the pull request adds an
+Error. It needs no token or service connection. On a Microsoft-hosted
+Linux agent:
+
+```yaml
+- job: qgate
+  condition: eq(variables['Build.Reason'], 'PullRequest')
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+    - checkout: self
+      fetchDepth: 0
+    - bash: |
+        set -euo pipefail
+        v=0.1.0 t=x86_64-unknown-linux-musl
+        base=https://github.com/nagypalervin/qgate/releases/download/v$v
+        curl -fsSL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS"
+        grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c
+        tar xzf "qgate-$v-$t.tar.gz"
+        echo "##vso[task.prependpath]$PWD/qgate-$v-$t"
+      displayName: Install qgate
+      workingDirectory: $(Agent.TempDirectory)
+    - bash: |
+        qgate check --base "origin/${TARGET_BRANCH#refs/heads/}"
+      displayName: qgate check
+      env:
+        TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+```
+
+On a Windows agent, use this job instead. qgate reads the sources from
+git, so the job's agent need not be the one your build runs on.
+
+```yaml
+- job: qgate
+  condition: eq(variables['Build.Reason'], 'PullRequest')
+  pool:
+    vmImage: windows-latest
+  steps:
+    - checkout: self
+      fetchDepth: 0
+    - pwsh: |
+        $ErrorActionPreference = "Stop"
+        $PSNativeCommandUseErrorActionPreference = $true
+        $v = "0.1.0"; $t = "x86_64-pc-windows-msvc"
+        $base = "https://github.com/nagypalervin/qgate/releases/download/v$v"
+        Invoke-WebRequest "$base/qgate-$v-$t.zip" -OutFile "qgate-$v-$t.zip"
+        Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
+        $line = Select-String -Path SHA256SUMS -SimpleMatch " qgate-$v-$t.zip"
+        if ((Get-FileHash "qgate-$v-$t.zip" -Algorithm SHA256).Hash -ne $line.Line.Split(" ")[0]) { throw "checksum mismatch" } else { Expand-Archive "qgate-$v-$t.zip" -DestinationPath . }
+        Write-Host "##vso[task.prependpath]$PWD\qgate-$v-$t"
+      displayName: Install qgate
+      workingDirectory: $(Agent.TempDirectory)
+    - pwsh: |
+        qgate check --base "origin/$($env:TARGET_BRANCH -replace '^refs/heads/', '')"
+      displayName: qgate check
+      env:
+        TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+```
+
+If your pipeline has `steps:` at the top level and no `jobs:`, move your
+`pool` and `steps` into a job of their own first (`jobs:` with
+`- job: build`), then add the `qgate` job beside it.
+
+**Making it a merge gate.** The YAML `pr:` trigger does not apply to
+Azure Repos; a branch policy runs the pipeline for pull requests:
+
+1. In *Repos → Branches*, open *Branch policies* from the menu of `main`.
+2. Under *Build validation*, select *+*.
+3. Choose the pipeline and keep the trigger *Automatic*.
+4. Set *Policy requirement* to *Required* and *Build expiration* to
+   *Immediately when main is updated*.
+5. Save.
+
+A pull request whose `qgate` job fails can then not be completed.
+
+Keep in mind:
+
+- **`fetchDepth: 0` is needed.** By default Azure Pipelines fetches only
+  the commit it builds, without the target branch. The pull request
+  build checks out the merge of the pull request into its target, so
+  `--base origin/<target>` checks exactly what the merge would change.
+- **The first lines of each install step are needed.** A script step in
+  Azure Pipelines goes on after a failing command, in bash and in
+  PowerShell alike; without them a failed checksum check would not stop
+  the install. Start any lines you add to a step the same way.
+- **Findings are in the job's log.** The pull request shows the failed
+  build; open it to see the findings.
+- **`--fail-on`** works as in GitHub Actions: add `--fail-on warning` or
+  `--fail-on never` to the `qgate check` line.
+- **Self-hosted agents** need access to github.com, and `curl`,
+  `sha256sum` and `tar` (Linux) or PowerShell 7.4 or later as `pwsh`
+  (Windows). On arm64, use the target `aarch64-unknown-linux-musl` or
+  `aarch64-pc-windows-msvc`.
 
 ## Why
 
