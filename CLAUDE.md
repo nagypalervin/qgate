@@ -24,8 +24,12 @@ work here matters as much as what you produce.
 - `crates/qgate-config`: reads `qgate.toml` into plain data (ADR 0003).
   No I/O; knows nothing about analysis.
 - `crates/qgate-cli`: the `qgate` binary. Thin; wires the others together.
-- `ci/`: files the CI integrations ship in the release archives, e.g.
-  `ci/azure/qgate-pr-comment.ps1` (PowerShell, tested with Pester). Not a crate.
+- `ci/`: scripts of the CI integrations, in PowerShell, tested with Pester.
+  Not a crate. `ci/azure/qgate-pr-comment.ps1` ships in the release
+  archives; `ci/github/qgate-action.ps1` runs the GitHub Action.
+- `action.yml`: the GitHub Action (`uses: nagypalervin/qgate@v<version>`).
+  It only wires its inputs to `ci/github/`; its `QGATE_VERSION` lines must
+  match the release (the release workflow checks them).
 - `docs/adr/`: architecture decision records. Read them before changing structure.
 
 Dependencies flow one way: `cli -> report, analyzers -> lang -> core`,

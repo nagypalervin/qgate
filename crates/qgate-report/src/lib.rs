@@ -1,19 +1,22 @@
 //! Reporters turn findings into output.
 //!
-//! Four formats exist:
+//! Five formats exist:
 //! - plain text for people ([`render_text`]);
 //! - the versioned JSON report for programs ([`render_json`]);
 //! - Markdown, the body of a pull request comment ([`render_markdown`]);
-//! - Azure Pipelines annotations ([`render_azure`]).
+//! - Azure Pipelines annotations ([`render_azure`]);
+//! - GitHub Actions annotations ([`render_github`]).
 //!
 //! SARIF follows in M4.
 
 use std::fmt::Write as _;
 
 mod azure;
+mod github;
 mod markdown;
 
 pub use azure::render_azure;
+pub use github::render_github;
 pub use markdown::{MAX_ROWS, render_markdown};
 
 use qgate_core::{Finding, Location, Metric, Severity};

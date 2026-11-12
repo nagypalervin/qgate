@@ -1,7 +1,8 @@
-//! End-to-end tests for `qgate check --format markdown` and `--format
-//! azure`, following the scenarios of the `report-formats` spec that the
-//! `add-pr-comments` change adds. Each test builds a throwaway git
-//! repository and runs the built binary in it, as `json.rs` does.
+//! End-to-end tests for `qgate check --format markdown`, `--format azure`
+//! and `--format github`, following the scenarios of the `report-formats`
+//! spec that the `add-pr-comments` and `add-github-action` changes add.
+//! Each test builds a throwaway git repository and runs the built binary
+//! in it, as `json.rs` does.
 
 mod support;
 
@@ -62,7 +63,7 @@ const SUMMARY_LINE: &str = "qgate: failing: 1 finding at or above \"error\" (see
 // Requirement: Format option
 
 #[test]
-fn markdown_and_azure_in_every_form() {
+fn markdown_azure_and_github_in_every_form() {
     let repo = f_got_worse();
     repo.write("old.ts", function("f", 1));
     repo.write("new.ts", function("f", 3));
@@ -92,6 +93,13 @@ fn markdown_and_azure_in_every_form() {
         assert!(
             azure.contains(";code=complexity/cyclomatic-increase]f: cyclomatic complexity 2 -> "),
             "{form:?}: {azure}"
+        );
+        let github = run("github");
+        assert!(github.starts_with("::warning file="), "{form:?}: {github}");
+        assert!(
+            github
+                .contains(",title=complexity/cyclomatic-increase::f: cyclomatic complexity 2 -> "),
+            "{form:?}: {github}"
         );
     }
 }
@@ -185,9 +193,9 @@ fn markdown_at_warning() {
 }
 
 #[test]
-fn unknown_base_revision_in_markdown_and_azure() {
+fn unknown_base_revision_in_markdown_azure_and_github() {
     let repo = f_got_worse();
-    for format in ["markdown", "azure"] {
+    for format in ["markdown", "azure", "github"] {
         let out = repo.qgate(&["--base", "no-such-branch", "--format", format]);
         assert_eq!(stdout(&out), "", "{format}");
         assert!(
@@ -226,5 +234,47 @@ fn azure_no_findings() {
     );
     let out = repo.qgate(&["--base", "main", "--format", "azure"]);
     assert_eq!(stdout(&out), "No regressions found.\n");
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+}
+
+// Requirement: GitHub Actions annotations
+
+#[test]
+fn github_annotations() {
+    let repo = error_and_warning();
+    let out = repo.qgate(&["--base", "main", "--format", "github"]);
+    assert_eq!(
+        stdout(&out),
+        "::warning file=src/a.ts,line=1,title=complexity/cyclomatic-increase::\
+         f: cyclomatic complexity 2 -> 4 (+2)\n\
+         ::error file=src/domain/order.ts,line=1,title=architecture/forbidden-import::\
+         imports src/ui/W (\"../ui/W\"), forbidden by \"domain-is-pure\"\n",
+        "{}",
+        stderr(&out)
+    );
+    assert!(stderr(&out).ends_with(SUMMARY_LINE), "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn github_no_findings() {
+    let repo = change(
+        &[("src/a.ts", &function("f", 1))],
+        &[("src/a.ts", &function("f", 1)), ("README.md", "x\n")],
+    );
+    let out = repo.qgate(&["--base", "main", "--format", "github"]);
+    assert_eq!(stdout(&out), "No regressions found.\n");
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+}
+
+#[test]
+fn github_never_failing() {
+    let repo = error_and_warning();
+    let out = repo.qgate(&["--base", "main", "--format", "github", "--fail-on", "never"]);
+    assert!(
+        stdout(&out).contains("::error file=src/domain/order.ts,"),
+        "{}",
+        stdout(&out)
+    );
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
 }

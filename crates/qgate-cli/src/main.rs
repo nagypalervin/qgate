@@ -34,7 +34,9 @@ use qgate_config::Config;
 use qgate_core::{Finding, Location, Severity};
 use qgate_git::{BlobId, BlobReader, ChangedFile, Changes, GitError, Repository};
 use qgate_lang::{FileModel, Language, ParseError, Token};
-use qgate_report::{ReportSummary, render_azure, render_json, render_markdown, render_text};
+use qgate_report::{
+    ReportSummary, render_azure, render_github, render_json, render_markdown, render_text,
+};
 
 /// Exit code for a check that ran and found findings at or above the
 /// `--fail-on` level.
@@ -107,6 +109,8 @@ enum Format {
     Markdown,
     /// Azure Pipelines logging commands, one issue per finding.
     Azure,
+    /// GitHub Actions workflow commands, one annotation per finding.
+    Github,
 }
 
 impl Format {
@@ -117,6 +121,7 @@ impl Format {
             Self::Json => "json",
             Self::Markdown => "markdown",
             Self::Azure => "azure",
+            Self::Github => "github",
         }
     }
 
@@ -131,13 +136,20 @@ impl Format {
             Self::Json => render_json(findings, summary),
             Self::Markdown => render_markdown(findings, summary),
             Self::Azure => render_azure(findings),
+            Self::Github => render_github(findings),
         }
     }
 }
 
 impl ValueEnum for Format {
     fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Text, Self::Json, Self::Markdown, Self::Azure]
+        &[
+            Self::Text,
+            Self::Json,
+            Self::Markdown,
+            Self::Azure,
+            Self::Github,
+        ]
     }
 
     fn to_possible_value(&self) -> Option<PossibleValue> {
@@ -270,7 +282,8 @@ fn check_command() -> Command {
                 .value_name("format")
                 .help(
                     "How to write the report: text for people, json for programs, \
-                     markdown for a pull request comment, azure for Azure Pipelines annotations",
+                     markdown for a pull request comment, azure for Azure Pipelines annotations, \
+                     github for GitHub Actions annotations",
                 )
                 .value_parser(value_parser!(Format))
                 .default_value(DEFAULT_FORMAT.name()),
