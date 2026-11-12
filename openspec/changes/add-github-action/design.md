@@ -497,7 +497,17 @@ with `error | src/értékelés.ts:1 | ertekeles: cyclomatic complexity 1
 marker line and the `\>` escape do not show. The annotation was
 checked through the check-run API above; the job summary was not
 reported separately, and GitHub has no API for it (the check run's
-`output` fields are empty). See "Review of PR 2". Ervin also merged that test pull request into the
+`output` fields are empty). See "Review of PR 2".
+
+After the review of PR 2, Ervin looked at Windows scenario 3 (pull
+request 7, run 43271826787):
+- **the job summary** on the run's Summary page: he pasted the same
+  rendered report as the comment ("1 finding, 1 at or above error." and
+  the `src/értékelés.ts:1` row);
+- **the annotation on the diff:** on "Files changed", at line 1 of
+  `src/értékelés.ts`, he saw the error annotation "ertekeles:
+  cyclomatic complexity 1 -> 7 (+6)". The page's copied text does not
+  include annotations, so this was asked as a question. Ervin also merged that test pull request into the
 rehearsal repository's `main` (it was meant only to be looked at); no
 effect on qgate, but the next rehearsal starts from a reverted `main`.
 
@@ -511,8 +521,9 @@ The `reviewer` subagent found no blocker. Its findings and what was done:
   ci-integration delta no longer says the job summary lists the
   findings.
 - **Should-fix: nobody had seen the job summary or the annotation on
-  the diff.** GitHub has no API for the job summary. Ervin is asked to
-  look at both; task 3.3 stays open until then.
+  the diff.** GitHub has no API for the job summary. Ervin looked at
+  both on pull request 7 (see the rehearsal section); task 3.3 was
+  reopened until then.
 - **Should-fix: the README promised six platforms, two had run.** A
   second rehearsal ran the README workflow (`comment: false`, so the
   jobs do not race) on the other four, pull request 12, run

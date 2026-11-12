@@ -61,7 +61,7 @@ D12).
 
 - [x] 3.1 Rewrite README "In GitHub Actions" (design D10), and add `github` to the formats paragraph. Move every install block to `0.3.0` and verify with `grep` that no `0.2.0` is left in them.
 - [x] 3.2 Rehearse the README workflow, extracted unchanged, in the rehearsal repository on `ubuntu-latest` and `windows-latest` with scenarios 1 to 7 of design D10. Check comments and annotations through the REST API (GitHub has no API for the job summary; see 3.3).
-- [ ] 3.3 Ask Ervin to look at one scenario-1 pull request in the web UI: the annotation on the diff, the job summary, the comment.
+- [x] 3.3 Ask Ervin to look at one scenario-1 pull request in the web UI: the annotation on the diff, the job summary, the comment.
 - [x] 3.4 Record the rehearsal in `design.md`: run ids, comment ids and bodies per scenario, the extraction `diff`, Ervin's check.
 - [x] 3.5 After the review of PR 2, rehearse what the first rehearsal left out: the README workflow on `ubuntu-24.04-arm`, `windows-11-arm`, `macos-latest` and `macos-15-intel`; one Warning with the default level and with `fail-on: warning`; a push with `base`; the README's JSON steps with `actions/upload-artifact@v7`. Record the runs in `design.md`.
 
