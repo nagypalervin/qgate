@@ -467,6 +467,17 @@ first `yaml` block of "In GitHub Actions"; each branch's
   step failed with the `grade` annotation.
 - `actions/checkout@v7` logged no deprecation warning.
 
+**Ervin's check in the web UI (task 3.3).** Ervin looked at pull
+request 3 (Linux, after scenario 3) and pasted the rendered comment:
+the heading "qgate", "1 finding, 1 at or above error.", and the table
+with `error | src/értékelés.ts:1 | ertekeles: cyclomatic complexity 1
+-> 7 (+6) | complexity/cyclomatic-increase`. The table renders, the
+marker line and the `\>` escape do not show. The annotation was
+checked through the check-run API above; the job summary was not
+reported separately. Ervin also merged that test pull request into the
+rehearsal repository's `main` (it was meant only to be looked at); no
+effect on qgate, but the next rehearsal starts from a reverted `main`.
+
 ## Risks / Trade-offs
 
 - **[The action is first run for real after the release]** A bug found
