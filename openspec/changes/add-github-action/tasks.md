@@ -22,7 +22,7 @@ D12).
 
 ## 1. Format, action, release check (PR 1, `change/add-github-action`)
 
-- [ ] 1.1 Write failing unit tests for `render_github` in `crates/qgate-report` (design D1):
+- [x] 1.1 Write failing unit tests for `render_github` in `crates/qgate-report` (design D1):
   - one error, one warning;
   - a finding without a line;
   - an Info finding left out;
@@ -30,7 +30,7 @@ D12).
   - each escape in `file`, `title` and the message.
 
   Then implement it in `github.rs`.
-- [ ] 1.2 Add `github` to `--format` in `qgate-cli`. Add end-to-end tests in `crates/qgate-cli/tests/`:
+- [x] 1.2 Add `github` to `--format` in `qgate-cli`. Add end-to-end tests in `crates/qgate-cli/tests/`:
   - `--format github` in each `check` form;
   - exit code 1 and the stderr summary line with an Error;
   - the usage error for `--format xml` naming all five values.

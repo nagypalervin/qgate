@@ -448,7 +448,7 @@ fn unknown_format() {
     let err = stderr(&out);
     assert!(err.contains("xml"), "{err}");
     assert!(
-        err.contains("[possible values: text, json, markdown, azure]"),
+        err.contains("[possible values: text, json, markdown, azure, github]"),
         "{err}"
     );
     assert_eq!(stdout(&out), "");
@@ -466,7 +466,7 @@ fn help_shows_every_form() {
         "qgate check --base <rev> [--head <rev>] [--format <format>] [--fail-on <level>]\n",
         "qgate check --base <rev> --worktree [--format <format>] [--fail-on <level>]\n",
         "Check the working tree (uncommitted and untracked files) instead of --head",
-        "[default: text] [possible values: text, json, markdown, azure]",
+        "[default: text] [possible values: text, json, markdown, azure, github]",
     ] {
         assert!(help.contains(form), "{help}");
     }
