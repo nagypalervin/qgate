@@ -229,9 +229,9 @@ exactly two file arguments nor `--base`, that has both file arguments and
 `--base`, that has `--head` without `--base`, that has `--worktree` without
 `--base`, that has both `--worktree` and `--head`, that has a `--fail-on`
 value other than `error`, `warning` or `never`, that has a `--format`
-value other than `text`, `json`, `markdown` or `azure`, or that has an
-unknown argument: print a usage message to standard error and exit with
-code 2.
+value other than `text`, `json`, `markdown`, `azure` or `github`, or
+that has an unknown argument: print a usage message to standard error
+and exit with code 2.
 
 #### Scenario: One argument
 
@@ -284,7 +284,7 @@ code 2.
 #### Scenario: Unknown format
 
 - **WHEN** the user runs `qgate check a.ts b.ts --format xml`
-- **THEN** standard error names the allowed values `text`, `json`, `markdown` and `azure`
+- **THEN** standard error names the allowed values `text`, `json`, `markdown`, `azure` and `github`
 - **AND** standard output is empty
 - **AND** the exit code is 2
 
