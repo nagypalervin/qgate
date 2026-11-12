@@ -4,16 +4,16 @@
 
 ### Requirement: Documented Azure Pipelines job
 
-The README SHALL give a `qgate` job for Azure Pipelines in two variants:
-- one for a Microsoft-hosted Linux agent (`ubuntu-latest`) in bash, with
-  a PowerShell 7 step for the comment;
-- one for a Microsoft-hosted Windows agent (`windows-latest`) in PowerShell 7.
+The README SHALL give a `qgate` job for Microsoft-hosted Azure
+Pipelines agents in two variants:
+- Linux (`ubuntu-latest`), in bash with a `pwsh` step for the comment;
+- Windows (`windows-latest`), in PowerShell 7.
 
 Each variant SHALL work when copied unchanged into the `jobs` of a
 pipeline for an Azure Repos Git repository. It SHALL need no service
-connection. Its only token SHALL be the pipeline's own
-`System.AccessToken`, and its only permission beyond a default
-pipeline's SHALL be the one the comment needs.
+connection. Its only token SHALL be `System.AccessToken`, and its
+only permission beyond a default pipeline's SHALL be the one the
+comment needs.
 
 #### Scenario: Copying the Linux job
 
