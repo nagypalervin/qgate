@@ -64,7 +64,7 @@ D10).
 
 ## 2. Release 0.2.0 (between the pull requests)
 
-- [ ] 2.1 After PR 1 merges, ask Ervin to push `v0.2.0`. Check the draft release:
+- [x] 2.1 After PR 1 merges, ask Ervin to push `v0.2.0`. Check the draft release:
   - six archives and `SHA256SUMS`;
   - `sha256sum --check`;
   - every archive holds `qgate-pr-comment.ps1`;
@@ -86,7 +86,7 @@ D10).
   - check the threads through the REST API;
   - check the build issues through the build timeline;
   - abandon the spike's pull request 1349 first.
-- [ ] 3.3 Ask Ervin to look at one scenario-1 comment in the web UI. He confirms that the table renders, the escapes do not show, and there is no marker line.
+- [ ] 3.3 Ask Ervin to look at one scenario-1 comment in the web UI. Ervin confirms that the table renders, the escapes do not show, and there is no marker line.
 - [ ] 3.4 Record the rehearsal in `design.md`:
   - the build ids;
   - the thread ids and statuses per scenario;

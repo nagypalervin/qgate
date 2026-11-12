@@ -431,8 +431,10 @@ crate, so the dependency rules and ADRs are unaffected.
   `musl-tools`: from about 13:50 UTC on 2026-11-11 the GitHub runners
   could not resolve the Ubuntu mirrors, which other projects reported
   the same day. Six retries over two hours failed the same way. The
-  packing step has not changed since `9997745`; task 2.1 checks the
-  archives of the real release.
+  runners resolved again later that day: on `31c815c`, the last commit
+  of PR 1, run 43062529813 passed all six builds and the checksums.
+  Its archives all hold the script, `SHA256SUMS` matches them, and the
+  Linux arm64 binary prints `qgate 0.2.0`.
 - **The script against the real API (task 1.8),** in the rehearsal
   project. Pull request 1350 ran on `ubuntu-latest` (build 1312) and
   pull request 1351 on `windows-latest` (build 1311). Each build ran
@@ -468,3 +470,20 @@ crate, so the dependency rules and ADRs are unaffected.
   reactivated it, each with exit code 0 and "1 finding" in the singular.
   A step without `SYSTEM_ACCESSTOKEN` ended with exit code 1 and one
   build error in the build summary, its three lines intact.
+
+## Release 0.2.0 (task 2.1)
+
+PR 1 merged as `c24029f`, whose tree equals `31c815c`. At Ervin's
+request the tag was pushed by Claude, as an annotated tag `v0.2.0` on
+`c24029f` in Ervin's name, like `v0.1.0`; Ervin published the draft.
+
+- Run 43091476436 passed every job and made the draft `qgate 0.2.0`
+  with six archives and `SHA256SUMS`.
+- On the files downloaded from the draft, `sha256sum --check
+  SHA256SUMS` passed for all six archives.
+- Every archive holds exactly one `qgate-pr-comment.ps1`; the one in
+  the Linux arm64 archive is byte-identical to the committed script.
+- The Linux arm64 binary is statically linked, prints `qgate 0.2.0`,
+  and renders `--format markdown` against `v0.1.0` (marker
+  `count=0 failing=0 fail_on=error`, "No regressions found.", exit 0).
+- Ervin published the release on 2026-11-11; it is the latest release.
