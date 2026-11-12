@@ -487,3 +487,57 @@ request the tag was pushed by Claude, as an annotated tag `v0.2.0` on
   and renders `--format markdown` against `v0.1.0` (marker
   `count=0 failing=0 fail_on=error`, "No regressions found.", exit 0).
 - Ervin published the release on 2026-11-11; it is the latest release.
+
+## Rehearsal of the README jobs (tasks 3.2 to 3.4)
+
+Run on 2026-11-12 in the rehearsal project `qgate-rehearsal`, pipeline
+36, with qgate 0.2.0, on `ubuntu-latest` and `windows-latest`. The
+earlier rehearsal pull requests 1341 to 1351, including the spike's
+1349, were abandoned first.
+
+**Extraction.** As in `add-azure-pipelines`, a script wrote the first
+(Linux) and the second (Windows) YAML block of the README section "In
+Azure Pipelines" as `azure-pipelines.yml`: the line `jobs:` and the
+block, unchanged. `diff` of each block against its pipeline file, on
+every rehearsal branch:
+
+```
+0a1
+> jobs:
+```
+
+The later commits of scenarios 2 and 3 changed only `src/`.
+
+**Results.** Every scenario gave the expected result. "Issues" are the
+build's issues from its timeline; the threads were read through the
+REST API after each build.
+
+| # | Scenario | Linux | Windows |
+|---|---|---|---|
+| 1 | `grade`'s complexity 2 → 8, no thread yet | PR 1352, build 1318. `qgate report`, `qgate comment` ("created the qgate comment (1 finding, 1 at or above error)") succeeded; `qgate check` failed. Issue: error, `src/grade.ts:1`, code `complexity/cyclomatic-increase`. Thread 4547, **active**, by the project's Build Service, one row; no marker line. | PR 1354, build 1321. Same steps, issue and message. Thread 4548, **active**, the same text. |
+| 2 | A commit that restores `grade` | Build 1328 succeeded: "updated and closed the qgate comment (0 findings, …)". Thread 4547 **closed**, "No regressions found." | Build 1327, the same. Thread 4548 **closed**. |
+| 3 | A commit that brings the complexity back and adds `src/értékelés.ts`, a copy of `grade` | Build 1332 failed at `qgate check`: "updated the qgate comment (2 findings, 1 at or above error)". Issues: the error, and a warning at `src/értékelés.ts:1` with code `duplication/duplicate-block`. Thread 4547 **active** again with both rows; still the only qgate thread. | Build 1331, the same. Thread 4548 **active**, both rows, the only qgate thread. |
+| 4 | A README-only PR | PR 1353, build 1320 succeeded: "no findings and no qgate comment; nothing to write". No thread, no issue. | PR 1355, build 1323, the same. |
+
+**Ervin's check (task 3.3)** was on pull request 1352's thread 4547
+after scenario 3, whose text holds scenario 1's row and one more. Ervin
+copied the comment as the web UI showed it: a table with the columns
+Severity, Location, Finding and Rule; `2 -> 8` without the backslash;
+`src/értékelés.ts` intact; no marker line. The author shown is
+"qgate-rehearsal Build Service".
+
+**Also observed:**
+- **Non-ASCII text survives both agents.** Scenario 3's path
+  `src/értékelés.ts` was added to check the Windows report step, which
+  redirects qgate's output with `>`. PowerShell 7.4 and later pass a
+  native command's bytes to the file unchanged; the comment and the
+  build issue show the path intact on both agents.
+- **CI builds on every pushed branch** (builds 1317, 1319, 1322, 1324,
+  1325, 1326, 1329, 1330; reason `individualCI`). In each the `qgate`
+  job was skipped and the build succeeded, as in `add-azure-pipelines`.
+- **The duplicate's first copy is named twice in the comment:** the
+  message says "duplicates src/grade.ts:1-19", and the Finding cell
+  then adds "also at src/grade.ts:1". The spec lists every related
+  location after the message, and the first one is the copy the message
+  names. This is cosmetic and released in 0.2.0; it is left for a
+  follow-up change rather than changing the spec here.

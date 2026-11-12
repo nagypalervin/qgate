@@ -82,12 +82,12 @@ D10).
   - a short note on the `markdown` and `azure` formats in the formats section.
 
   Verify with `grep` that no `0.1.0` is left in install blocks.
-- [ ] 3.2 Rehearse the README jobs, extracted unchanged, on both agents with scenarios 1 to 4 of design D8:
+- [x] 3.2 Rehearse the README jobs, extracted unchanged, on both agents with scenarios 1 to 4 of design D8:
   - check the threads through the REST API;
   - check the build issues through the build timeline;
   - abandon the spike's pull request 1349 first.
-- [ ] 3.3 Ask Ervin to look at one scenario-1 comment in the web UI. Ervin confirms that the table renders, the escapes do not show, and there is no marker line.
-- [ ] 3.4 Record the rehearsal in `design.md`:
+- [x] 3.3 Ask Ervin to look at one scenario-1 comment in the web UI. Ervin confirms that the table renders, the escapes do not show, and there is no marker line.
+- [x] 3.4 Record the rehearsal in `design.md`:
   - the build ids;
   - the thread ids and statuses per scenario;
   - the extraction `diff`;
