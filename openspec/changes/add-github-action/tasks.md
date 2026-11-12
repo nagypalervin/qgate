@@ -36,8 +36,8 @@ D12).
   - the usage error for `--format xml` naming all five values.
 
   Update `qgate-report`'s module doc and the `--format` help text.
-- [ ] 1.3 Write `ci/github/qgate-action.Tests.ps1` (Pester 5.9.1, mocked `Invoke-Qgate` and `Invoke-GitHub`) for every case in design D9, then `ci/github/qgate-action.ps1` until the tests pass locally.
-- [ ] 1.4 Write `action.yml` (design D2): the three inputs, the four steps, `QGATE_VERSION`, the `comment` condition. Check it with `actionlint` if it can be installed with a verified checksum; otherwise review it by hand against GitHub's metadata syntax.
+- [x] 1.3 Write `ci/github/qgate-action.Tests.ps1` (Pester 5.9.1, mocked `Invoke-Qgate` and `Invoke-GitHub`) for every case in design D9, then `ci/github/qgate-action.ps1` until the tests pass locally.
+- [x] 1.4 Write `action.yml` (design D2): the three inputs, the four steps, `QGATE_VERSION`, the `comment` condition. Check it with `actionlint` if it can be installed with a verified checksum; otherwise review it by hand against GitHub's metadata syntax.
 - [ ] 1.5 Point the `pester (<os>)` jobs at `ci/` so they run both directories; verify on the PR that both jobs run the new tests and keep their names.
 - [ ] 1.6 Release check and version (design D7):
   - a step in `release.yml`'s `version` job compares `action.yml`'s `QGATE_VERSION` with the tag, with a self-test of the mismatch;
@@ -45,7 +45,8 @@ D12).
   - the version becomes `0.3.0`, with `Cargo.lock` following.
 
   Verify from the PR's release rehearsal that the Linux arm64 binary prints `qgate 0.3.0` and renders `--format github`.
-- [ ] 1.7 Add `action.yml` and `ci/github/` to `CLAUDE.md`'s "Layout" and to the README's "Repository layout" (design D11).
+- [x] 1.7 Add `action.yml` and `ci/github/` to `CLAUDE.md`'s "Layout" and to the README's "Repository layout" (design D11).
+- [x] 1.8 Before the release, run a copy of the action with `QGATE_VERSION: 0.2.0` as a local action in the rehearsal repository, on `ubuntu-latest` and `windows-latest` (design, "Decisions during apply"). Check that install, job summary and comment work, and that the gate fails with "qgate check could not run (exit code 2)" and qgate's usage error printed as text. Record the run in `design.md`.
 
 ## 2. Release 0.3.0 (between the pull requests)
 

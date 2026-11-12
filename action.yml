@@ -1,0 +1,56 @@
+# The qgate GitHub Action (design D2 of the OpenSpec change
+# add-github-action). The logic is in ci/github/qgate-action.ps1, tested
+# with Pester; this file only wires the inputs to its four steps.
+#
+# QGATE_VERSION is the qgate release this action installs. It appears once
+# per step, and the release workflow fails a tag when any of them differs
+# from the tag's version (.github/scripts/check-action-version.sh).
+name: qgate
+description: Reports what a pull request made worse (complexity, duplication, architecture rules) and fails the check on it.
+inputs:
+  base:
+    description: Revision to compare with. Empty means origin/<base branch> on a pull_request event.
+    required: false
+    default: ''
+  fail-on:
+    description: Lowest severity that fails the step, error, warning or never.
+    required: false
+    default: error
+  comment:
+    description: Keep one qgate comment on the pull request up to date (needs pull-requests write). Set to false to skip it.
+    required: false
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - name: Install qgate
+      shell: pwsh
+      run: '& "$env:GITHUB_ACTION_PATH/ci/github/qgate-action.ps1" -Step Install'
+      env:
+        QGATE_VERSION: 0.3.0
+        QGATE_INPUT_BASE: ${{ inputs.base }}
+        QGATE_INPUT_FAIL_ON: ${{ inputs.fail-on }}
+
+    - name: qgate report
+      shell: pwsh
+      run: '& "$env:GITHUB_ACTION_PATH/ci/github/qgate-action.ps1" -Step Report'
+      env:
+        QGATE_VERSION: 0.3.0
+        QGATE_INPUT_BASE: ${{ inputs.base }}
+        QGATE_INPUT_FAIL_ON: ${{ inputs.fail-on }}
+
+    - name: qgate comment
+      if: inputs.comment == 'true'
+      shell: pwsh
+      run: '& "$env:GITHUB_ACTION_PATH/ci/github/qgate-action.ps1" -Step Comment'
+      env:
+        QGATE_VERSION: 0.3.0
+        GITHUB_TOKEN: ${{ github.token }}
+
+    - name: qgate check
+      shell: pwsh
+      run: '& "$env:GITHUB_ACTION_PATH/ci/github/qgate-action.ps1" -Step Gate'
+      env:
+        QGATE_VERSION: 0.3.0
+        QGATE_INPUT_BASE: ${{ inputs.base }}
+        QGATE_INPUT_FAIL_ON: ${{ inputs.fail-on }}

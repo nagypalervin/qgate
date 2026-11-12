@@ -302,6 +302,61 @@ X64), `windows-latest` (Windows X64) and `macos-latest` (macOS ARM64):
 
 None of this contradicts D1 to D6; the apply continues with 1.1.
 
+## Decisions during apply
+
+- **No `GITHUB_ENV`** (changes D2 and D3). Every step recomputes the base
+  and the binary's path (`$RUNNER_TEMP/qgate-<version>/qgate-<version>-<target>/`)
+  from the same inputs. The job's environment stays as it was, and a
+  base input cannot write other variables through `GITHUB_ENV`.
+- **`QGATE_VERSION` once per step** (changes D3's "one place"). A
+  composite action has no shared `env:`, and every step needs the
+  version for the paths. `.github/scripts/check-action-version.sh` checks
+  every `QGATE_VERSION` line against the tag, so a missed one fails the
+  release; the `release.yml` self-test also requires them to equal the
+  workspace version on every pull request that touches `action.yml`.
+- **Tests mock `Invoke-WebRequest`,** not a wrapper (changes D9). The
+  wrapper `Invoke-GitHub` (headers, paging through `Link`, error
+  mapping) is then tested too. `Invoke-Qgate` is mocked;
+  `Expand-QgateArchive` is tested with a real `.tar.gz` and `.zip`.
+- **The gate's stdout is copied as bytes** to the process's standard
+  output (`Write-QgateOutput`), so non-ASCII paths in annotations do
+  not depend on the console encoding.
+- **No `actionlint`:** it checks workflows, not an action's metadata
+  file. `action.yml` was checked by hand against the metadata syntax,
+  and the pre-release run (below) runs it.
+- **A run before the release** (new task 1.8). The action downloads the
+  release that matches `QGATE_VERSION`, so the real action can only run
+  after `v0.3.0`. To catch wiring mistakes earlier, a copy of
+  `action.yml` and `ci/github/` with `QGATE_VERSION: 0.2.0` runs as a
+  local action (`uses: ./qgate-action`) in the rehearsal repository.
+  0.2.0 has no `--format github`, so the gate takes the exit-code-2
+  path; install, report, job summary and comment run for real.
+
+## Pre-release run (task 1.8, 2026-11-12)
+
+Rehearsal repository, pull request 2 (branch `smoke`), run
+43265505693. A copy of this branch's `action.yml` (every
+`QGATE_VERSION` set to `0.2.0`) and `ci/github/qgate-action.ps1` as
+`./qgate-action`; the workflow grants `contents: read` and
+`pull-requests: write`, checks out with `fetch-depth: 0`, and runs the
+action on `ubuntu-latest` (now Ubuntu 26.04), then on `windows-latest`.
+
+| Step | Linux | Windows |
+|---|---|---|
+| Install | `installed qgate 0.2.0 (x86_64-unknown-linux-musl); comparing with origin/main` | the same for `x86_64-pc-windows-msvc` |
+| Report | `added the report to the job summary` | the same |
+| Comment | `created the qgate comment (1 finding, 0 at or above error)` | `updated the qgate comment (...)`, the same comment |
+| Gate | qgate's `error: invalid value 'github' for '--format <format>'` between the stop-commands lines, then `qgate check could not run (exit code 2)` as an error; the step failed | the same |
+
+- The pull request has one comment, by `github-actions[bot]`, with the
+  marker line and the row for `src/értékelés.ts:1` (the non-ASCII path
+  intact).
+- The runner masks the stop-commands token in the log (`***`).
+- The change to `src/grade.ts` produced no finding: the rehearsal's
+  `main` had been seeded with the complex `grade.ts` of the Azure
+  rehearsal, so the branch made it simpler. The PR 2 rehearsal resets
+  `main` to the simple version first.
+
 ## Risks / Trade-offs
 
 - **[The action is first run for real after the release]** A bug found
