@@ -115,11 +115,11 @@ its own checkout at the tag, which already matches the binaries.
 
 - **Pull request:** number and head repository from the event payload
   at `$GITHUB_EVENT_PATH`.
-- **Read-only token, skip with a notice** (`::notice::`), before any
-  API call:
-  - the head repository's `full_name` differs from `GITHUB_REPOSITORY`,
-    or it is null (deleted fork): "the comment is skipped for pull
-    requests from forks: their GITHUB_TOKEN cannot write";
+- **Forks: skip with a notice** (`::notice::`), before any API call,
+  when the head repository's `full_name` differs from
+  `GITHUB_REPOSITORY` or is null (a deleted fork): "the comment is
+  skipped for pull requests from forks: GitHub gives them a
+  GITHUB_TOKEN that cannot write".
 - **Find the comment:** `GET /repos/{repo}/issues/{n}/comments
   ?per_page=100`, following `Link: rel="next"`. The qgate comment is
   the first whose author is `github-actions[bot]` and whose body starts
@@ -144,8 +144,9 @@ its own checkout at the tag, which already matches the binaries.
 
 - `base` input set: use it, on any event.
 - Empty, and `GITHUB_EVENT_NAME` is `pull_request`: `origin/$GITHUB_BASE_REF`.
-- Empty otherwise: fail in `Install`, before downloading, with "qgate
-  needs a pull_request event or a base input".
+- Empty otherwise: fail in `Install`, before downloading, with "no
+  base revision to compare with; run the action on a pull_request
+  event, or set its base input".
 - The comment step also skips (silently) on events other than
   `pull_request`: there is no pull request to comment on.
 - A shallow checkout is not detected: qgate's own error names the
@@ -374,6 +375,21 @@ PR #16, all 18 checks green on the first push.
     `::warning file=src/a.ts,line=1,title=complexity/cyclomatic-increase::f:
     cyclomatic complexity 1 -> 4 (+3)`.
 
+## Release 0.3.0 (task 2.1)
+
+- PR #16 merged as e29df6e. At Ervin's request the agent pushed the
+  annotated tag `v0.3.0` ("qgate 0.3.0", Ervin's noreply identity, as
+  for 0.2.0) after `check-version.sh` and `check-action-version.sh`
+  accepted it on `main`.
+- Release run 43269011917: all jobs green; the `version` job printed
+  "every QGATE_VERSION in action.yml is 0.3.0, as the tag v0.3.0 says".
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six; each holds the binary, `qgate-pr-comment.ps1`,
+  `README.md` and both licenses; the Linux arm64 binary printed
+  `qgate 0.3.0`.
+- Ervin published the draft on 2026-11-12 (17:31 UTC); `releases/latest`
+  is `v0.3.0` and its files download.
+
 ## Review of PR 1
 
 The `reviewer` subagent found no blocker. Its findings and what was done:
@@ -381,8 +397,9 @@ The `reviewer` subagent found no blocker. Its findings and what was done:
 - **Should-fix: Dependabot was skipped on a wrong premise.** Since 2021,
   workflows triggered by Dependabot get the permissions the workflow's
   `permissions:` key grants, so the README workflow gives them a token
-  that can write. The skip is removed: the spec's requirement "Pull
-  requests with a read-only token" now names forks only, and a test
+  that can write. The skip is removed: the spec's requirement (then
+  "Pull requests with a read-only token", renamed "Pull requests from
+  forks" in the review of PR 2) now names forks only, and a test
   checks that a Dependabot pull request gets the comment. Changed after
   Gate 1; the proposal says so.
 - **Should-fix: the spec promised an annotation per finding.** The spike
@@ -418,6 +435,129 @@ The `reviewer` subagent found no blocker. Its findings and what was done:
   - qgate's standard error is decoded with the console encoding by
     `2>`; non-ASCII text in an error message may look wrong in a
     Windows log. It reaches only the log.
+
+## Rehearsal of the README workflow (task 3.2)
+
+Rehearsal repository, 2026-11-12, with the published `@v0.3.0`. Before
+it: pull requests 1 and 2 (spike, pre-release run) closed, and `main`'s
+`src/grade.ts` reset to the simple version (complexity 2).
+
+**The workflow is the README's.** A scratch script printed the first
+`yaml` block of "In GitHub Actions" unchanged:
+
+```sh
+awk '/^### In GitHub Actions$/ { s = 1; next }
+     s && /^### / { exit }
+     s && !done && /^```yaml$/ { b = 1; next }
+     b && /^```$/ { b = 0; done = 1; next }
+     b { print }' README.md
+```
+
+Each branch's `.github/workflows/qgate.yml` was compared with it by
+`diff`:
+- Linux scenarios 1 to 4: no difference;
+- Linux 5: `6d5` (no `pull-requests: write`); Linux 6: `6d5` and
+  `15a15,16` (`with: comment: false`); Linux 7: `2c2` (`on: push`);
+- Windows 1 to 4: `10c10` (`runs-on: windows-latest`); Windows 5 and 6:
+  the Linux lines plus `10c9`; Windows 7: `2c2` and `10c10`.
+
+| # | Scenario | Linux run (PR) | Windows run (PR) | Result on both |
+|---|---|---|---|---|
+| 1 | `grade` 2 -> 8 | 43270761465 (#3) | 43271598570 (#7) | step failed; error annotation `src/grade.ts:1`; comment created (Linux 6831081351, Windows 6831199408) |
+| 2 | fix pushed | 43270874931 | 43271717142 | step succeeded; the same comment edited to the `count=0` report, "No regressions found." |
+| 3 | `ertekeles` 1 -> 7 in `src/értékelés.ts` | 43271049647 | 43271826787 | step failed; annotation and comment row name `src/értékelés.ts:1` intact; still one comment |
+| 4 | README only | 43271163964 (#4) | 43271978936 (#8) | step succeeded; no comment |
+| 5 | no `pull-requests: write` | 43271266084 (#5) | 43272101206 (#9) | step failed with the 403 message naming `pull-requests: write`; no gate annotation; no comment |
+| 6 | `comment: false`, `contents: read` | 43271402040 (#6) | 43272211304 (#10) | step failed with the `grade` annotation; no comment |
+| 7 | `on: push`, no `base` | 43271490407 | 43272363368 | step failed: "no base revision to compare with; run the action on a pull_request event, or set its base input" |
+
+- **The comment's bodies,** from its edit history (GraphQL
+  `userContentEdits`), the same on both pull requests: scenario 1
+  `count=1 failing=1` with the row `error | src/grade.ts:1 | grade:
+  cyclomatic complexity 2 -\> 8 (+6)`; scenario 2 `count=0` and "No
+  regressions found."; scenario 3 `count=1 failing=1` with the row for
+  `src/értékelés.ts:1`. Linux 6831081351 (created 17:34:01, edited
+  17:34:56 and 17:35:36), Windows 6831199408 (17:38:54, 17:39:35,
+  17:40:14).
+- qgate's summary line on standard error appeared between the
+  stop-commands lines in every run that had one (scenarios 1, 3, 5 and
+  6); the runner masked the token. Scenarios 2 and 4 print nothing on
+  standard error, and 7 fails before qgate runs.
+- The README's steps without the action (the install block and the
+  `--format github` line, wrapped in one job unchanged) ran on Linux,
+  run 43272496815 (#11): the archive passed `sha256sum -c`, and the
+  step failed with the `grade` annotation.
+- `actions/checkout@v7` logged no deprecation warning.
+
+**Ervin's check in the web UI (task 3.3).** Ervin looked at pull
+request 3 (Linux, after scenario 3) and pasted the rendered comment:
+the heading "qgate", "1 finding, 1 at or above error.", and the table
+with `error | src/értékelés.ts:1 | ertekeles: cyclomatic complexity 1
+-> 7 (+6) | complexity/cyclomatic-increase`. The table renders, the
+marker line and the `\>` escape do not show. The annotation was
+checked through the check-run API above; the job summary was not
+reported separately, and GitHub has no API for it (the check run's
+`output` fields are empty). See "Review of PR 2".
+
+After the review of PR 2, Ervin looked at Windows scenario 3 (pull
+request 7, run 43271826787):
+- **the job summary** on the run's Summary page: he pasted the same
+  rendered report as the comment ("1 finding, 1 at or above error." and
+  the `src/értékelés.ts:1` row);
+- **the annotation on the diff:** on "Files changed", at line 1 of
+  `src/értékelés.ts`, he saw the error annotation "ertekeles:
+  cyclomatic complexity 1 -> 7 (+6)". The page's copied text does not
+  include annotations, so this was asked as a question. Ervin also merged that test pull request into the
+rehearsal repository's `main` (it was meant only to be looked at); no
+effect on qgate, but the next rehearsal starts from a reverted `main`.
+
+## Review of PR 2
+
+The `reviewer` subagent found no blocker. Its findings and what was done:
+
+- **Should-fix: the job summary does not hold every finding.** Its
+  table stops at 50 rows (`MAX_ROWS`). The README now says "a table of
+  up to 50 findings" and that the step's log lists every finding; the
+  ci-integration delta no longer says the job summary lists the
+  findings.
+- **Should-fix: nobody had seen the job summary or the annotation on
+  the diff.** GitHub has no API for the job summary. Ervin looked at
+  both on pull request 7 (see the rehearsal section); task 3.3 was
+  reopened until then.
+- **Should-fix: the README promised six platforms, two had run.** A
+  second rehearsal ran the README workflow (`comment: false`, so the
+  jobs do not race) on the other four, pull request 12, run
+  43276141365: `ubuntu-24.04-arm`, `windows-11-arm`, `macos-latest`
+  (ARM64) and `macos-15-intel` each installed its own target
+  (`aarch64-unknown-linux-musl`, `aarch64-pc-windows-msvc`,
+  `aarch64-apple-darwin`, `x86_64-apple-darwin`) and failed with the
+  `grade` annotation. The sentence stays.
+- **Should-fix: `actions/upload-artifact@v4` runs on Node 20.** The
+  README names `@v7` (Node 24). Its JSON steps, cut out of the README
+  unchanged, ran in the same run: the check step failed with exit code
+  1, the upload ran (`if: ${{ !cancelled() }}`), and the artifact
+  `qgate-report` held one finding and the summary `count=1 failing=1`.
+- **Scenarios the first rehearsal left to Pester,** now run (task 3.5):
+  - "A warning with the default level" and "A stricter level", pull
+    request 13, run 43276192820: with one Warning (`grade` 2 -> 5), the
+    default job succeeded with a warning annotation, and the job with
+    the README's `fail-on: warning` failed;
+  - "A push with a base", branch `extra/pushbase`, run 43276190605:
+    `base: origin/main` on `push` failed with the `grade` annotation,
+    and the comment step said "not a pull_request event (push); no
+    comment to write".
+  - "A pull request from a fork" stays covered by Pester only.
+- **Nits fixed:** the gate is "skipped" rather than "the check does not
+  run" in the README; self-hosted runners also need `git` and network
+  access, and `tar` only on Linux and macOS; pinning a commit does not
+  pin the binary, which still comes from the release; forks "usually"
+  get a read-only token, and the requirement is renamed "Pull requests
+  from forks"; the README's status note mentions the CI integrations;
+  D4 and D5 match the code; the extraction is printed above; the diff
+  list is exact; the stop-commands claim names the runs it covers; the
+  comment bodies come from the edit history.
+- **Slip, not rewritten:** task 3.1 was ticked in the commit after the
+  README change, not in the same one, as CLAUDE.md asks.
 
 ## Risks / Trade-offs
 

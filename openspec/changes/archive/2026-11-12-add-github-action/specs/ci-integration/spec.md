@@ -44,8 +44,7 @@ The action's result SHALL follow qgate's exit code for its `fail-on`
 input (default `error`): it SHALL fail when the pull request adds a
 finding at or above that level. The step's log SHALL hold one
 annotation command per Error and Warning finding; GitHub shows at most
-10 errors and 10 warnings of a step as annotations, and the job summary
-lists the findings.
+10 errors and 10 warnings of a step as annotations.
 
 #### Scenario: An error fails the step
 
@@ -126,7 +125,7 @@ reading the repository.
 - **THEN** the step fails because of the error, with its annotation and job summary
 - **AND** the pull request has no qgate comment
 
-### Requirement: Pull requests with a read-only token
+### Requirement: Pull requests from forks
 
 For a pull request from a fork, GitHub gives the job a `GITHUB_TOKEN`
 that cannot write, unless the repository sends write tokens to fork

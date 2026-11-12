@@ -5,8 +5,8 @@
 > Status: early. `qgate check` compares TypeScript code between two git
 > revisions (or two files) for cyclomatic complexity, newly duplicated
 > code and, with a [`qgate.toml`](#architecture-rules-qgatetoml),
-> forbidden imports; more analyzers and CI integration follow the
-> [roadmap](#roadmap) below.
+> forbidden imports. It reports on pull requests in GitHub Actions and
+> Azure Pipelines; more analyzers follow the [roadmap](#roadmap) below.
 
 ## Try it
 
@@ -26,10 +26,10 @@ check it against `SHA256SUMS`, unpack it, and put `qgate` on your
 
 The Linux binaries are statically linked and run on any distribution,
 Alpine included (with `curl` installed). Each block below installs only
-when the checksum matches. On Linux, with version 0.2.0 as the example:
+when the checksum matches. On Linux, with version 0.3.0 as the example:
 
 ```sh
-v=0.2.0 t=x86_64-unknown-linux-musl
+v=0.3.0 t=x86_64-unknown-linux-musl
 base=https://github.com/nagypalervin/qgate/releases/download/v$v
 curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
   grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c &&
@@ -40,7 +40,7 @@ curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
 On macOS, the check uses `shasum`:
 
 ```sh
-v=0.2.0 t=aarch64-apple-darwin
+v=0.3.0 t=aarch64-apple-darwin
 base=https://github.com/nagypalervin/qgate/releases/download/v$v
 curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
   grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | shasum -a 256 --check &&
@@ -53,7 +53,7 @@ On Windows, in PowerShell, then add the unpacked folder to your `PATH`:
 
 ```powershell
 $ErrorActionPreference = "Stop"
-$v = "0.2.0"; $t = "x86_64-pc-windows-msvc"
+$v = "0.3.0"; $t = "x86_64-pc-windows-msvc"
 $base = "https://github.com/nagypalervin/qgate/releases/download/v$v"
 Invoke-WebRequest "$base/qgate-$v-$t.zip" -OutFile "qgate-$v-$t.zip"
 Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
@@ -131,10 +131,11 @@ example above has an Error finding, so it exits with `1`; add
 `--format json` writes the report as JSON for programs, such as coding
 agents, hooks and CI scripts, in every form (see
 [JSON output](#json-output)); `--format text`, the default, is the
-output shown here. Two formats are for CI: `--format markdown` writes
-the report as a pull request comment, and `--format azure` writes each
+output shown here. Three formats are for CI: `--format markdown` writes
+the report as a pull request comment, `--format azure` writes each
 Error and Warning as an Azure Pipelines build issue (see
-[In Azure Pipelines](#in-azure-pipelines)).
+[In Azure Pipelines](#in-azure-pipelines)), and `--format github` as a
+GitHub Actions annotation (see [In GitHub Actions](#in-github-actions)).
 
 ### Checking uncommitted work
 
@@ -492,15 +493,91 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
 
 ### In GitHub Actions
 
-Install qgate in the job from a release, outside the checkout, so
-`actions/checkout` does not remove it and qgate does not analyze it. On
-`ubuntu-latest`:
+Add the qgate action to a workflow for pull requests, for example
+`.github/workflows/qgate.yml`:
+
+```yaml
+name: qgate
+on: pull_request
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  qgate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: nagypalervin/qgate@v0.3.0
+```
+
+The action installs qgate 0.3.0 for the runner from the release and
+checks it against `SHA256SUMS`. It compares the pull request with its
+base branch (`origin/<base branch>`), so the checkout needs the full
+history (`fetch-depth: 0`). It runs on GitHub-hosted Linux, macOS and
+Windows runners, x64 and arm64.
+
+#### What the pull request shows
+
+- **Annotations** on the changed files, one per Error and Warning
+  finding. GitHub shows at most 10 errors and 10 warnings of a step;
+  the step's log lists every finding.
+- **The job summary** of the run: the Markdown report, a table of up to
+  50 findings.
+- **One qgate comment** with the same report, posted when a run first
+  finds something. Later runs update it, and once the findings are
+  gone it says "No regressions found." A pull request that never had a
+  finding gets no comment.
+- **The check fails** when the pull request adds an Error finding. To
+  block the merge, make the `qgate` check required in the branch's
+  protection rules or ruleset.
+
+#### Inputs
+
+| Input | Default | Meaning |
+|---|---|---|
+| `fail-on` | `error` | `warning` for a stricter gate, `never` to report without failing |
+| `comment` | `true` | `false` writes no comment; the workflow then needs only `contents: read` |
+| `base` | the pull request's base branch | the revision to compare with, for example `origin/main`; needed outside `pull_request` events |
+
+```yaml
+      - uses: nagypalervin/qgate@v0.3.0
+        with:
+          fail-on: warning
+```
+
+#### Keep in mind
+
+- **The comment needs `pull-requests: write`.** `issues: write` is not
+  enough for a pull request. Without the permission the action fails
+  with a message that names it, before qgate's gate runs, so there are
+  no annotations.
+- **Pull requests from forks** usually get a token that cannot write, so
+  the action skips the comment for every fork with a notice. The
+  annotations, the job summary and the result work as usual.
+- **Pinning.** qgate never moves a release tag. To pin the action's
+  code itself, use the commit instead:
+  `nagypalervin/qgate@e29df6e8330bd47f262f56fcbcf04e40e3c3ba06 # v0.3.0`.
+  The binary still comes from the release, checked against its
+  `SHA256SUMS`.
+- **Self-hosted runners** need PowerShell 7.4 or later (`pwsh`), `git`,
+  `tar` on Linux and macOS, and access to `github.com` and
+  `api.github.com`.
+
+#### Without the action
+
+To run qgate in your own steps, install it from a release, outside the
+checkout, so `actions/checkout` does not remove it and qgate does not
+analyze it. On `ubuntu-latest`:
 
 ```yaml
 - name: Install qgate
   working-directory: ${{ runner.temp }}
   run: |
-    v=0.2.0 t=x86_64-unknown-linux-musl
+    v=0.3.0 t=x86_64-unknown-linux-musl
     base=https://github.com/nagypalervin/qgate/releases/download/v$v
     curl -fsSL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS"
     grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c
@@ -509,25 +586,15 @@ Install qgate in the job from a release, outside the checkout, so
 ```
 
 A `run` step stops at its first failing command, so a bad download
-installs nothing.
-
-For a workflow triggered `on: pull_request` (`github.base_ref` is empty
-for other events). `--base` needs the base branch in the clone, and
-`actions/checkout` fetches a single commit by default, so fetch the full
-history:
+installs nothing. Then, in a workflow triggered `on: pull_request`
+(`github.base_ref` is empty for other events), with the full history
+checked out:
 
 ```yaml
-- uses: actions/checkout@v4
-  with:
-    fetch-depth: 0
-- run: qgate check --base "origin/$BASE_REF"
+- run: qgate check --base "origin/$BASE_REF" --format github
   env:
     BASE_REF: ${{ github.base_ref }}
 ```
-
-The job fails when the pull request adds an Error finding. Use
-`--fail-on warning` for a stricter gate, or `--fail-on never` to report
-without failing the job.
 
 For a later step or another tool, write the report as JSON to a file
 instead. The exit code is the same, so the step still fails the job, and
@@ -539,7 +606,7 @@ to report.
 - run: qgate check --base "origin/$BASE_REF" --format json > qgate-report.json
   env:
     BASE_REF: ${{ github.base_ref }}
-- uses: actions/upload-artifact@v4
+- uses: actions/upload-artifact@v7
   if: ${{ !cancelled() }}
   with:
     name: qgate-report
@@ -568,7 +635,7 @@ On a Microsoft-hosted Linux agent:
       fetchDepth: 0
     - bash: |
         set -euo pipefail
-        v=0.2.0 t=x86_64-unknown-linux-musl
+        v=0.3.0 t=x86_64-unknown-linux-musl
         base=https://github.com/nagypalervin/qgate/releases/download/v$v
         curl -fsSL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS"
         grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c
@@ -608,7 +675,7 @@ git, so the job's agent need not be the one your build runs on.
     - pwsh: |
         $ErrorActionPreference = "Stop"
         $PSNativeCommandUseErrorActionPreference = $true
-        $v = "0.2.0"; $t = "x86_64-pc-windows-msvc"
+        $v = "0.3.0"; $t = "x86_64-pc-windows-msvc"
         $base = "https://github.com/nagypalervin/qgate/releases/download/v$v"
         Invoke-WebRequest "$base/qgate-$v-$t.zip" -OutFile "qgate-$v-$t.zip"
         Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
