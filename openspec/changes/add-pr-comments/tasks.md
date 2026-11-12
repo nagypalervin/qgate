@@ -74,7 +74,7 @@ D10).
 
 ## 3. README and rehearsal (PR 2, `change/add-pr-comments-2`)
 
-- [ ] 3.1 Update the README (design D7):
+- [x] 3.1 Update the README (design D7):
   - the "In Azure Pipelines" jobs, on both agents: the `QGATE_DIR` variable, the Markdown step, the comment step with `SYSTEM_ACCESSTOKEN`, and the gate with `--format azure` last;
   - the permission steps and the identity note;
   - what the developer sees;

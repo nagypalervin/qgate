@@ -26,10 +26,10 @@ check it against `SHA256SUMS`, unpack it, and put `qgate` on your
 
 The Linux binaries are statically linked and run on any distribution,
 Alpine included (with `curl` installed). Each block below installs only
-when the checksum matches. On Linux, with version 0.1.0 as the example:
+when the checksum matches. On Linux, with version 0.2.0 as the example:
 
 ```sh
-v=0.1.0 t=x86_64-unknown-linux-musl
+v=0.2.0 t=x86_64-unknown-linux-musl
 base=https://github.com/nagypalervin/qgate/releases/download/v$v
 curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
   grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c &&
@@ -40,7 +40,7 @@ curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
 On macOS, the check uses `shasum`:
 
 ```sh
-v=0.1.0 t=aarch64-apple-darwin
+v=0.2.0 t=aarch64-apple-darwin
 base=https://github.com/nagypalervin/qgate/releases/download/v$v
 curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
   grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | shasum -a 256 --check &&
@@ -53,7 +53,7 @@ On Windows, in PowerShell, then add the unpacked folder to your `PATH`:
 
 ```powershell
 $ErrorActionPreference = "Stop"
-$v = "0.1.0"; $t = "x86_64-pc-windows-msvc"
+$v = "0.2.0"; $t = "x86_64-pc-windows-msvc"
 $base = "https://github.com/nagypalervin/qgate/releases/download/v$v"
 Invoke-WebRequest "$base/qgate-$v-$t.zip" -OutFile "qgate-$v-$t.zip"
 Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
@@ -131,7 +131,10 @@ example above has an Error finding, so it exits with `1`; add
 `--format json` writes the report as JSON for programs, such as coding
 agents, hooks and CI scripts, in every form (see
 [JSON output](#json-output)); `--format text`, the default, is the
-output shown here.
+output shown here. Two formats are for CI: `--format markdown` writes
+the report as a pull request comment, and `--format azure` writes each
+Error and Warning as an Azure Pipelines build issue (see
+[In Azure Pipelines](#in-azure-pipelines)).
 
 ### Checking uncommitted work
 
@@ -497,7 +500,7 @@ Install qgate in the job from a release, outside the checkout, so
 - name: Install qgate
   working-directory: ${{ runner.temp }}
   run: |
-    v=0.1.0 t=x86_64-unknown-linux-musl
+    v=0.2.0 t=x86_64-unknown-linux-musl
     base=https://github.com/nagypalervin/qgate/releases/download/v$v
     curl -fsSL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS"
     grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c
@@ -548,9 +551,12 @@ to report.
 For a repository in Azure Repos, add a `qgate` job to the `jobs:` of the
 pipeline that builds your pull requests, and a branch policy that runs
 the pipeline for them ([below](#azure-branch-policy)). The job runs only
-in pull request builds, next to your other jobs, and fails when the
-pull request adds an Error. It needs no token or service connection. On
-a Microsoft-hosted Linux agent:
+in pull request builds, next to your other jobs. It keeps one qgate
+comment on the pull request up to date, lists the findings in the build
+summary, and fails when the pull request adds an Error. It needs no
+service connection: the comment is written with the pipeline's own
+token, which needs one permission ([below](#azure-comment-permission)).
+On a Microsoft-hosted Linux agent:
 
 ```yaml
 - job: qgate
@@ -562,16 +568,27 @@ a Microsoft-hosted Linux agent:
       fetchDepth: 0
     - bash: |
         set -euo pipefail
-        v=0.1.0 t=x86_64-unknown-linux-musl
+        v=0.2.0 t=x86_64-unknown-linux-musl
         base=https://github.com/nagypalervin/qgate/releases/download/v$v
         curl -fsSL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS"
         grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c
         tar xzf "qgate-$v-$t.tar.gz"
         echo "##vso[task.prependpath]$PWD/qgate-$v-$t"
+        echo "##vso[task.setvariable variable=QGATE_DIR]$PWD/qgate-$v-$t"
       displayName: Install qgate
       workingDirectory: $(Agent.TempDirectory)
     - bash: |
-        qgate check --base "origin/${TARGET_BRANCH#refs/heads/}"
+        qgate check --base "origin/${TARGET_BRANCH#refs/heads/}" --format markdown > "$AGENT_TEMPDIRECTORY/qgate.md" || [ $? -eq 1 ]
+      displayName: qgate report
+      env:
+        TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+    - pwsh: |
+        & "$env:QGATE_DIR/qgate-pr-comment.ps1" -Report "$env:AGENT_TEMPDIRECTORY/qgate.md"
+      displayName: qgate comment
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    - bash: |
+        qgate check --base "origin/${TARGET_BRANCH#refs/heads/}" --format azure
       displayName: qgate check
       env:
         TARGET_BRANCH: $(System.PullRequest.TargetBranch)
@@ -591,17 +608,29 @@ git, so the job's agent need not be the one your build runs on.
     - pwsh: |
         $ErrorActionPreference = "Stop"
         $PSNativeCommandUseErrorActionPreference = $true
-        $v = "0.1.0"; $t = "x86_64-pc-windows-msvc"
+        $v = "0.2.0"; $t = "x86_64-pc-windows-msvc"
         $base = "https://github.com/nagypalervin/qgate/releases/download/v$v"
         Invoke-WebRequest "$base/qgate-$v-$t.zip" -OutFile "qgate-$v-$t.zip"
         Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
         $line = Select-String -Path SHA256SUMS -SimpleMatch " qgate-$v-$t.zip"
         if ((Get-FileHash "qgate-$v-$t.zip" -Algorithm SHA256).Hash -ne $line.Line.Split(" ")[0]) { throw "checksum mismatch" } else { Expand-Archive "qgate-$v-$t.zip" -DestinationPath . }
         Write-Host "##vso[task.prependpath]$PWD\qgate-$v-$t"
+        Write-Host "##vso[task.setvariable variable=QGATE_DIR]$PWD\qgate-$v-$t"
       displayName: Install qgate
       workingDirectory: $(Agent.TempDirectory)
     - pwsh: |
-        qgate check --base "origin/$($env:TARGET_BRANCH -replace '^refs/heads/', '')"
+        qgate check --base "origin/$($env:TARGET_BRANCH -replace '^refs/heads/', '')" --format markdown > "$env:AGENT_TEMPDIRECTORY\qgate.md"
+        if ($LASTEXITCODE -eq 1) { exit 0 }
+      displayName: qgate report
+      env:
+        TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+    - pwsh: |
+        & "$env:QGATE_DIR\qgate-pr-comment.ps1" -Report "$env:AGENT_TEMPDIRECTORY\qgate.md"
+      displayName: qgate comment
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    - pwsh: |
+        qgate check --base "origin/$($env:TARGET_BRANCH -replace '^refs/heads/', '')" --format azure
       displayName: qgate check
       env:
         TARGET_BRANCH: $(System.PullRequest.TargetBranch)
@@ -627,6 +656,35 @@ qgate found nothing. To add the policy:
 *Required* is what makes it a merge gate: a pull request whose `qgate`
 job fails can then not be completed.
 
+<a id="azure-comment-permission"></a>**The comment needs one
+permission.** The `qgate comment` step writes with the pipeline's token,
+`System.AccessToken`, which belongs to the project's build service. By
+default it may read the repository but not comment on pull requests. To
+allow it:
+
+1. In *Project settings → Repositories*, select the repository.
+2. Open the *Security* tab.
+3. Under *Users*, select *&lt;project&gt; Build Service (&lt;organization&gt;)*.
+4. Set *Contribute to pull requests* to *Allow*.
+
+If your organization or project does not limit the job authorization
+scope to the current project, the token belongs to *Project Collection
+Build Service (&lt;organization&gt;)* instead; give that identity the
+permission. Without it, the `qgate comment` step fails, and its error
+names the permission and the identity that needs it.
+
+**What the pull request shows:**
+
+- **One qgate comment.** The first build with findings creates it as an
+  active thread with a table of the findings. Later builds update the
+  same comment: with findings, it is set active again; once they are
+  gone, it says "No regressions found." and is closed. A pull request
+  that never had a finding gets no comment.
+- **The build summary.** Each Error and Warning is listed as an issue
+  of the build, with its file, line and rule.
+- **The build result.** The `qgate check` step fails the job, and with
+  the policy the pull request, when the pull request adds an Error.
+
 Keep in mind:
 
 - **`fetchDepth: 0` is needed.** By default Azure Pipelines fetches only
@@ -640,13 +698,17 @@ Keep in mind:
   such as `git` or `curl.exe`; the second line stops it. The PowerShell
   block calls none, but a command you add later would slip through
   without it. Start any script step you add the same way.
-- **Findings are in the job's log.** The pull request shows the failed
-  build; open it to see the findings.
-- **`--fail-on`** works as in GitHub Actions: add `--fail-on warning` or
-  `--fail-on never` to the `qgate check` line.
-- **Self-hosted agents** need access to github.com, and `curl`,
-  `sha256sum` and `tar` (Linux) or PowerShell 7.4 or later as `pwsh`
-  (Windows). On arm64, use the target `aarch64-unknown-linux-musl` or
+- **qgate runs twice.** The `qgate report` step writes the comment's
+  Markdown and accepts exit code `1`, which only means findings; it
+  still fails on `2`, when the check cannot run. The `qgate check` step
+  is the gate. It comes last, so that the comment is written even when
+  the gate fails.
+- **`--fail-on`** works as in GitHub Actions. Add the same option, for
+  example `--fail-on warning`, to both `qgate check` lines: the comment
+  then names the level that gates the pull request.
+- **Self-hosted agents** need access to github.com, PowerShell 7.4 or
+  later as `pwsh`, and on Linux `curl`, `sha256sum` and `tar`. On
+  arm64, use the target `aarch64-unknown-linux-musl` or
   `aarch64-pc-windows-msvc`.
 
 ## Why
