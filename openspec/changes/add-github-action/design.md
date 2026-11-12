@@ -71,10 +71,10 @@ Four steps, all `shell: pwsh`, each one line:
 the inputs, `github.token` and the qgate version in `env:`.
 
 1. `Install`: resolve the base (D5) and the target, download, verify,
-   unpack; write `QGATE` (the binary's path) and `QGATE_BASE` to
-   `$GITHUB_ENV`.
+   unpack into `$RUNNER_TEMP/qgate-<version>/`. (Apply changed this:
+   no `GITHUB_ENV`; see "Decisions during apply".)
 2. `Report`: `qgate check --base $base --format markdown --fail-on
-   $failOn` into `$RUNNER_TEMP/qgate.md`; exit 0 and 1 are both fine,
+   $failOn` into `$RUNNER_TEMP/qgate-<version>/report.md`; exit 0 and 1 are both fine,
    2 fails the step. Append the file to `$GITHUB_STEP_SUMMARY`.
 3. `Comment` (`if: inputs.comment == 'true'`): D4.
 4. `Gate`: `qgate check --base $base --format github --fail-on
@@ -113,14 +113,13 @@ its own checkout at the tag, which already matches the binaries.
 
 ### D4. The comment
 
-- **Pull request:** number, head repository and author from the event
-  payload at `$GITHUB_EVENT_PATH`.
+- **Pull request:** number and head repository from the event payload
+  at `$GITHUB_EVENT_PATH`.
 - **Read-only token, skip with a notice** (`::notice::`), before any
   API call:
   - the head repository's `full_name` differs from `GITHUB_REPOSITORY`,
     or it is null (deleted fork): "the comment is skipped for pull
     requests from forks: their GITHUB_TOKEN cannot write";
-  - `GITHUB_ACTOR` is `dependabot[bot]`: the same, for Dependabot.
 - **Find the comment:** `GET /repos/{repo}/issues/{n}/comments
   ?per_page=100`, following `Link: rel="next"`. The qgate comment is
   the first whose author is `github-actions[bot]` and whose body starts
@@ -158,8 +157,9 @@ The runner reads workflow commands from a step's stdout and stderr.
 Paths and messages come from the pull request, and qgate's errors (exit
 2) can quote revision names or config values. So the script:
 - prints the gate's stdout as it is (qgate escapes it, D1);
-- prints qgate's stderr from both runs, and the report step's output,
-  between `::stop-commands::<random token>` and `::<token>::`.
+- prints qgate's stderr from both runs between
+  `::stop-commands::<random token>` and `::<token>::`; the report step's
+  stdout goes only to the job summary and the comment.
 
 ### D7. Version and release check
 
@@ -197,7 +197,7 @@ the change is updated (and its approval asked again) before PR 1.
   `--format github` in every form, and the five-value usage error.
 - **Pester** (`ci/github/qgate-action.Tests.ps1`): target mapping,
   checksum match and mismatch, base resolution per event, the four
-  comment branches, fork and Dependabot skips, pagination, 403 and 404
+  comment branches, the fork skip, pagination, 403 and 404
   messages, exit-code handling of the report and gate steps,
   stop-commands wrapping. The `pester` jobs run `ci/` (both
   directories); job names and required checks stay the same.
@@ -212,7 +212,7 @@ README "In GitHub Actions" becomes:
   and the comment permission), `actions/checkout@v4` with
   `fetch-depth: 0`, and `uses: nagypalervin/qgate@v0.3.0`;
 - the inputs; what the pull request shows (annotations, summary,
-  comment, result); forks and Dependabot; pinning to a commit SHA;
+  comment, result); forks; pinning to a commit SHA;
 - the JSON-artifact example, kept, after the action.
 
 Rehearsal in the private repository, Linux and Windows runners, the
@@ -227,8 +227,8 @@ workflow cut out of the README and compared with `diff` as before:
 6. `comment: false` with `contents: read` only: no comment, gate fails;
 7. `on: push` without `base`: the message from D5.
 
-Forks and Dependabot are covered by the Pester tests only; a fork needs
-a second account.
+Forks are covered by the Pester tests only; a fork needs a second
+account.
 
 ### D11. Repository layout
 
@@ -373,6 +373,51 @@ PR #16, all 18 checks green on the first push.
   - its binary printed `qgate 0.3.0` and, in a throwaway repository,
     `::warning file=src/a.ts,line=1,title=complexity/cyclomatic-increase::f:
     cyclomatic complexity 1 -> 4 (+3)`.
+
+## Review of PR 1
+
+The `reviewer` subagent found no blocker. Its findings and what was done:
+
+- **Should-fix: Dependabot was skipped on a wrong premise.** Since 2021,
+  workflows triggered by Dependabot get the permissions the workflow's
+  `permissions:` key grants, so the README workflow gives them a token
+  that can write. The skip is removed: the spec's requirement "Pull
+  requests with a read-only token" now names forks only, and a test
+  checks that a Dependabot pull request gets the comment. Changed after
+  Gate 1; the proposal says so.
+- **Should-fix: the spec promised an annotation per finding.** The spike
+  showed GitHub keeps 10 errors and 10 warnings per step. The
+  requirement "Checking a pull request with the GitHub Action" now
+  promises one annotation command per finding in the log, says what
+  GitHub shows, and points to the job summary.
+- **Should-fix: a failed download named nothing.** `Save-QgateDownload`
+  now names the URL and says that the release `v<version>` must be
+  published (a draft's files cannot be downloaded); tested.
+- **Nits fixed:**
+  - stale design text (report path, the event author, the report
+    step's output);
+  - `$event` renamed (an automatic variable);
+  - the comment request sends `charset=utf-8`;
+  - the Install step no longer gets `QGATE_INPUT_FAIL_ON`;
+  - the release self-test checks that the mismatch message names both
+    versions;
+  - new tests: the gate's stop-commands wrapping and order, a clean
+    report in the job summary, and `Write-QgateOutput` copying bytes
+    through a child `pwsh`;
+  - the `pester` jobs also run on `macos-latest`. The new check is not
+    in the "Protect main" ruleset; adding it is Ervin's call.
+- **Kept, by design:**
+  - Any failure of the comment step (a 500, no answer, a 403 for a rate
+    limit) skips the gate, as the Azure job does. The job fails either
+    way, and the error quotes GitHub's own message, so a rate limit or
+    a locked conversation is visible even though the hint names the
+    permission.
+  - The scenarios "A warning without a line" and "Info findings left
+    out" are covered by `github.rs` unit tests only, as their Azure
+    counterparts are.
+  - qgate's standard error is decoded with the console encoding by
+    `2>`; non-ASCII text in an error message may look wrong in a
+    Windows log. It reaches only the log.
 
 ## Risks / Trade-offs
 

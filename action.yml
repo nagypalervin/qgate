@@ -29,7 +29,6 @@ runs:
       env:
         QGATE_VERSION: 0.3.0
         QGATE_INPUT_BASE: ${{ inputs.base }}
-        QGATE_INPUT_FAIL_ON: ${{ inputs.fail-on }}
 
     - name: qgate report
       shell: pwsh

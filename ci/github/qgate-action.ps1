@@ -17,7 +17,7 @@ step, with the action's inputs in the environment:
 - Report:  qgate check --format markdown; appends the report to the job
   summary. Exit codes 0 and 1 are both fine here.
 - Comment: keeps one qgate comment on the pull request up to date; skips
-  forks and Dependabot, whose token cannot write.
+  pull requests from forks, whose token cannot write.
 - Gate:    qgate check --format github; prints the annotations and exits
   with qgate's exit code.
 
@@ -159,6 +159,22 @@ function Expand-QgateArchive {
     }
 }
 
+function Save-QgateDownload {
+    <# Downloads one release file, with retries; a failure names the URL and the release. #>
+    param(
+        [Parameter(Mandatory)] [string] $Uri,
+        [Parameter(Mandatory)] [string] $OutFile,
+        [Parameter(Mandatory)] [string] $Version
+    )
+
+    try {
+        Invoke-WebRequest -Uri $Uri -OutFile $OutFile -MaximumRetryCount 3 -RetryIntervalSec 5
+    } catch {
+        throw ("qgate: cannot download $Uri ($($_.Exception.Message)). The action installs qgate $Version; " +
+            "the release v$Version must be published (a draft's files cannot be downloaded)")
+    }
+}
+
 function Invoke-QgateInstall {
     <# The Install step. #>
     $base = Resolve-QgateBase -EventName $env:GITHUB_EVENT_NAME -BaseRef $env:GITHUB_BASE_REF -BaseInput $env:QGATE_INPUT_BASE
@@ -172,8 +188,8 @@ function Invoke-QgateInstall {
     $archive = Join-Path $dir $name
     $sums = Join-Path $dir 'SHA256SUMS'
     $url = "$($script:ReleaseUrl)/v$version"
-    Invoke-WebRequest -Uri "$url/$name" -OutFile $archive -MaximumRetryCount 3 -RetryIntervalSec 5
-    Invoke-WebRequest -Uri "$url/SHA256SUMS" -OutFile $sums -MaximumRetryCount 3 -RetryIntervalSec 5
+    Save-QgateDownload -Uri "$url/$name" -OutFile $archive -Version $version
+    Save-QgateDownload -Uri "$url/SHA256SUMS" -OutFile $sums -Version $version
     Test-QgateChecksum -Archive $archive -Sums $sums
     Expand-QgateArchive -Archive $archive -Destination $dir
 
@@ -348,7 +364,8 @@ function Invoke-GitHub {
         SkipHttpErrorCheck = $true
     }
     if ($null -ne $Body) {
-        $request.ContentType = 'application/json'
+        # Explicit, so non-ASCII paths in the report do not depend on the default.
+        $request.ContentType = 'application/json; charset=utf-8'
         $request.Body = $Body | ConvertTo-Json -Depth 10 -Compress
     }
     $verb = $Method.ToUpperInvariant()
@@ -426,17 +443,12 @@ function Invoke-QgateComment {
         Write-Host "qgate: not a pull_request event ($env:GITHUB_EVENT_NAME); no comment to write"
         return 0
     }
-    $event = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
-    $pullRequest = $event.pull_request
+    $payload = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+    $pullRequest = $payload.pull_request
     $head = $pullRequest.head.repo
     if ($null -eq $head -or $head.full_name -ne $env:GITHUB_REPOSITORY) {
-        Write-Host ('::notice::qgate: the comment is skipped for pull requests from forks: their GITHUB_TOKEN ' +
-            'cannot write. The annotations and the job summary show the findings.')
-        return 0
-    }
-    if ($env:GITHUB_ACTOR -eq 'dependabot[bot]') {
-        Write-Host ('::notice::qgate: the comment is skipped for pull requests opened by Dependabot: their ' +
-            'GITHUB_TOKEN cannot write. The annotations and the job summary show the findings.')
+        Write-Host ('::notice::qgate: the comment is skipped for pull requests from forks: GitHub gives ' +
+            'them a GITHUB_TOKEN that cannot write. The annotations and the job summary show the findings.')
         return 0
     }
 

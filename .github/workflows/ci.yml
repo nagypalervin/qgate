@@ -90,14 +90,14 @@ jobs:
   pester:
     # The CI scripts under ci/: the Azure Pipelines comment script
     # (ci/azure, design D5 of add-pr-comments) and the GitHub Action's
-    # script (ci/github, design D9 of add-github-action), on both operating
-    # systems their agents and runners mostly use. Pester is pinned: runner
-    # images may ship another major version.
+    # script (ci/github, design D9 of add-github-action), on the three
+    # operating systems the action runs on. Pester is pinned: runner images
+    # may ship another major version.
     name: pester (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:

@@ -37,10 +37,12 @@ could reuse it.
   (default `error`) and `comment` (default `true`). The token is the
   job's `GITHUB_TOKEN`; the workflow grants it the permission to
   comment.
-- **Pull requests whose token cannot write:** from a fork, or opened by
-  Dependabot, `GITHUB_TOKEN` is read-only. The action then skips the
-  comment with a notice and still writes the summary, the annotations
-  and the gate. A same-repository pull request whose token lacks the
+- **Pull requests whose token cannot write:** from a fork,
+  `GITHUB_TOKEN` is read-only. The action then skips the comment with a
+  notice and still writes the summary, the annotations and the gate.
+  (Changed after Gate 1, in the review of PR 1: Dependabot pull requests
+  are no longer skipped; their workflows get the permissions the
+  workflow grants.) A same-repository pull request whose token lacks the
   permission fails the comment step with a message that names it.
 - **The logic is PowerShell 7,** in `ci/github/`, tested with Pester in
   the existing `pester` CI jobs. `pwsh` runs on every GitHub-hosted

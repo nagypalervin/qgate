@@ -72,10 +72,15 @@ jobs:
             exit 1
           fi
           .github/scripts/check-action-version.sh "v$VERSION"
-          if .github/scripts/check-action-version.sh "v$VERSION.1"; then
+          if message=$(.github/scripts/check-action-version.sh "v$VERSION.1" 2>&1); then
             echo "error: the action version check accepted v$VERSION.1" >&2
             exit 1
           fi
+          # The message names both versions (the releases spec).
+          case $message in
+            *"qgate $VERSION,"*"releases $VERSION.1"*) ;;
+            *) echo "error: the action version check did not name both versions: $message" >&2; exit 1 ;;
+          esac
 
   build:
     name: build (${{ matrix.target }})

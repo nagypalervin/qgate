@@ -42,8 +42,10 @@ platform has no release archive.
 
 The action's result SHALL follow qgate's exit code for its `fail-on`
 input (default `error`): it SHALL fail when the pull request adds a
-finding at or above that level. Each Error and Warning finding SHALL
-appear as an annotation of the run.
+finding at or above that level. The step's log SHALL hold one
+annotation command per Error and Warning finding; GitHub shows at most
+10 errors and 10 warnings of a step as annotations, and the job summary
+lists the findings.
 
 #### Scenario: An error fails the step
 
@@ -126,10 +128,12 @@ reading the repository.
 
 ### Requirement: Pull requests with a read-only token
 
-For a pull request from a fork, or one opened by Dependabot, the job's
-`GITHUB_TOKEN` cannot write. The action SHALL then skip the comment with
-a notice that says why, and SHALL still write the job summary and the
-annotations and decide the step's result as for any pull request.
+For a pull request from a fork, GitHub gives the job a `GITHUB_TOKEN`
+that cannot write, unless the repository sends write tokens to fork
+pull requests. The action SHALL skip the comment for every fork pull
+request with a notice that says why, and SHALL still write the job
+summary and the annotations and decide the step's result as for any
+pull request.
 
 #### Scenario: A pull request from a fork
 

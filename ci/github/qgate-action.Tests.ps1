@@ -261,6 +261,18 @@ Describe 'The Install step' {
         Get-LogText | Should -Match '^::error::qgate: qgate-0\.3\.0-x86_64-unknown-linux-musl\.tar\.gz does not match'
     }
 
+    It 'names the URL and the release when a download fails' {
+        Mock Invoke-WebRequest -ParameterFilter { $OutFile } {
+            throw [System.Net.Http.HttpRequestException]::new('Response status code does not indicate success: 404 (Not Found).')
+        }
+        Invoke-QgateAction -Step Install | Should -Be 1
+        $text = Get-LogText
+        $text | Should -Match '^::error::qgate: cannot download https://github\.com/nagypalervin/qgate/releases/download/v0\.3\.0/qgate-0\.3\.0-x86_64-unknown-linux-musl\.tar\.gz'
+        $text | Should -Match '404'
+        $text | Should -Match 'release v0\.3\.0 must be published'
+        Should -Invoke Expand-QgateArchive -Times 0
+    }
+
     It 'fails before downloading without a base' {
         $env:GITHUB_EVENT_NAME = 'push'
         $env:GITHUB_BASE_REF = ''
@@ -293,9 +305,10 @@ Describe 'The Report step' {
         $script:QgateCalls = [System.Collections.Generic.List[object]]::new()
         $script:QgateExit = 1
         $script:QgateStderr = "qgate: failing: 1 finding at or above `"error`" (see --fail-on)`n"
+        $script:QgateReport = New-Report -Count 1 -Failing 1
         Mock Invoke-Qgate {
             $script:QgateCalls.Add($Arguments)
-            Set-Content -LiteralPath $StdoutPath -NoNewline -Value (New-Report -Count 1 -Failing 1)
+            Set-Content -LiteralPath $StdoutPath -NoNewline -Value $script:QgateReport
             Set-Content -LiteralPath $StderrPath -NoNewline -Value $script:QgateStderr
             $script:QgateExit
         }
@@ -324,6 +337,14 @@ Describe 'The Report step' {
         $script:Log[1] | Should -BeLike '*::error::injected'
         $script:Log[2] | Should -BeExactly "::${token}::"
         $script:Log[3] | Should -Match '^::error::qgate check could not run \(exit code 2\)'
+    }
+
+    It 'adds a clean report to the job summary' {
+        $script:QgateExit = 0
+        $script:QgateStderr = ''
+        $script:QgateReport = New-Report -Count 0
+        Invoke-QgateAction -Step Report | Should -Be 0
+        Get-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Raw | Should -BeLike '*No regressions found.*'
     }
 
     It 'accepts exit code 0' {
@@ -422,12 +443,12 @@ Describe 'The Comment step' {
         Get-LogText | Should -Match '::notice::.*fork'
     }
 
-    It 'skips a pull request opened by Dependabot' {
+    It 'comments on a pull request opened by Dependabot like on any other' {
+        # Its workflows get the permissions the workflow grants.
         $env:GITHUB_ACTOR = 'dependabot[bot]'
         Use-FakeApi
         Invoke-QgateAction -Step Comment | Should -Be 0
-        $script:Calls.Count | Should -Be 0
-        Get-LogText | Should -Match '::notice::.*Dependabot'
+        $script:Calls.Method | Should -Be @('Get', 'Post')
     }
 
     It 'writes no comment outside a pull request' {
@@ -505,6 +526,18 @@ Describe 'The Gate step' {
         Get-LogText | Should -Match 'qgate: failing: 1 finding'
     }
 
+    It 'prints the annotations before qgate''s standard error, which is wrapped' {
+        $script:QgateStderr = "error: x`n::error::injected"
+        $script:QgateExit = 2
+        Mock Write-QgateOutput { $script:Log.Add('<annotations>') }
+        Invoke-QgateAction -Step Gate | Should -Be 2
+        $script:Log[0] | Should -BeExactly '<annotations>'
+        $script:Log[1] | Should -Match '^::stop-commands::[0-9a-f]{32}$'
+        $token = $script:Log[1].Substring('::stop-commands::'.Length)
+        $script:Log[2] | Should -BeLike '*::error::injected'
+        $script:Log[3] | Should -BeExactly "::${token}::"
+    }
+
     It 'succeeds when qgate does' {
         $script:QgateExit = 0
         Invoke-QgateAction -Step Gate | Should -Be 0
@@ -533,5 +566,20 @@ Describe 'Invoke-QgateAction' {
         Mock Invoke-QgateInstall { throw "100% broken`r`nnext" }
         Invoke-QgateAction -Step Install | Should -Be 1
         $script:Log | Should -Be @('::error::100%25 broken%0D%0Anext')
+    }
+}
+
+Describe 'Write-QgateOutput' {
+    It 'copies the bytes unchanged to standard output' {
+        $in = Join-Path $TestDrive 'annotations.out'
+        $bytes = [Text.UTF8Encoding]::new($false).GetBytes("::warning file=src/é.ts,line=1,title=r/x::ő`n")
+        [IO.File]::WriteAllBytes($in, $bytes)
+        $out = Join-Path $TestDrive 'copied.out'
+        $script = Join-Path $PSScriptRoot 'qgate-action.ps1'
+        # A child pwsh, so its real standard output can be captured; `>`
+        # keeps a native command's bytes in PowerShell 7.4 and later.
+        & (Get-Process -Id $PID).Path -NoProfile -NonInteractive -Command ". '$script' -Step Gate; Write-QgateOutput -Path '$in'" > $out
+        $LASTEXITCODE | Should -Be 0
+        [IO.File]::ReadAllBytes($out) | Should -Be $bytes
     }
 }
