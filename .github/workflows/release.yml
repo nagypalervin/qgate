@@ -15,6 +15,7 @@ on:
     paths:
       - .github/workflows/release.yml
       - .github/scripts/**
+      - action.yml
       - ci/azure/**
       - Cargo.toml
       - Cargo.lock
@@ -52,6 +53,12 @@ jobs:
         if: github.ref_type == 'tag'
         run: .github/scripts/check-version.sh "$GITHUB_REF_NAME"
 
+      - name: Check the action's version
+        # The action at this tag must install this tag's release (design D7
+        # of add-github-action).
+        if: github.ref_type == 'tag'
+        run: .github/scripts/check-action-version.sh "$GITHUB_REF_NAME"
+
       - name: Test the tag check
         # Not a tag: make sure the check accepts the right tag and rejects
         # a wrong one before the first real tag depends on it.
@@ -62,6 +69,11 @@ jobs:
           .github/scripts/check-version.sh "v$VERSION"
           if .github/scripts/check-version.sh "v$VERSION.1"; then
             echo "error: the tag check accepted v$VERSION.1" >&2
+            exit 1
+          fi
+          .github/scripts/check-action-version.sh "v$VERSION"
+          if .github/scripts/check-action-version.sh "v$VERSION.1"; then
+            echo "error: the action version check accepted v$VERSION.1" >&2
             exit 1
           fi
 

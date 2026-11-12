@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -19,12 +19,12 @@ repository = "https://github.com/nagypalervin/qgate"
 authors = ["Ervin Nagypál"]
 
 [workspace.dependencies]
-qgate-core = { path = "crates/qgate-core", version = "0.2.0" }
-qgate-lang = { path = "crates/qgate-lang", version = "0.2.0" }
-qgate-analyzers = { path = "crates/qgate-analyzers", version = "0.2.0" }
-qgate-report = { path = "crates/qgate-report", version = "0.2.0" }
-qgate-git = { path = "crates/qgate-git", version = "0.2.0" }
-qgate-config = { path = "crates/qgate-config", version = "0.2.0" }
+qgate-core = { path = "crates/qgate-core", version = "0.3.0" }
+qgate-lang = { path = "crates/qgate-lang", version = "0.3.0" }
+qgate-analyzers = { path = "crates/qgate-analyzers", version = "0.3.0" }
+qgate-report = { path = "crates/qgate-report", version = "0.3.0" }
+qgate-git = { path = "crates/qgate-git", version = "0.3.0" }
+qgate-config = { path = "crates/qgate-config", version = "0.3.0" }
 
 # External
 clap = { version = "4.6", default-features = false, features = ["std", "help", "usage", "error-context"] }
