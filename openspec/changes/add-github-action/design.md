@@ -134,8 +134,8 @@ its own checkout at the tag, which already matches the binaries.
   application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28`. The
   token comes from `env:` and is never printed.
 - **Errors:** an HTTP 403 or 404 on any call becomes one `::error::`
-  that names the permission to grant (the spike settles whether it is
-  `pull-requests: write`, `issues: write` or either) and the step exits
+  that names the permission to grant, `pull-requests: write` (the
+  spike showed that `issues: write` is not enough), and the step exits
   1, so the gate does not run. Other failures print the status and
   GitHub's `message`.
 - **Body size:** the report has at most 50 rows, far below GitHub's
@@ -243,6 +243,65 @@ changes structure; the dependency rules are untouched.
 - **PR 2,** `change/add-github-action-2`: README, rehearsal record,
   review fixes, journal entry, archive.
 
+## Spike results (task 0.1, 2026-11-12)
+
+Rehearsal repository `nagypalervin/qgate-rehearsal` (private, created by
+the agent with `gh` at Ervin's request), pull request 1, run
+43263496151, branch `spike`. One hand-written workflow, no qgate code
+except the 0.2.0 release for the install prototype.
+
+**Comment permissions** (job-level `permissions:`, pull request from the
+same repository):
+
+| Permissions | List comments | Create | Edit |
+|---|---|---|---|
+| `contents: read` | 403 | 403 | (none to edit) |
+| `contents: read`, `issues: write` | 403 | 403 | (none to edit) |
+| `contents: read`, `pull-requests: write` | 200 | 201 | 200 |
+
+The 403 body is `{"message":"Resource not accessible by integration",
+...}`. The docs name `issues: write` for comments, but on a pull
+request only `pull-requests: write` works. D4's error message and the
+README name `pull-requests: write`.
+
+**Annotations:**
+- Escaping as in D1 reads back exactly: `file=src/a%2Cb%3Ac.ts` →
+  `src/a,b:c.ts`; `title=r%3Ax%2Cy%25z` → `r:x,y%z`; the message
+  `100%25 done%0Anext: one, two` → `100% done`, line feed, `next: one,
+  two` (raw `:` and `,` in the message are fine); `%0D` → CR.
+- An annotation without `line` gets `start_line` 0 and keeps its file.
+- **Limit: 10 errors and 10 warnings per step.** Step A printed 15 of
+  each, steps B and C 15 errors each; the check run kept 10 + 10, 10
+  and 10 (40 in the job, under any job limit). The log still shows all
+  60 lines. A job limit was not reached and is not needed: the action
+  annotates in one step.
+
+**`::stop-commands::`:** an `::error::` line between
+`::stop-commands::spike7f3a` and `::spike7f3a::` stayed text; a
+`::warning::` after the end token became an annotation. D6 holds.
+
+**`pwsh` and the install prototype** (D3), on `ubuntu-latest` (Linux
+X64), `windows-latest` (Windows X64) and `macos-latest` (macOS ARM64):
+- `pwsh` 7.6.9 on all three;
+- `git -c core.quotepath=false ls-files > file` kept the UTF-8 bytes of
+  `src/értékelés.ts` on all three;
+- `tar`: GNU tar 1.35, bsdtar 3.8.9 (Windows), bsdtar 3.5.3 (macOS);
+  `Expand-Archive` present everywhere;
+- the prototype mapped `RUNNER_OS` × `RUNNER_ARCH` to the target,
+  downloaded qgate 0.2.0 and `SHA256SUMS` with `Invoke-WebRequest
+  -MaximumRetryCount 3`, matched `Get-FileHash`, unpacked (`tar`, or
+  `Expand-Archive` for the `.zip`), and `qgate --version` printed
+  `qgate 0.2.0` on all three.
+
+**Other observations:**
+- `actions/checkout@v4` logs a warning that its Node.js 20 runtime is
+  deprecated and forced onto Node.js 24. The README (PR 2) should name
+  the current major of `actions/checkout`; to be checked then.
+- `ubuntu-latest` logs a notice that the label moves to Ubuntu 26. The
+  musl binaries do not depend on the image.
+
+None of this contradicts D1 to D6; the apply continues with 1.1.
+
 ## Risks / Trade-offs
 
 - **[The action is first run for real after the release]** A bug found
@@ -251,9 +310,9 @@ changes structure; the dependency rules are untouched.
 - **[Marketplace listing may need a repository without workflows]** →
   Out of scope; moving `action.yml` later changes the `uses:` path, so
   the README would say so then.
-- **[GitHub shows only some annotations]** (limit to be measured) → The
-  job summary and the comment always list up to 50 findings; the README
-  says so.
+- **[GitHub shows only some annotations]** 10 errors and 10 warnings
+  per step (spike). → The gate's log still prints every finding, and
+  the job summary and the comment list up to 50; the README says so.
 - **[`github-actions[bot]` as the only author]** A user who switches to
   a PAT through a fork of the action gets a second comment. → Not
   supported; no `token` input.

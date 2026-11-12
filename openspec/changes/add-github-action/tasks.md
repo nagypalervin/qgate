@@ -11,7 +11,7 @@ D12).
 
 ## 0. Spike (before any code, design D8)
 
-- [ ] 0.1 Once the private rehearsal repository exists (Ervin creates it, or tells the agent to), push a TypeScript fixture and the spike workflow, and open a pull request in it. Run the workflow on `ubuntu-latest`, `windows-latest` and `macos-latest` and record in `design.md`:
+- [x] 0.1 Once the private rehearsal repository exists (Ervin creates it, or tells the agent to), push a TypeScript fixture and the spike workflow, and open a pull request in it. Run the workflow on `ubuntu-latest`, `windows-latest` and `macos-latest` and record in `design.md`:
   - status codes for creating and editing a comment with `contents: read`, with `pull-requests: write` and with `issues: write`, and the error body of the failing case;
   - annotations shown per step and per job;
   - the read-back of escaped `%`, `:`, `,`, CR and LF;
