@@ -359,6 +359,12 @@ crate, so the dependency rules and ADRs are unaffected.
   could ship either major version, and Pester 6 may change semantics.
   The CI job installs exactly 5.9.1. The tests require it with
   `#Requires`, and the local runs use the same version.
+- **The comment step runs the script with `&`, not `pwsh -File`
+  (changes D7, PR 2).** The step is already a PowerShell 7 step, so a
+  second process adds nothing. The script ends with `exit <code>`; called
+  with `&`, that sets `$LASTEXITCODE`, and the step's wrapper exits with
+  it. The rehearsal ran this path: scenarios 1 to 3 with exit code 0,
+  scenario 5 with 1.
 - **The Markdown step uses the gate's level, not `--fail-on never`
   (changes D7, found while preparing task 1.8).** With `--fail-on
   never`, every comment would say "none at or above `never`" instead of
@@ -431,8 +437,10 @@ crate, so the dependency rules and ADRs are unaffected.
   `musl-tools`: from about 13:50 UTC on 2026-11-11 the GitHub runners
   could not resolve the Ubuntu mirrors, which other projects reported
   the same day. Six retries over two hours failed the same way. The
-  packing step has not changed since `9997745`; task 2.1 checks the
-  archives of the real release.
+  runners resolved again later that day: on `31c815c`, the last commit
+  of PR 1, run 43062529813 passed all six builds and the checksums.
+  Its archives all hold the script, `SHA256SUMS` matches them, and the
+  Linux arm64 binary prints `qgate 0.2.0`.
 - **The script against the real API (task 1.8),** in the rehearsal
   project. Pull request 1350 ran on `ubuntu-latest` (build 1312) and
   pull request 1351 on `windows-latest` (build 1311). Each build ran
@@ -468,3 +476,126 @@ crate, so the dependency rules and ADRs are unaffected.
   reactivated it, each with exit code 0 and "1 finding" in the singular.
   A step without `SYSTEM_ACCESSTOKEN` ended with exit code 1 and one
   build error in the build summary, its three lines intact.
+
+## Release 0.2.0 (task 2.1)
+
+PR 1 merged as `c24029f`, whose tree equals `31c815c`. At Ervin's
+request the tag was pushed by Claude, as an annotated tag `v0.2.0` on
+`c24029f` in Ervin's name, like `v0.1.0`; Ervin published the draft.
+
+- Run 43091476436 passed every job and made the draft `qgate 0.2.0`
+  with six archives and `SHA256SUMS`.
+- On the files downloaded from the draft, `sha256sum --check
+  SHA256SUMS` passed for all six archives.
+- Every archive holds exactly one `qgate-pr-comment.ps1`; the one in
+  the Linux arm64 archive is byte-identical to the committed script.
+- The Linux arm64 binary is statically linked, prints `qgate 0.2.0`,
+  and renders `--format markdown` against `v0.1.0` (marker
+  `count=0 failing=0 fail_on=error`, "No regressions found.", exit 0).
+- The same binary renders `--format azure` (added in review): on a
+  repository with a complexity error and a duplicate it wrote two
+  `##vso[task.logissue …]` lines, `type=error` and `type=warning`, each
+  with `sourcepath`, `linenumber` and `code`, and exited with 1.
+- Ervin published the release on 2026-11-11; it is the latest release.
+
+## Rehearsal of the README jobs (tasks 3.2 to 3.4)
+
+Run on 2026-11-12 in the rehearsal project `qgate-rehearsal`, pipeline
+36, with qgate 0.2.0, on `ubuntu-latest` and `windows-latest`. The
+earlier rehearsal pull requests 1341 to 1351, including the spike's
+1349, were abandoned first.
+
+**Extraction.** As in `add-azure-pipelines`, a script wrote the first
+(Linux) and the second (Windows) YAML block of the README section "In
+Azure Pipelines" as `azure-pipelines.yml`: the line `jobs:` and the
+block, unchanged. `diff` of each block against its pipeline file, on
+every rehearsal branch:
+
+```
+0a1
+> jobs:
+```
+
+The later commits of scenarios 2 and 3 changed only `src/`.
+
+**Results.** Every scenario gave the expected result. "Issues" are the
+build's issues from its timeline; the threads were read through the
+REST API after each build.
+
+| # | Scenario | Linux | Windows |
+|---|---|---|---|
+| 1 | `grade`'s complexity 2 → 8, no thread yet | PR 1352, build 1318. `qgate report`, `qgate comment` ("created the qgate comment (1 finding, 1 at or above error)") succeeded; `qgate check` failed. Issue: error, `src/grade.ts:1`, code `complexity/cyclomatic-increase`. Thread 4547, **active**, by the project's Build Service, one row; no marker line. | PR 1354, build 1321. Same steps, issue and message. Thread 4548, **active**, the same text. |
+| 2 | A commit that restores `grade` | Build 1328 succeeded: "updated and closed the qgate comment (0 findings, …)". Thread 4547 **closed**, "No regressions found." | Build 1327, the same. Thread 4548 **closed**. |
+| 3 | A commit that brings the complexity back and adds `src/értékelés.ts`, a copy of `grade` | Build 1332 failed at `qgate check`: "updated the qgate comment (2 findings, 1 at or above error)". Issues: the error, and a warning at `src/értékelés.ts:1` with code `duplication/duplicate-block`. Thread 4547 **active** again with both rows; still the only qgate thread. | Build 1331, the same. Thread 4548 **active**, both rows, the only qgate thread. |
+| 4 | A README-only PR | PR 1353, build 1320 succeeded: "no findings and no qgate comment; nothing to write". No thread, no issue. | PR 1355, build 1323, the same. |
+| 5 | Added in review: scenario 1's change, with the comment step's `env:` mapping of `SYSTEM_ACCESSTOKEN` removed | PR 1356, build 1335 failed at `qgate comment`: one build error, "qgate: SYSTEM_ACCESSTOKEN is not set; add to this step: …", its three lines intact; `qgate check` skipped; no thread. | PR 1357, build 1336, the same. |
+
+**Scenario 5's change** is the only change to the README's text: the
+two lines after `displayName: qgate comment` are removed (`diff`:
+`28,29d27` on Linux, `31,32d30` on Windows). It runs the script's
+failure path through the README's `&` call on both agents.
+
+**Policy statuses** at the end, from the policy evaluations: pull
+requests 1352, 1354, 1356 and 1357 **rejected**, 1353 and 1355
+**approved**.
+
+**Ervin's check (task 3.3)** was on pull request 1352's thread 4547
+after scenario 3, whose text holds scenario 1's row and one more. Ervin
+copied the comment as the web UI showed it: a table with the columns
+Severity, Location, Finding and Rule; `2 -> 8` without the backslash;
+`src/értékelés.ts` intact; no marker line. The author shown is
+"qgate-rehearsal Build Service".
+
+**Also observed:**
+- **Non-ASCII text survives both agents.** Scenario 3's path
+  `src/értékelés.ts` was added to check the Windows report step, which
+  redirects qgate's output with `>`. PowerShell 7.4 and later pass a
+  native command's bytes to the file unchanged; the comment and the
+  build issue show the path intact on both agents.
+- **CI builds on every pushed branch** (builds 1317, 1319, 1322, 1324,
+  1325, 1326, 1329, 1330; reason `individualCI`). In each the `qgate`
+  job was skipped and the build succeeded, as in `add-azure-pipelines`.
+- **The duplicate's first copy is named twice in the comment:** the
+  message says "duplicates src/grade.ts:1-19", and the Finding cell
+  then adds "also at src/grade.ts:1". The spec lists every related
+  location after the message, and the first one is the copy the message
+  names. This is cosmetic and released in 0.2.0; it is left for a
+  follow-up change rather than changing the spec here.
+
+## Review of PR 2
+
+The `reviewer` subagent found one blocker, four should-fix items and
+five nits:
+
+- **Fixed: the living requirement "Checking a pull request in Azure
+  Pipelines" (blocker).** It said the job log shows the finding in the
+  text format, which the job no longer prints. The delta now modifies
+  it: the job fails by the gating check, and the findings are shown as
+  build issues and in the comment. The proposal says so too.
+- **Fixed: "depends only on qgate's exit code" (should-fix).** That
+  contradicted the missing-permission requirement, under which the
+  comment step fails the job. The build-summary requirement now says
+  only that reporting the issues does not by itself change the result.
+- **Fixed: the `&` call was not recorded (should-fix).** See the
+  decision above.
+- **Fixed: the README job's failure path was not rehearsed
+  (should-fix).** Scenario 5 runs it on both agents. The missing
+  permission itself was rehearsed with the script in PR 1 (build 1315);
+  it ends through the same `exit 1`.
+- **Fixed: what the error names (should-fix).** The README now says
+  the error names the identity by its id, and that its hint names the
+  project's Build Service in either case.
+- **Fixed (nits):**
+  - the README notes that without the permission the job fails on every
+    pull request with findings, Warnings included;
+  - "The PowerShell block" became "the Windows install step", and the
+    README warns not to add the second line to the Windows report step;
+  - the spec's Linux variant names its PowerShell 7 comment step;
+  - the release record includes `--format azure`;
+  - tasks 2.1 and 3.3 point to the records of how they were done.
+
+**Left for follow-up changes:**
+- the script's hint names the project's Build Service even when the
+  token belongs to the Project Collection Build Service;
+- a duplicate's first copy is named twice in its Markdown row (see the
+  rehearsal record).

@@ -134,6 +134,8 @@ None.
 - `ci-integration`:
   - the documented job also annotates the build summary and keeps one
     pull request comment up to date;
+  - the findings appear as build issues and in the comment, no longer
+    as text-format lines in the job log;
   - the job needs one permission for the comment, where it needed none
     before.
 

@@ -4,15 +4,16 @@
 
 ### Requirement: Documented Azure Pipelines job
 
-The README SHALL give a `qgate` job for Azure Pipelines in two variants:
-- one for a Microsoft-hosted Linux agent (`ubuntu-latest`) in bash;
-- one for a Microsoft-hosted Windows agent (`windows-latest`) in PowerShell 7.
+The README SHALL give a `qgate` job for Microsoft-hosted Azure
+Pipelines agents in two variants:
+- Linux (`ubuntu-latest`), in bash with a `pwsh` step for the comment;
+- Windows (`windows-latest`), in PowerShell 7.
 
 Each variant SHALL work when copied unchanged into the `jobs` of a
 pipeline for an Azure Repos Git repository. It SHALL need no service
-connection. Its only token SHALL be the pipeline's own
-`System.AccessToken`, and its only permission beyond a default
-pipeline's SHALL be the one the comment needs.
+connection. Its only token SHALL be `System.AccessToken`, and its
+only permission beyond a default pipeline's SHALL be the one the
+comment needs.
 
 #### Scenario: Copying the Linux job
 
@@ -26,14 +27,36 @@ pipeline's SHALL be the one the comment needs.
 - **WHEN** a user copies the README's Windows job instead
 - **THEN** the pipeline runs without asking for a service connection or a token of its own
 
+### Requirement: Checking a pull request in Azure Pipelines
+
+In a pull request build, the documented job SHALL run `qgate check` on
+the changes the pull request makes against its target branch. The job
+SHALL fail when the check that gates it exits non-zero, which it does
+for a finding at or above the `--fail-on` level. The findings SHALL be
+shown as build issues and in the pull request's qgate comment, as the
+requirements below describe.
+
+#### Scenario: A pull request that adds an error
+
+- **GIVEN** a pull request into `main` that raises a function's cyclomatic complexity enough for an error finding
+- **WHEN** its pull request build runs the documented job, on either agent
+- **THEN** the job fails
+- **AND** its log shows the finding as an error annotation with the path and line, the message and `complexity/cyclomatic-increase`
+
+#### Scenario: A pull request without findings
+
+- **GIVEN** a pull request into `main` that changes only `README.md`
+- **WHEN** its pull request build runs the documented job, on either agent
+- **THEN** the job succeeds and its log shows `No regressions found.`
+
 ## ADDED Requirements
 
 ### Requirement: Findings in the Azure Pipelines build summary
 
 In a pull request build, the documented job SHALL report each Error and
 Warning finding as an issue of the build, with its file, line and rule,
-so that the build summary lists it. Whether the job fails SHALL still
-depend only on qgate's exit code.
+so that the build summary lists it. Reporting the issues SHALL NOT by
+itself change the job's result.
 
 #### Scenario: An error in the build summary
 

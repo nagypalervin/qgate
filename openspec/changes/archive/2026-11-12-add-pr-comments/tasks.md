@@ -64,17 +64,17 @@ D10).
 
 ## 2. Release 0.2.0 (between the pull requests)
 
-- [ ] 2.1 After PR 1 merges, ask Ervin to push `v0.2.0`. Check the draft release:
+- [x] 2.1 After PR 1 merges, ask Ervin to push `v0.2.0`. Check the draft release:
   - six archives and `SHA256SUMS`;
   - `sha256sum --check`;
   - every archive holds `qgate-pr-comment.ps1`;
   - the Linux arm64 binary prints `qgate 0.2.0`.
 
-  Then ask Ervin to publish. Record the result in `design.md` on `change/add-pr-comments-2`.
+  Then ask Ervin to publish. Record the result in `design.md` on `change/add-pr-comments-2`. (Ervin asked Claude to push the tag; see design.md.)
 
 ## 3. README and rehearsal (PR 2, `change/add-pr-comments-2`)
 
-- [ ] 3.1 Update the README (design D7):
+- [x] 3.1 Update the README (design D7):
   - the "In Azure Pipelines" jobs, on both agents: the `QGATE_DIR` variable, the Markdown step, the comment step with `SYSTEM_ACCESSTOKEN`, and the gate with `--format azure` last;
   - the permission steps and the identity note;
   - what the developer sees;
@@ -82,12 +82,12 @@ D10).
   - a short note on the `markdown` and `azure` formats in the formats section.
 
   Verify with `grep` that no `0.1.0` is left in install blocks.
-- [ ] 3.2 Rehearse the README jobs, extracted unchanged, on both agents with scenarios 1 to 4 of design D8:
+- [x] 3.2 Rehearse the README jobs, extracted unchanged, on both agents with scenarios 1 to 4 of design D8:
   - check the threads through the REST API;
   - check the build issues through the build timeline;
   - abandon the spike's pull request 1349 first.
-- [ ] 3.3 Ask Ervin to look at one scenario-1 comment in the web UI. He confirms that the table renders, the escapes do not show, and there is no marker line.
-- [ ] 3.4 Record the rehearsal in `design.md`:
+- [x] 3.3 Ask Ervin to look at one scenario-1 comment in the web UI. Ervin confirms that the table renders, the escapes do not show, and there is no marker line. (Checked after scenario 3, whose comment holds scenario 1's row; see design.md.)
+- [x] 3.4 Record the rehearsal in `design.md`:
   - the build ids;
   - the thread ids and statuses per scenario;
   - the extraction `diff`;
