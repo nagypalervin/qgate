@@ -670,8 +670,11 @@ allow it:
 If your organization or project does not limit the job authorization
 scope to the current project, the token belongs to *Project Collection
 Build Service (&lt;organization&gt;)* instead; give that identity the
-permission. Without it, the `qgate comment` step fails, and its error
-names the permission and the identity that needs it.
+permission. Without it, the `qgate comment` step fails the job for every
+pull request with findings, Warnings included; only pull requests
+without findings pass. The error names the permission and the build
+identity by its id, such as `Build\<id>`, and its hint names the
+project's Build Service in either case.
 
 **What the pull request shows:**
 
@@ -695,9 +698,11 @@ Keep in mind:
   Azure Pipelines goes on after a failing command: without
   `set -euo pipefail`, a failed download or checksum check would not stop
   the install. A PowerShell step goes on after a failing native command,
-  such as `git` or `curl.exe`; the second line stops it. The PowerShell
-  block calls none, but a command you add later would slip through
-  without it. Start any script step you add the same way.
+  such as `git` or `curl.exe`; the second line stops it. The Windows
+  install step calls none, but a command you add later would slip
+  through without it. Start any script step you add the same way. Do
+  not add the second line to the Windows `qgate report` step: it would
+  stop the step at exit code `1`, before the step accepts it.
 - **qgate runs twice.** The `qgate report` step writes the comment's
   Markdown and accepts exit code `1`, which only means findings; it
   still fails on `2`, when the check cannot run. The `qgate check` step

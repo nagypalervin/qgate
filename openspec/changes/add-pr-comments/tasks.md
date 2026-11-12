@@ -70,7 +70,7 @@ D10).
   - every archive holds `qgate-pr-comment.ps1`;
   - the Linux arm64 binary prints `qgate 0.2.0`.
 
-  Then ask Ervin to publish. Record the result in `design.md` on `change/add-pr-comments-2`.
+  Then ask Ervin to publish. Record the result in `design.md` on `change/add-pr-comments-2`. (Ervin asked Claude to push the tag; see design.md.)
 
 ## 3. README and rehearsal (PR 2, `change/add-pr-comments-2`)
 
@@ -86,7 +86,7 @@ D10).
   - check the threads through the REST API;
   - check the build issues through the build timeline;
   - abandon the spike's pull request 1349 first.
-- [x] 3.3 Ask Ervin to look at one scenario-1 comment in the web UI. Ervin confirms that the table renders, the escapes do not show, and there is no marker line.
+- [x] 3.3 Ask Ervin to look at one scenario-1 comment in the web UI. Ervin confirms that the table renders, the escapes do not show, and there is no marker line. (Checked after scenario 3, whose comment holds scenario 1's row; see design.md.)
 - [x] 3.4 Record the rehearsal in `design.md`:
   - the build ids;
   - the thread ids and statuses per scenario;
