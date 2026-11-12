@@ -374,6 +374,21 @@ PR #16, all 18 checks green on the first push.
     `::warning file=src/a.ts,line=1,title=complexity/cyclomatic-increase::f:
     cyclomatic complexity 1 -> 4 (+3)`.
 
+## Release 0.3.0 (task 2.1)
+
+- PR #16 merged as e29df6e. At Ervin's request the agent pushed the
+  annotated tag `v0.3.0` ("qgate 0.3.0", Ervin's noreply identity, as
+  for 0.2.0) after `check-version.sh` and `check-action-version.sh`
+  accepted it on `main`.
+- Release run 43269011917: all jobs green; the `version` job printed
+  "every QGATE_VERSION in action.yml is 0.3.0, as the tag v0.3.0 says".
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six; each holds the binary, `qgate-pr-comment.ps1`,
+  `README.md` and both licenses; the Linux arm64 binary printed
+  `qgate 0.3.0`.
+- Ervin published the draft on 2026-11-12 (17:31 UTC); `releases/latest`
+  is `v0.3.0` and its files download.
+
 ## Review of PR 1
 
 The `reviewer` subagent found no blocker. Its findings and what was done:
@@ -418,6 +433,39 @@ The `reviewer` subagent found no blocker. Its findings and what was done:
   - qgate's standard error is decoded with the console encoding by
     `2>`; non-ASCII text in an error message may look wrong in a
     Windows log. It reaches only the log.
+
+## Rehearsal of the README workflow (task 3.2)
+
+Rehearsal repository, 2026-11-12, with the published `@v0.3.0`. Before
+it: pull requests 1 and 2 (spike, pre-release run) closed, and `main`'s
+`src/grade.ts` reset to the simple version (complexity 2).
+
+**The workflow is the README's.** `extract-gha-workflow.sh` prints the
+first `yaml` block of "In GitHub Actions"; each branch's
+`.github/workflows/qgate.yml` was compared with it by `diff`:
+- Linux scenarios 1 to 4: no difference;
+- Windows: `10c10` (`runs-on: windows-latest`);
+- scenario 5: `6d5` (no `pull-requests: write`);
+- scenario 6: `6d5`, and `15a15,16` (`with: comment: false`);
+- scenario 7: `2c2` (`on: push`).
+
+| # | Scenario | Linux run (PR) | Windows run (PR) | Result on both |
+|---|---|---|---|---|
+| 1 | `grade` 2 -> 8 | 43270761465 (#3) | 43271598570 (#7) | step failed; error annotation `src/grade.ts:1`; comment created (Linux 6831081351, Windows 6831199408) |
+| 2 | fix pushed | 43270874931 | 43271717142 | step succeeded; the same comment now "No regressions found." |
+| 3 | `ertekeles` 1 -> 7 in `src/értékelés.ts` | 43271049647 | 43271826787 | step failed; annotation and comment row name `src/értékelés.ts:1` intact; still one comment |
+| 4 | README only | 43271163964 (#4) | 43271978936 (#8) | step succeeded; no comment |
+| 5 | no `pull-requests: write` | 43271266084 (#5) | 43272101206 (#9) | step failed with the 403 message naming `pull-requests: write`; no gate annotation; no comment |
+| 6 | `comment: false`, `contents: read` | 43271402040 (#6) | 43272211304 (#10) | step failed with the `grade` annotation; no comment |
+| 7 | `on: push`, no `base` | 43271490407 | 43272363368 | step failed: "no base revision to compare with; run the action on a pull_request event, or set its base input" |
+
+- qgate's summary line on standard error appeared between the
+  stop-commands lines in every run; the runner masked the token.
+- The README's steps without the action (the install block and the
+  `--format github` line, wrapped in one job unchanged) ran on Linux,
+  run 43272496815 (#11): the archive passed `sha256sum -c`, and the
+  step failed with the `grade` annotation.
+- `actions/checkout@v7` logged no deprecation warning.
 
 ## Risks / Trade-offs
 
