@@ -5,8 +5,8 @@
 > Status: early. `qgate check` compares TypeScript code between two git
 > revisions (or two files) for cyclomatic complexity, newly duplicated
 > code and, with a [`qgate.toml`](#architecture-rules-qgatetoml),
-> forbidden imports; more analyzers and CI integration follow the
-> [roadmap](#roadmap) below.
+> forbidden imports. It reports on pull requests in GitHub Actions and
+> Azure Pipelines; more analyzers follow the [roadmap](#roadmap) below.
 
 ## Try it
 
@@ -524,8 +524,9 @@ Windows runners, x64 and arm64.
 
 - **Annotations** on the changed files, one per Error and Warning
   finding. GitHub shows at most 10 errors and 10 warnings of a step;
-  the step's log and the job summary have them all.
-- **The job summary** of the run: the Markdown report.
+  the step's log lists every finding.
+- **The job summary** of the run: the Markdown report, a table of up to
+  50 findings.
 - **One qgate comment** with the same report, posted when a run first
   finds something. Later runs update it, and once the findings are
   gone it says "No regressions found." A pull request that never had a
@@ -552,15 +553,19 @@ Windows runners, x64 and arm64.
 
 - **The comment needs `pull-requests: write`.** `issues: write` is not
   enough for a pull request. Without the permission the action fails
-  with a message that names it, and the check does not run.
-- **Pull requests from forks** get a token that cannot write, so the
-  action skips the comment with a notice. The annotations, the job
-  summary and the check work as usual.
+  with a message that names it, before qgate's gate runs, so there are
+  no annotations.
+- **Pull requests from forks** usually get a token that cannot write, so
+  the action skips the comment for every fork with a notice. The
+  annotations, the job summary and the result work as usual.
 - **Pinning.** qgate never moves a release tag. To pin the action's
   code itself, use the commit instead:
   `nagypalervin/qgate@e29df6e8330bd47f262f56fcbcf04e40e3c3ba06 # v0.3.0`.
-- **Self-hosted runners** need PowerShell 7.4 or later (`pwsh`) and
-  `tar`.
+  The binary still comes from the release, checked against its
+  `SHA256SUMS`.
+- **Self-hosted runners** need PowerShell 7.4 or later (`pwsh`), `git`,
+  `tar` on Linux and macOS, and access to `github.com` and
+  `api.github.com`.
 
 #### Without the action
 
@@ -601,7 +606,7 @@ to report.
 - run: qgate check --base "origin/$BASE_REF" --format json > qgate-report.json
   env:
     BASE_REF: ${{ github.base_ref }}
-- uses: actions/upload-artifact@v4
+- uses: actions/upload-artifact@v7
   if: ${{ !cancelled() }}
   with:
     name: qgate-report
