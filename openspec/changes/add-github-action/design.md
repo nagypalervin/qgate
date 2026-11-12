@@ -357,6 +357,23 @@ action on `ubuntu-latest` (now Ubuntu 26.04), then on `windows-latest`.
   rehearsal, so the branch made it simpler. The PR 2 rehearsal resets
   `main` to the simple version first.
 
+## Verification on PR 1 (tasks 1.5 and 1.6)
+
+PR #16, all 18 checks green on the first push.
+- **Pester (1.5):** both `pester (ubuntu-latest)` and `pester
+  (windows-latest)` ran `ci/azure/qgate-pr-comment.Tests.ps1` and
+  `ci/github/qgate-action.Tests.ps1`: 81 tests passed on each. The job
+  names, and so the required checks, did not change.
+- **Release rehearsal (1.6),** run 43265888318:
+  - the `version` job's self-test printed "every QGATE_VERSION in
+    action.yml is 0.3.0" for `v0.3.0` and refused `v0.3.0.1`;
+  - six archives and `SHA256SUMS`; the Linux arm64 archive passed
+    `sha256sum --check` and holds `qgate`, `qgate-pr-comment.ps1`,
+    `README.md` and both licenses;
+  - its binary printed `qgate 0.3.0` and, in a throwaway repository,
+    `::warning file=src/a.ts,line=1,title=complexity/cyclomatic-increase::f:
+    cyclomatic complexity 1 -> 4 (+3)`.
+
 ## Risks / Trade-offs
 
 - **[The action is first run for real after the release]** A bug found

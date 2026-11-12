@@ -38,8 +38,8 @@ D12).
   Update `qgate-report`'s module doc and the `--format` help text.
 - [x] 1.3 Write `ci/github/qgate-action.Tests.ps1` (Pester 5.9.1, mocked `Invoke-Qgate` and `Invoke-GitHub`) for every case in design D9, then `ci/github/qgate-action.ps1` until the tests pass locally.
 - [x] 1.4 Write `action.yml` (design D2): the three inputs, the four steps, `QGATE_VERSION`, the `comment` condition. Check it with `actionlint` if it can be installed with a verified checksum; otherwise review it by hand against GitHub's metadata syntax.
-- [ ] 1.5 Point the `pester (<os>)` jobs at `ci/` so they run both directories; verify on the PR that both jobs run the new tests and keep their names.
-- [ ] 1.6 Release check and version (design D7):
+- [x] 1.5 Point the `pester (<os>)` jobs at `ci/` so they run both directories; verify on the PR that both jobs run the new tests and keep their names.
+- [x] 1.6 Release check and version (design D7):
   - a step in `release.yml`'s `version` job compares `action.yml`'s `QGATE_VERSION` with the tag, with a self-test of the mismatch;
   - `release.yml` triggers on changes to `action.yml`;
   - the version becomes `0.3.0`, with `Cargo.lock` following.
