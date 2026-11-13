@@ -11,16 +11,23 @@ finding's path, message or rule contains:
 - a line break SHALL become a space.
 
 The Location cell SHALL be `<path>:<line>`, or `<path>` for a finding
-without a line. A finding's related locations SHALL be listed in its
-Finding cell after the message, except one whose `<path>:<line>` the
-message already names: at the start of the message or after
-whitespace, and not followed by an ASCII digit.
+without a line.
 
 #### Scenario: A message with table and HTML characters
 
 - **GIVEN** a finding whose message is `a | b <script> *c*`
 - **WHEN** the Markdown report is rendered
 - **THEN** its row still has four cells, and the Finding cell renders as the text `a | b <script> *c*`
+
+## ADDED Requirements
+
+### Requirement: Markdown related locations
+
+The Finding cell SHALL list a finding's related locations after the
+message, as `<path>:<line>`, or `<path>` for one without a line. It
+SHALL leave out a location whose `<path>:<line>` the message already
+names: at the start of the message or after whitespace, and not
+followed by an ASCII digit.
 
 #### Scenario: A duplicate with its copies
 

@@ -131,7 +131,7 @@ fn markdown_report() {
     assert_eq!(stdout(&again), stdout(&out));
 }
 
-// Requirement: Markdown table cells, "A copy the message names", with the
+// Requirement: Markdown related locations, "A copy the message names", with the
 // duplication analyzer's real message (design D1 of
 // `fix-pr-comment-details`).
 #[test]

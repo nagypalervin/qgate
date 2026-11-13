@@ -74,8 +74,11 @@ None.
 
 ### Modified Capabilities
 
-- `report-formats`: "Markdown table cells" leaves out a related
-  location the message already names.
+- `report-formats`: the related locations move out of "Markdown table
+  cells" into a new requirement, "Markdown related locations", which
+  leaves out a location the message already names. (Split at the
+  archive: one requirement held both and grew past the 500 characters
+  `openspec validate --strict` accepts.)
 - `ci-integration`: "Missing comment permission" names the identity the
   token belongs to, the project's or the collection's Build Service.
 
