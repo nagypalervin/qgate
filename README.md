@@ -28,10 +28,10 @@ check it against `SHA256SUMS`, unpack it, and put `qgate` on your
 
 The Linux binaries are statically linked and run on any distribution,
 Alpine included (with `curl` installed). Each block below installs only
-when the checksum matches. On Linux, with version 0.5.0 as the example:
+when the checksum matches. On Linux, with version 0.6.0 as the example:
 
 ```sh
-v=0.5.0 t=x86_64-unknown-linux-musl
+v=0.6.0 t=x86_64-unknown-linux-musl
 base=https://github.com/nagypalervin/qgate/releases/download/v$v
 curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
   grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c &&
@@ -42,7 +42,7 @@ curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
 On macOS, the check uses `shasum`:
 
 ```sh
-v=0.5.0 t=aarch64-apple-darwin
+v=0.6.0 t=aarch64-apple-darwin
 base=https://github.com/nagypalervin/qgate/releases/download/v$v
 curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
   grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | shasum -a 256 --check &&
@@ -55,7 +55,7 @@ On Windows, in PowerShell, then add the unpacked folder to your `PATH`:
 
 ```powershell
 $ErrorActionPreference = "Stop"
-$v = "0.5.0"; $t = "x86_64-pc-windows-msvc"
+$v = "0.6.0"; $t = "x86_64-pc-windows-msvc"
 $base = "https://github.com/nagypalervin/qgate/releases/download/v$v"
 Invoke-WebRequest "$base/qgate-$v-$t.zip" -OutFile "qgate-$v-$t.zip"
 Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
@@ -649,10 +649,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: nagypalervin/qgate@v0.5.0
+      - uses: nagypalervin/qgate@v0.6.0
 ```
 
-The action installs qgate 0.5.0 for the runner from the release and
+The action installs qgate 0.6.0 for the runner from the release and
 checks it against `SHA256SUMS`. It compares the pull request with its
 base branch (`origin/<base branch>`), so the checkout needs the full
 history (`fetch-depth: 0`). It runs on GitHub-hosted Linux, macOS and
@@ -682,7 +682,7 @@ Windows runners, x64 and arm64.
 | `base` | the pull request's base branch | the revision to compare with, for example `origin/main`; needed outside `pull_request` events |
 
 ```yaml
-      - uses: nagypalervin/qgate@v0.5.0
+      - uses: nagypalervin/qgate@v0.6.0
         with:
           fail-on: warning
 ```
@@ -698,7 +698,7 @@ Windows runners, x64 and arm64.
   annotations, the job summary and the result work as usual.
 - **Pinning.** qgate never moves a release tag. To pin the action's
   code itself, use the commit instead:
-  `nagypalervin/qgate@d408ea1f7e17f7213df5b7bd70a18051e149a096 # v0.5.0`.
+  `nagypalervin/qgate@fdcbadd4bec9d6904c1ec4d857a4bc24398f40b0 # v0.6.0`.
   The binary still comes from the release, checked against its
   `SHA256SUMS`.
 - **Self-hosted runners** need PowerShell 7.4 or later (`pwsh`), `git`,
@@ -715,7 +715,7 @@ analyze it. On `ubuntu-latest`:
 - name: Install qgate
   working-directory: ${{ runner.temp }}
   run: |
-    v=0.5.0 t=x86_64-unknown-linux-musl
+    v=0.6.0 t=x86_64-unknown-linux-musl
     base=https://github.com/nagypalervin/qgate/releases/download/v$v
     curl -fsSL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS"
     grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c
@@ -773,7 +773,7 @@ On a Microsoft-hosted Linux agent:
       fetchDepth: 0
     - bash: |
         set -euo pipefail
-        v=0.5.0 t=x86_64-unknown-linux-musl
+        v=0.6.0 t=x86_64-unknown-linux-musl
         base=https://github.com/nagypalervin/qgate/releases/download/v$v
         curl -fsSL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS"
         grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c
@@ -813,7 +813,7 @@ git, so the job's agent need not be the one your build runs on.
     - pwsh: |
         $ErrorActionPreference = "Stop"
         $PSNativeCommandUseErrorActionPreference = $true
-        $v = "0.5.0"; $t = "x86_64-pc-windows-msvc"
+        $v = "0.6.0"; $t = "x86_64-pc-windows-msvc"
         $base = "https://github.com/nagypalervin/qgate/releases/download/v$v"
         Invoke-WebRequest "$base/qgate-$v-$t.zip" -OutFile "qgate-$v-$t.zip"
         Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
@@ -971,10 +971,10 @@ Design principles:
 | **M2** | Architecture rules (`qgate.toml`), duplication detection | done |
 | **M3** | Checking while coding: the working tree as head, JSON output, a Claude Code hook, an MCP server, so agents check their own changes before opening a pull request | done |
 | **M4** | CI integration: release binaries, GitHub Action, Azure DevOps Pipelines, pull request comments | done |
-| **Languages** | C# next to TypeScript: complexity and duplication (0.4.0) | done |
+| **Languages** | C# next to TypeScript: complexity and duplication (0.4.0), architecture rules for `using` directives (0.6.0) | done |
 | **M5** | Change risk from git history: hotspots (code that is both complex and changed often), code changed without its tests | planned |
 | **M6** | Baseline and trends over time, optional AI summary | planned |
-| **Later** | A git pre-commit hook, which needs a check of the staged changes (`--staged`); SARIF output, once a consumer fits a tool that reports only what got worse; architecture rules for C# `using` directives, which name namespaces rather than files | not planned yet |
+| **Later** | A git pre-commit hook, which needs a check of the staged changes (`--staged`); SARIF output, once a consumer fits a tool that reports only what got worse | not planned yet |
 
 The hotspot analysis in M5 builds on published work on behavioral code
 analysis, notably Adam Tornhill's *Your Code as a Crime Scene*.

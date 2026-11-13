@@ -16,11 +16,11 @@ checks; commit messages and PR bodies are written to files first.
 
 ## 2. Release 0.6.0 (between the pull requests)
 
-- [ ] 2.1 After PR 1 merges and Ervin agrees, push `v0.6.0` and check the draft: six archives, `SHA256SUMS`, `sha256sum --check`, the Linux arm64 binary printing `qgate 0.6.0` and reporting a forbidden `using`. Ervin publishes. Record it in `design.md` on `change/add-csharp-architecture-2`.
+- [x] 2.1 After PR 1 merges and Ervin agrees, push `v0.6.0` and check the draft: six archives, `SHA256SUMS`, `sha256sum --check`, the Linux arm64 binary printing `qgate 0.6.0` and reporting a forbidden `using`. Ervin publishes. Record it in `design.md` on `change/add-csharp-architecture-2`.
 
 ## 3. README, roadmap and rehearsal (PR 2, `change/add-csharp-architecture-2`)
 
-- [ ] 3.1 Every README install block, `uses:` and the pinned commit at 0.6.0; `grep` finds no `0.5.0`. The roadmap's "Languages" row names the C# rules, and the "Later" row no longer lists them.
+- [x] 3.1 Every README install block, `uses:` and the pinned commit at 0.6.0; `grep` finds no `0.5.0`. The roadmap's "Languages" row names the C# rules, and the "Later" row no longer lists them.
 - [ ] 3.2 Azure rehearsal (D8): the README's Linux job at 0.6.0 in the rehearsal project, on a pull request that adds a forbidden `using` to a domain file; read the comment thread and the build issues through the REST API and record them in `design.md`. Abandon the pull request afterwards.
 
 ## Workflow follow-up

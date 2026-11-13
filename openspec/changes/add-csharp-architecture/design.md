@@ -406,6 +406,46 @@ Fixed:
 - the TypeScript message is built only for the first import of a
   target again.
 
+## Release 0.6.0 (task 2.1)
+
+- PR #26 merged as fdcbadd. As Ervin agreed, the agent pushed the
+  annotated tag `v0.6.0` ("qgate 0.6.0") after `check-version.sh` and
+  `check-action-version.sh` accepted it on `main`.
+- Release run 43523029663: all nine jobs green.
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six. The Linux arm64 archive holds the binary,
+  `qgate-pr-comment.ps1` (byte for byte the one on `main`), `README.md`
+  and both licenses. Its binary (11,211,840 bytes, the same size as in
+  0.5.0) printed `qgate 0.6.0`. In a throwaway repository, on a domain
+  file gaining `using Microsoft.EntityFrameworkCore;` under a rule with
+  `to_namespaces`, it reported `src/Shop.Domain/Order.cs:2 uses
+  Microsoft.EntityFrameworkCore, forbidden by "domain-is-pure"` and
+  exited with 1.
+- Archive sizes in bytes against 0.5.0; the change is the C# walk and
+  the pattern code:
+
+  | Archive | 0.5.0 | 0.6.0 |
+  |---|---|---|
+  | `x86_64-unknown-linux-musl.tar.gz` | 2,140,993 | 2,149,926 |
+  | `aarch64-unknown-linux-musl.tar.gz` | 1,947,700 | 1,954,472 |
+  | `aarch64-apple-darwin.tar.gz` | 1,945,945 | 1,953,299 |
+  | `x86_64-apple-darwin.tar.gz` | 1,974,853 | 1,983,095 |
+  | `x86_64-pc-windows-msvc.zip` | 1,933,168 | 1,939,601 |
+  | `aarch64-pc-windows-msvc.zip` | 1,828,044 | 1,836,382 |
+
+- Ervin published the draft on 2026-11-13 (23:01 UTC); `releases/latest`
+  is `v0.6.0`.
+
+## README at 0.6.0 (task 3.1)
+
+Every install block, both `uses:` lines and the pinned commit
+(`fdcbadd4bec9d6904c1ec4d857a4bc24398f40b0`, `v0.6.0^{commit}`) name
+0.6.0, and `grep` finds no `0.5.0`. The roadmap's "Languages" row names
+the C# architecture rules (0.6.0); the "Later" row no longer lists them.
+The Linux install block, run as written against the published release
+(with the arm64 target and a scratch directory instead of
+`~/.local/bin`), passed its checksum and installed `qgate 0.6.0`.
+
 ## Risks / Trade-offs
 
 - **[A rule can be bypassed]** A fully qualified name in code, or a
