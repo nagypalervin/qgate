@@ -64,7 +64,7 @@
   location counts as named only at the start of the message or after
   whitespace, so `src/a.ts:1` stays listed next to `lib/src/a.ts:1-6`.
   The `report-formats` delta says so and has a scenario for it. Put to
-  Ervin with PR 1; awaiting his approval.
+  Ervin with PR 1; he approved it on 2026-11-13.
 
 ## Capabilities
 
