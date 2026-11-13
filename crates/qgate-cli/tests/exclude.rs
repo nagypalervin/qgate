@@ -178,3 +178,25 @@ fn invalid_exclude_pattern() {
     assert!(err.contains("\"/src/**\""), "{err}");
     assert_eq!(code, Some(2));
 }
+
+// Out of scope of exclusion (proposal): a rule's `to` still matches an
+// excluded target.
+#[test]
+fn an_excluded_file_is_still_an_import_target() {
+    let config = "[files]\nexclude = [\"src/ui\"]\n\n[[architecture.forbid]]\nname = \"domain-is-pure\"\n\
+                  from = [\"src/domain/**\"]\nto = [\"src/ui/**\"]\n";
+    let (out, err, _) = run(
+        &[
+            ("qgate.toml", config),
+            ("src/ui/Button.ts", "export const B = 1;\n"),
+        ],
+        &[(
+            "src/domain/order.ts",
+            "import { B } from \"../ui/Button\";\n",
+        )],
+    );
+    assert!(
+        out.contains("src/domain/order.ts:1  imports src/ui/Button"),
+        "{out}{err}"
+    );
+}

@@ -490,13 +490,40 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
 - **The file is read from the revision being checked** (`--head`, by default
   `HEAD`), not from the working tree, unless you check the working tree
   itself with `--worktree`. A missing `qgate.toml` means no
-  rules; an invalid one (unknown keys included) fails with exit code `2`.
+  rules and no excluded files; an invalid one (unknown keys included)
+  fails with exit code `2`.
   The two-file form ignores it.
 - **Not yet supported:** tsconfig `paths`, root-absolute imports
   (`import "/src/ui/Button"`, which no pattern can name), and files the
   TypeScript grammar
   cannot parse yet (`export type * from`, `import("./x").Foo<T>`), which
   are reported as `input/unparsable` instead.
+
+### Leaving files out (`[files] exclude`)
+
+To keep files out of every check, list path patterns under `[files]` in
+`qgate.toml`:
+
+```toml
+[files]
+exclude = ["**/Migrations/**", "vendor"]
+```
+
+- **An excluded file is left out everywhere** in `--base` and
+  `--worktree` mode, as if qgate did not read its language: it is not
+  analyzed, a copy of it is not reported, and its old code does not
+  count as code that existed before. A file moved out of an excluded
+  directory counts as new.
+- **Patterns** are those of [architecture rules](#architecture-rules-qgatetoml):
+  `vendor` also covers everything below it, `**/Migrations/**` any
+  `Migrations` directory.
+- **The list is read from the revision being checked**, like the rules,
+  so a pull request that excludes its own files shows it in the diff of
+  its `qgate.toml`.
+- **An invalid pattern** fails with exit code `2`, naming `files.exclude`
+  and the pattern. The two-file form ignores the setting.
+- **An excluded file is still an import target:** a rule's `to` matches
+  it as before.
 
 ### C#
 
@@ -531,7 +558,9 @@ rules of its own.
 - **EF Core migrations themselves are not generated** by this
   convention: they have no header, so they are analyzed, and a new
   migration that repeats an older one's table definitions is reported
-  as a copy (a Warning).
+  as a copy (a Warning). To leave them out, add
+  `exclude = ["**/Migrations/**"]` under `[files]` (see
+  [Leaving files out](#leaving-files-out-files-exclude)).
 - **Preprocessor directives are not evaluated.** The code of every `#if`
   branch counts, and a directive's condition does not. A file is
   reported as `input/unparsable` where `#if` splits code the parser
