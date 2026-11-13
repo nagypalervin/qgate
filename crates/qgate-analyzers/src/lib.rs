@@ -35,6 +35,7 @@
 pub mod architecture;
 pub mod complexity;
 pub mod duplication;
+pub mod patterns;
 
 use std::path::PathBuf;
 

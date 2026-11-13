@@ -14,19 +14,22 @@
 //!   one that leaves the root has no target;
 //! - any other specifier (`react`, `@/ui/Button`) is its own target.
 //!
-//! Patterns are globs over `/`-separated paths: `*` and `?` stay within one
-//! segment, `**` spans segments, `[...]` is a character class. A pattern
-//! without glob characters also matches everything below it (`react`
-//! matches `react/jsx-runtime`), and `dir/**` also matches `dir`.
+//! Patterns are [`PathPatterns`](crate::patterns::PathPatterns): globs over
+//! `/`-separated paths, where a pattern without glob characters also
+//! matches everything below it (`react` matches `react/jsx-runtime`), and
+//! `dir/**` also matches `dir`.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
-use globset::{Glob, GlobBuilder, GlobSet, GlobSetBuilder};
 use qgate_core::{Finding, Location, Severity};
 use qgate_lang::FileModel;
 
+use crate::patterns::PathPatterns;
+// The spelling tests below call it directly.
+#[cfg(test)]
+use crate::patterns::normalize;
 use crate::{Analyzer, FileChange};
 
 /// Rule id of a newly introduced forbidden import.
@@ -75,8 +78,8 @@ pub struct ArchitectureAnalyzer {
 #[derive(Debug, Clone)]
 struct CompiledRule {
     name: String,
-    from: GlobSet,
-    to: GlobSet,
+    from: PathPatterns,
+    to: PathPatterns,
 }
 
 impl ArchitectureAnalyzer {
@@ -114,14 +117,14 @@ impl ArchitectureAnalyzer {
     ) -> BTreeMap<(usize, String), (u32, String)> {
         let mut found = BTreeMap::new();
         for (index, rule) in self.rules.iter().enumerate() {
-            if !rule.from.is_match(path) {
+            if !rule.from.matches(path) {
                 continue;
             }
             for import in &model.imports {
                 let Some(target) = target(path, &import.specifier) else {
                     continue;
                 };
-                if rule.to.is_match(&target) {
+                if rule.to.matches(&target) {
                     found
                         .entry((index, target))
                         .or_insert_with(|| (import.line, import.specifier.clone()));
@@ -208,77 +211,14 @@ fn target(importer: &str, specifier: &str) -> Option<String> {
     (!path.is_empty()).then_some(path)
 }
 
-/// Compile the patterns of one side of a rule into a set (design D3).
-fn compile(rule: &str, patterns: &[String]) -> Result<GlobSet, PatternError> {
-    let mut set = GlobSetBuilder::new();
-    for written in patterns {
-        let error = |detail: String| PatternError {
-            rule: rule.to_owned(),
-            pattern: written.clone(),
-            detail,
-        };
-        let pattern = normalize(written).map_err(|detail| error(detail.to_owned()))?;
-        let pattern = pattern.as_str();
-        let has_glob = pattern.contains(['*', '?', '[', '{']);
-        let mut globs = vec![pattern.to_owned()];
-        if !has_glob {
-            // `react` also matches `react/jsx-runtime`.
-            globs.push(format!("{pattern}/**"));
-        } else if let Some(dir) = pattern.strip_suffix("/**") {
-            // `src/ui/**` also matches `src/ui`, the target of `import "../ui"`.
-            globs.push(dir.to_owned());
-        }
-        for glob in globs {
-            set.add(glob_of(&glob).map_err(|e| error(e.kind().to_string()))?);
-        }
-    }
-    set.build().map_err(|e| PatternError {
+/// Compile the patterns of one side of a rule (design D3), naming the
+/// rule in an error.
+fn compile(rule: &str, patterns: &[String]) -> Result<PathPatterns, PatternError> {
+    PathPatterns::new(patterns).map_err(|e| PatternError {
         rule: rule.to_owned(),
-        pattern: patterns.join(", "),
-        detail: e.kind().to_string(),
+        pattern: e.pattern,
+        detail: e.detail,
     })
-}
-
-/// A pattern in the form paths have. Leading `./` are removed; a pattern
-/// that then starts with `/`, or has a `..` segment anywhere (also inside
-/// braces), is invalid, as is an empty one: none could ever match a path
-/// from the repository root. A pattern with braces or a `\` escape keeps
-/// its glob syntax and is not rewritten further; in any other pattern,
-/// empty and `.` segments and a trailing `/` are dropped, so `./src//ui/`
-/// means `src/ui`.
-fn normalize(pattern: &str) -> Result<String, &'static str> {
-    let mut rest = pattern;
-    while let Some(after) = rest.strip_prefix("./") {
-        rest = after;
-    }
-    if rest.starts_with('/') {
-        return Err("patterns are relative to the repository root; remove the leading `/`");
-    }
-    if rest.split(['/', '{', '}', ',']).any(|part| part == "..") {
-        return Err("`..` cannot match a path from the repository root");
-    }
-    // Braces and escapes keep their glob meaning: no further rewriting.
-    if rest.contains(['{', '\\']) {
-        return Ok(rest.to_owned());
-    }
-    let mut segments = Vec::new();
-    for segment in rest.split('/') {
-        match segment {
-            "" | "." => {}
-            segment => segments.push(segment),
-        }
-    }
-    if segments.is_empty() {
-        return Err("the pattern is empty");
-    }
-    Ok(segments.join("/"))
-}
-
-fn glob_of(pattern: &str) -> Result<Glob, globset::Error> {
-    GlobBuilder::new(pattern)
-        .literal_separator(true)
-        .backslash_escape(true)
-        .build()
 }
 
 #[cfg(test)]
@@ -437,7 +377,7 @@ mod tests {
     fn matches(pattern: &str, path: &str) -> bool {
         compile("r", &[pattern.to_owned()])
             .expect("valid pattern")
-            .is_match(path)
+            .matches(path)
     }
 
     #[test]
