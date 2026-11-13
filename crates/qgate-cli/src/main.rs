@@ -808,7 +808,7 @@ fn architecture_analyzer(config: &Config) -> Result<ArchitectureAnalyzer, String
         .map(|rule| ForbidRule {
             name: rule.name.clone(),
             from: rule.from.clone(),
-            to: rule.to.clone(),
+            to: rule.to.clone().unwrap_or_default(),
         })
         .collect();
     ArchitectureAnalyzer::new(&rules).map_err(|e| format!("{CONFIG_FILE}: {e}"))

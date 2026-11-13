@@ -97,9 +97,12 @@ violation only once, and the CLI needs no new branch.
   - a list that is given but empty is an error, as now;
   - a rule with neither list is an error that names `to` and
     `to_namespaces`.
-  - Telling "missing" from "empty" needs `Option<Vec<String>>` in the
-    serde layer. The public field can stay a plain `Vec`, filled after
-    validation.
+  - Telling "missing" from "empty" needs `Option<Vec<String>>`.
+    **Decided in task 1.2:** the public fields are `Option<Vec<String>>`
+    as well. The alternative, plain `Vec`s filled from a private serde
+    struct through `try_from`, would put the TOML position in front of
+    the list errors and change their messages; `None` also says plainly
+    "not given".
 - **Why one table:**
   - a layer rule for a full-stack repository is one name with both
     lists ("the domain must not depend on the infrastructure");
