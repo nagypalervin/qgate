@@ -432,6 +432,33 @@ in throwaway repositories, and asked for:
     working tree and one that does not parse → added;
   - the evaluation's generated-file counts → corrected above.
 
+## Release 0.4.0 (task 3.1)
+
+- PR #22 merged as cb474ba. As Ervin agreed, the agent pushed the
+  annotated tag `v0.4.0` ("qgate 0.4.0") after `check-version.sh` and
+  `check-action-version.sh` accepted it on `main`.
+- Release run 43415680951: all nine jobs green.
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six. The Linux arm64 archive holds the binary,
+  `qgate-pr-comment.ps1` (byte for byte the one on `main`), `README.md`
+  and both licenses. Its binary (11,211,840 bytes) printed `qgate 0.4.0`
+  and, on `crates/qgate-cli/tests/fixtures/cs/{Before,After}.cs`,
+  reported `Cart.Total(int): cyclomatic complexity 2 -> 3 (+1)` and
+  exited 0.
+- Archive sizes against 0.3.1, the cost of the C# grammar:
+
+  | Archive | 0.3.1 | 0.4.0 |
+  |---|---|---|
+  | `x86_64-unknown-linux-musl.tar.gz` | 1,778,448 | 2,134,656 |
+  | `aarch64-unknown-linux-musl.tar.gz` | 1,597,105 | 1,941,545 |
+  | `aarch64-apple-darwin.tar.gz` | 1,554,227 | 1,939,195 |
+  | `x86_64-apple-darwin.tar.gz` | 1,625,782 | 1,969,611 |
+  | `x86_64-pc-windows-msvc.zip` | 1,593,265 | 1,925,716 |
+  | `aarch64-pc-windows-msvc.zip` | 1,493,343 | 1,821,786 |
+
+- Ervin published the draft on 2026-11-13 (11:23 UTC); `releases/latest`
+  is `v0.4.0`.
+
 ## Risks / Trade-offs
 
 - **[`#if` the grammar cannot place]** Branches that each open a block,
