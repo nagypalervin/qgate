@@ -32,8 +32,8 @@ first.
 ## 4. Docs, Azure run and archive (PR 3, `change/add-csharp-analysis-3`)
 
 - [x] 4.1 Every README install block, `uses:` and the pinned commit at 0.4.0; `grep` finds no `0.3.1`.
-- [x] 4.2 In the Azure rehearsal project, run the README's Windows job on a pull request that makes a C# method more complex and copies another; check the comment's rows through the API and record the run in `design.md`. Needs a PAT valid on the day; ask Ervin for one after 2026-11-17.
-- [x] 4.3 The roadmap row "Languages" says C# is done (architecture rules for `using` still open).
+- [x] 4.2 In the Azure rehearsal project, run the README's Windows job on a pull request with C# code: a new complex method, a copy and two generated files (amended: the rehearsal `main` holds no C#, so no existing method could grow; Ervin accepted this on 2026-11-13). Check the comment's rows through the API and record the run in `design.md`.
+- [x] 4.3 The roadmap row "Languages" says C# is done; architecture rules for `using` move to the "Later" row (Ervin's decision, 2026-11-13).
 
 ## Workflow follow-up
 

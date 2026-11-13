@@ -844,8 +844,9 @@ they are supposed to cover. Each pull request looks fine on its own; the
 damage shows up months later.
 
 qgate makes that drift visible **per change**, while it is still cheap
-to fix, and records it over time so you can answer a simple question with
-data instead of gut feeling:
+to fix, and is meant to record it over time (M6 on the
+[roadmap](#roadmap)) so you can answer a simple question with data
+instead of gut feeling:
 
 *When we develop faster, where does the system break first?*
 
@@ -862,6 +863,9 @@ git diff base..head ─► parser (tree-sitter) ─► analyzers ─► findings
                                               ├ duplication     ├ PR comment
                                               └ tests           └ MCP server
 ```
+
+The `tests` analyzer (M5) and SARIF output (Later) are planned; the rest
+works today.
 
 Design principles:
 
