@@ -406,6 +406,100 @@ Fixed:
 - the TypeScript message is built only for the first import of a
   target again.
 
+## Release 0.6.0 (task 2.1)
+
+- PR #26 merged as fdcbadd. As Ervin agreed, the agent pushed the
+  annotated tag `v0.6.0` ("qgate 0.6.0") after `check-version.sh` and
+  `check-action-version.sh` accepted it on `main`.
+- Release run 43523029663: all nine jobs green.
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six. The Linux arm64 archive holds the binary,
+  `qgate-pr-comment.ps1` (byte for byte the one on `main`), `README.md`
+  and both licenses. Its binary (11,211,840 bytes, the same size as in
+  0.5.0) printed `qgate 0.6.0`. In a throwaway repository, on a domain
+  file gaining `using Microsoft.EntityFrameworkCore;` under a rule with
+  `to_namespaces`, it reported `src/Shop.Domain/Order.cs:2 uses
+  Microsoft.EntityFrameworkCore, forbidden by "domain-is-pure"` and
+  exited with 1.
+- Archive sizes in bytes against 0.5.0; the change is the C# walk and
+  the pattern code:
+
+  | Archive | 0.5.0 | 0.6.0 |
+  |---|---|---|
+  | `x86_64-unknown-linux-musl.tar.gz` | 2,140,993 | 2,149,926 |
+  | `aarch64-unknown-linux-musl.tar.gz` | 1,947,700 | 1,954,472 |
+  | `aarch64-apple-darwin.tar.gz` | 1,945,945 | 1,953,299 |
+  | `x86_64-apple-darwin.tar.gz` | 1,974,853 | 1,983,095 |
+  | `x86_64-pc-windows-msvc.zip` | 1,933,168 | 1,939,601 |
+  | `aarch64-pc-windows-msvc.zip` | 1,828,044 | 1,836,382 |
+
+- Ervin published the draft on 2026-11-13 (23:01 UTC); `releases/latest`
+  is `v0.6.0`.
+
+## README at 0.6.0 (task 3.1)
+
+Every install block, both `uses:` lines and the pinned commit
+(`fdcbadd4bec9d6904c1ec4d857a4bc24398f40b0`, `v0.6.0^{commit}`) name
+0.6.0, and `grep` finds no `0.5.0`. The roadmap's "Languages" row names
+the C# architecture rules (0.6.0); the "Later" row no longer lists them.
+The Linux install block, run as written against the published release
+(with the arm64 target and a scratch directory instead of
+`~/.local/bin`), passed its checksum and installed `qgate 0.6.0`.
+
+## Azure Pipelines rehearsal (task 3.2, 2026-11-13)
+
+- **Setup:** in the rehearsal project `qgate-rehearsal`, pipeline 36, a
+  branch from `main` whose `azure-pipelines.yml` is the line `jobs:` and
+  the README's Linux job at 0.6.0, cut out unchanged (`diff`:
+  `0a1 > jobs:`). The branch adds:
+  - `qgate.toml` with the README's rule: `from =
+    ["src/Shop.Domain/**"]`, `to_namespaces = ["Shop.Infrastructure",
+    "Microsoft.EntityFrameworkCore"]`;
+  - `src/Shop.Domain/Order.cs`, with `using System;` and
+    `using Microsoft.EntityFrameworkCore;`;
+  - `src/Shop.Domain/GlobalUsings.cs`, with
+    `global using System.Collections.Generic;` and
+    `global using Shop.Infrastructure.Data;`;
+  - `src/Shop.Infrastructure/ShopDb.cs`, which uses EF Core and the
+    domain: outside `from`, so it must not be reported.
+
+  Pull request 1359, abandoned afterwards, unmerged. The rehearsal
+  `main` holds no C#, so the domain files are new; a using added to an
+  existing file is covered by the CLI tests and the evaluation.
+- **Deviation from D8:** D8 names one form, `using
+  Shop.Infrastructure.Data;`. The rehearsal used two others, a
+  `global using` of that namespace and a plain `using` of EF Core, so
+  that one run covers both entries of `to_namespaces` and a second
+  directive form. Task 3.2 asks for "a forbidden `using`", which both
+  are.
+- **Build 1340** on `ubuntu-latest` (image `ubuntu-26.04`, version
+  20261111.196.1), reason `pullRequest`:
+  - Install qgate (checksum OK), qgate report and qgate comment
+    succeeded;
+  - `qgate comment`: "created the qgate comment (2 findings, 2 at or
+    above error)";
+  - qgate check failed, as it should, with two build issues of code
+    `architecture/forbidden-import`:
+    - error at `src/Shop.Domain/GlobalUsings.cs` line 2, `uses
+      Shop.Infrastructure.Data, forbidden by "domain-is-pure"`;
+    - error at `src/Shop.Domain/Order.cs` line 2, `uses
+      Microsoft.EntityFrameworkCore, forbidden by "domain-is-pure"`.
+  - The job carried the hosted pool's warning that `ubuntu-latest`
+    moves to Ubuntu 26 from 2026-10-19; this run already had it.
+- **Thread 4561,** active, by "qgate-rehearsal Build Service
+  (<organization>)", read through the REST API: "2 findings, 2 at or
+  above `error`." and a table with exactly these two rows. `ShopDb.cs`
+  and the `System` usings do not appear.
+
+## Review of PR 2
+
+The `reviewer` subagent checked the README versions and the pinned
+commit against the tag, each archive size of both releases and the
+release run with `gh`, the archive's script byte for byte, and the
+rehearsal record for consistency with the README's job and rule (the
+Azure facts need the private token). It found no blocker; its one nit,
+the rehearsal using other forms than D8's example, is recorded above.
+
 ## Risks / Trade-offs
 
 - **[A rule can be bypassed]** A fully qualified name in code, or a
