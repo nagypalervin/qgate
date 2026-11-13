@@ -12,6 +12,7 @@ authors.workspace = true
 qgate-core.workspace = true
 tree-sitter.workspace = true
 tree-sitter-typescript.workspace = true
+tree-sitter-c-sharp.workspace = true
 
 [lints]
 workspace = true

@@ -10,8 +10,9 @@
 
 use std::collections::HashSet;
 
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
+use crate::common::{line_of, named_children, parse_tree, unique_segment};
 use crate::{FileModel, Function, Import, Language, ParseError, Token};
 
 /// Parse TypeScript or TSX source into a [`FileModel`].
@@ -20,22 +21,7 @@ pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, Parse
         Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
         Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX,
     };
-    let mut parser = Parser::new();
-    parser
-        .set_language(&grammar.into())
-        .map_err(|e| ParseError::Parser {
-            message: e.to_string(),
-        })?;
-    let tree = parser
-        .parse(source, None)
-        .ok_or_else(|| ParseError::Parser {
-            message: "tree-sitter returned no tree".to_owned(),
-        })?;
-
-    if let Some(line) = first_error_line(tree.root_node()) {
-        return Err(ParseError::Syntax { line });
-    }
-
+    let tree = parse_tree(&grammar.into(), source)?;
     let mut walker = Walker::new(source.as_bytes());
     walker.walk(tree.root_node());
     let (functions, imports, tokens) = walker.finish();
@@ -332,18 +318,7 @@ impl<'s> Walker<'s> {
     /// produce is already taken. Nested units inherit the suffix because it
     /// is part of the segment.
     fn unique_segment(&self, name: &str) -> String {
-        let qualify = |segment: &str| {
-            let mut parts = self.segments.clone();
-            parts.push(segment.to_owned());
-            parts.join(".")
-        };
-        let mut segment = name.to_owned();
-        let mut n = 2;
-        while self.taken.contains(&qualify(&segment)) {
-            segment = format!("{name}#{n}");
-            n += 1;
-        }
-        segment
+        unique_segment(&self.segments, &self.taken, name)
     }
 
     fn leave(&mut self, frame: &Frame) {
@@ -745,33 +720,6 @@ fn unquote(text: &str) -> &str {
         .unwrap_or_default()
 }
 
-/// The named children of a node.
-fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
-    let mut cursor = node.walk();
-    node.named_children(&mut cursor).collect()
-}
-
-/// Line of the earliest `ERROR` or missing node, if the tree has any.
-/// Only subtrees that contain an error are visited.
-fn first_error_line(root: Node<'_>) -> Option<u32> {
-    if !root.has_error() {
-        return None;
-    }
-    let mut first: Option<Node<'_>> = None;
-    let mut pending = vec![root];
-    while let Some(node) = pending.pop() {
-        if node.is_error() || node.is_missing() {
-            if first.is_none_or(|f| node.start_byte() < f.start_byte()) {
-                first = Some(node);
-            }
-            continue;
-        }
-        let mut cursor = node.walk();
-        pending.extend(node.children(&mut cursor).filter(Node::has_error));
-    }
-    first.map(line_of)
-}
-
 /// Whether the node adds one to the enclosing unit's complexity.
 fn is_decision_point(node: Node<'_>) -> bool {
     let kind = node.kind();
@@ -794,11 +742,6 @@ fn is_decision_point(node: Node<'_>) -> bool {
 fn operator_in(node: Node<'_>, operators: &[&str]) -> bool {
     node.child_by_field_name("operator")
         .is_some_and(|op| operators.contains(&op.kind()))
-}
-
-/// 1-based line of a node's start.
-fn line_of(node: Node<'_>) -> u32 {
-    u32::try_from(node.start_position().row + 1).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]

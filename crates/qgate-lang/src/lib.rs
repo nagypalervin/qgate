@@ -34,6 +34,7 @@
 //! # Ok::<(), qgate_lang::ParseError>(())
 //! ```
 
+mod common;
 mod model;
 mod typescript;
 
