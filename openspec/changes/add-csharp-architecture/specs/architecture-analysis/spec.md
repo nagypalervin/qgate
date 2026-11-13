@@ -149,8 +149,9 @@ The target of a `using` directive SHALL be the namespace or type it
 names as written, without `global::`, without the `@` of verbatim
 identifiers, without whitespace or comments, and without type arguments.
 It SHALL NOT be resolved against an enclosing namespace. A directive
-whose alias names a tuple, array, pointer or built-in type, or a name
-qualified by an extern alias other than `global`, SHALL have no target.
+whose alias names a tuple, array, pointer, nullable or keyword type, or
+whose name is qualified by an alias other than `global` (`X::`), SHALL
+have no target.
 
 #### Scenario: Normalized names
 
@@ -159,7 +160,7 @@ qualified by an extern alias other than `global`, SHALL have no target.
 
 #### Scenario: No target
 
-- **WHEN** a C# file has `using P = (int X, int Y);`, `using unsafe Ptr = int*;` and `using Legacy::Shop.Data;`
+- **WHEN** a C# file has `using P = (int X, int Y);`, `using unsafe Ptr = int*;`, `using N = Shop.Data.Row?;` and `using Legacy::Shop.Data;`
 - **THEN** none of them has a target
 
 #### Scenario: As written inside a namespace
@@ -174,8 +175,8 @@ A `to_namespaces` pattern SHALL be a glob over `.`-separated names: `*`
 and `?` match within one segment, `**` matches any number of segments,
 and `[...]` is a character class. A pattern without glob characters SHALL
 also match every name below it, and a pattern ending in `.**` SHALL also
-match the name itself. A pattern that is empty, has an empty segment or
-contains `/` SHALL be invalid.
+match the name itself. A pattern that is empty, has an empty segment, or
+contains `/`, whitespace or `@` SHALL be invalid.
 
 #### Scenario: A namespace and the names below it
 

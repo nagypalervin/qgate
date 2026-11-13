@@ -24,6 +24,7 @@
 //! and `to` never does (design D5 of `add-csharp-architecture`).
 
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::fmt;
 use std::path::Path;
 
@@ -139,13 +140,18 @@ impl ArchitectureAnalyzer {
                 let Some(target) = target(path, &import.specifier) else {
                     continue;
                 };
-                if rule.to.matches(&target) {
-                    let shown = if import.specifier == target {
+                if !rule.to.matches(&target) {
+                    continue;
+                }
+                // The first import of the target wins.
+                if let Entry::Vacant(slot) = found.entry((index, target)) {
+                    let target = &slot.key().1;
+                    let shown = if import.specifier == *target {
                         format!("imports {target}")
                     } else {
                         format!("imports {target} (\"{}\")", import.specifier)
                     };
-                    found.entry((index, target)).or_insert((import.line, shown));
+                    slot.insert((import.line, shown));
                 }
             }
             for using in &model.usings {

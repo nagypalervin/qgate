@@ -14,8 +14,8 @@
 //! [`NamespacePatterns`] are the same globs over `.`-separated C# names
 //! (design D4 of `add-csharp-architecture`): `Shop.Infrastructure` also
 //! matches `Shop.Infrastructure.Data`, and `**.Data` any name ending in a
-//! `Data` segment. A namespace pattern with an empty segment or a `/` is
-//! invalid.
+//! `Data` segment. A namespace pattern with an empty segment, a `/`,
+//! whitespace or an `@` is invalid.
 
 use std::fmt;
 
@@ -102,7 +102,7 @@ impl NamespacePatterns {
     /// # Errors
     ///
     /// Returns the first pattern, as written, that is empty, has an empty
-    /// segment or a `/`, or is not a valid glob.
+    /// segment, a `/`, whitespace or an `@`, or is not a valid glob.
     pub fn new(patterns: &[String]) -> Result<Self, InvalidPattern> {
         let mut as_paths = Vec::with_capacity(patterns.len());
         for written in patterns {
@@ -141,6 +141,14 @@ fn check_namespace(pattern: &str) -> Result<(), &'static str> {
     }
     if pattern.contains('/') {
         return Err("namespace patterns are `.`-separated; `/` is not allowed");
+    }
+    // Names are compared without whitespace and without the `@` of
+    // verbatim identifiers, so a pattern with either could never match.
+    if pattern.contains(char::is_whitespace) {
+        return Err("a namespace pattern cannot contain whitespace");
+    }
+    if pattern.contains('@') {
+        return Err("write names without `@`: `using @class.Foo;` uses `class.Foo`");
     }
     if pattern.split('.').any(str::is_empty) {
         return Err(
@@ -292,7 +300,23 @@ mod tests {
         let error = invalid_namespace("Shop/Infrastructure");
         assert_eq!(error.pattern, "Shop/Infrastructure");
         assert!(error.detail.contains('/'), "{error}");
-        // A glob error names the pattern as written, not its path form.
+        // A glob error names the pattern as written, not its path form,
+        // also in a list.
         assert_eq!(invalid_namespace("Shop.[Infra").pattern, "Shop.[Infra");
+        let list = ["Shop.Data".to_owned(), "Shop.[a".to_owned()];
+        assert_eq!(
+            NamespacePatterns::new(&list).expect_err("invalid").pattern,
+            "Shop.[a"
+        );
+        // A typo that no normalized name could match is an error, not a
+        // rule that silently never fires.
+        for written in ["Shop.Infrastructure ", "Shop. Data", "Shop.@class"] {
+            let error = invalid_namespace(written);
+            assert_eq!(error.pattern, written);
+            assert!(
+                error.detail.contains("whitespace") || error.detail.contains('@'),
+                "{written}: {error}"
+            );
+        }
     }
 }

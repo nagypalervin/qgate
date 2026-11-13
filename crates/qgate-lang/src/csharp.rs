@@ -443,8 +443,9 @@ impl<'s> Walker<'s> {
 
     /// A name as `.`-separated segments, without `global::`, the `@` of
     /// verbatim identifiers and type arguments. `None` for anything else:
-    /// tuple, array, pointer and built-in types, or a name qualified by an
-    /// extern alias other than `global`.
+    /// tuple, array, pointer, nullable and keyword types, or a name
+    /// qualified by an alias other than `global` (an extern alias, or a
+    /// using alias of a namespace, which syntax cannot tell apart).
     fn dotted(&self, node: Node<'_>) -> Option<String> {
         match node.kind() {
             "identifier" => {
@@ -966,7 +967,9 @@ mod tests {
             ])
         );
         let source = "using P = (int X, int Y);\nusing unsafe Ptr = int*;\nusing Legacy::Shop.Data;\n\
-                      using N = int;\nusing Arr = string[];\nusing Opt = int?;\n";
+                      using N = int;\nusing Arr = string[];\nusing Opt = int?;\n\
+                      using Rows = Shop.Data.Row[];\nusing Maybe = Shop.Data.Row?;\n\
+                      using S::Infrastructure.Data;\n";
         assert_eq!(usings(source), pairs(&[]));
     }
 

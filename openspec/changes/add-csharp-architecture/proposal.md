@@ -23,8 +23,9 @@ these rules, before M5, so they leave the roadmap's "Later" row.
   - so `using L = global::Shop.Data.List<int>;` names `Shop.Data.List`.
 
   These have no target:
-  - an alias of a tuple, array, pointer or built-in type;
-  - an extern-alias name such as `Legacy::Shop.Data`.
+  - an alias of a tuple, array, pointer, nullable or keyword type;
+  - a name qualified by an alias other than `global`, such as
+    `Legacy::Shop.Data` (clarified in the review of PR 1).
 
   `using` statements and declarations (`using var x = ...`) are not
   directives and do not count.
@@ -113,7 +114,9 @@ Each question has a recommendation; design.md has the reasons.
 6. **Two pull requests with 0.6.0 between them,** as before. PR 1 is
    the rules, the README section and the version. PR 2 is the README
    versions, the roadmap, the evaluation record, the rehearsal and the
-   archive. *Recommended: yes.*
+   archive. *Recommended: yes.* (Corrected after Gate 1: design D9 and
+   task 1.7 record the evaluation in PR 1, before the tag, which is what
+   question 4 asks for.)
 
 **Decided at Gate 1 (2026-11-13):** Ervin approved the proposal with
 every recommendation.

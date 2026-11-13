@@ -229,7 +229,11 @@ violation only once, and the CLI needs no new branch.
 - `dotnet/eShop` at 913acea (2026-10-15): 547 C# files, 762 using
   directives.
 
-**Rules** a team would write, with `exclude = ["**/Migrations/**"]`:
+**Binary:** `cargo build --release` of this branch (`qgate 0.6.0`,
+aarch64 Linux), against the published 0.5.0 binary for comparison.
+
+**Rules** a team would write, with `exclude = ["**/Migrations/**"]`
+(the exact files are below):
 - **CleanArchitecture:**
   - the domain must not use `CleanArchitecture.Application`, `.Infrastructure`,
     `.Web` or `Microsoft.EntityFrameworkCore`;
@@ -304,6 +308,104 @@ commit:
 
 **No finding the spec does not explain,** so nothing stops the release.
 
+**To reproduce,** with the two repositories cloned (a partial clone,
+`--filter=blob:none`, is enough):
+
+`qgate.toml` for CleanArchitecture:
+
+```toml
+[files]
+exclude = ["**/Migrations/**"]
+
+[[architecture.forbid]]
+name = "domain-is-pure"
+from = ["src/Domain/**"]
+to_namespaces = ["CleanArchitecture.Application", "CleanArchitecture.Infrastructure", "CleanArchitecture.Web", "Microsoft.EntityFrameworkCore"]
+
+[[architecture.forbid]]
+name = "application-has-no-infrastructure"
+from = ["src/Application/**"]
+to_namespaces = ["CleanArchitecture.Infrastructure", "CleanArchitecture.Web", "Microsoft.EntityFrameworkCore"]
+```
+
+`qgate.toml` for eShop:
+
+```toml
+[files]
+exclude = ["**/Migrations/**"]
+
+[[architecture.forbid]]
+name = "ordering-domain-is-pure"
+from = ["src/Ordering.Domain/**"]
+to_namespaces = ["eShop.Ordering.Infrastructure", "eShop.Ordering.API", "Microsoft.EntityFrameworkCore"]
+
+[[architecture.forbid]]
+name = "ordering-infrastructure-not-api"
+from = ["src/Ordering.Infrastructure/**"]
+to_namespaces = ["eShop.Ordering.API"]
+
+[[architecture.forbid]]
+name = "catalog-not-ordering"
+from = ["src/Catalog.API/**"]
+to_namespaces = ["eShop.Ordering"]
+```
+
+(A) runs this loop with each file (and, for 0.5.0, with only the
+`[files]` table):
+
+```bash
+#!/usr/bin/env bash
+# Usage: per-commit.sh <repo> <qgate.toml> <qgate binary> <out dir>
+set -u
+repo=$1 config=$2 qgate=$3 out=$4
+mkdir -p "$out"
+wt="$out/wt"
+git -C "$repo" worktree remove --force "$wt" 2>/dev/null
+git -C "$repo" worktree add -q --detach "$wt" HEAD
+for c in $(git -C "$repo" log -n 30 --no-merges --format=%H -- '*.cs'); do
+  git -C "$wt" checkout -q --detach "$c"
+  cp "$config" "$wt/qgate.toml"
+  start=$(date +%s.%N)
+  (cd "$wt" && "$qgate" check --base "$c^" --worktree --fail-on never --format json > "$out/$c.json" 2> "$out/$c.err")
+  end=$(date +%s.%N)
+  rm -f "$wt/qgate.toml"
+  files=$(git -C "$repo" diff --name-only "$c^" "$c" -- '*.cs' | wc -l)
+  printf '%s %s %s\n' "$c" "$files" "$(echo "$end - $start" | bc)" >> "$out/times.txt"
+done
+git -C "$repo" worktree remove --force "$wt"
+```
+
+(B) commits the HEAD tree onto an empty commit and checks it against
+that commit, with the configuration in the tree:
+
+```bash
+empty=$(git commit-tree "$(git hash-object -t tree -w /dev/null)" -m empty)
+# in a worktree of HEAD with qgate.toml added and committed:
+whole=$(git commit-tree "HEAD^{tree}" -p "$empty" -m whole)
+qgate check --base "$empty" --head "$whole" --fail-on never --format json
+```
+
+## Review of PR 1
+
+The `reviewer` subagent mutated the adapter, the patterns, the
+analyzer, the configuration and the CLI; every mutation but one was
+killed. It also reproduced the evaluation numbers from the files above.
+Fixed:
+- **should-fix:** the evaluation could not be reproduced from this file;
+  the configurations, the loop and the binary are now here;
+- the error mapping of a list of namespace patterns was untested (the
+  surviving mutation); a test with two patterns now names the bad one;
+- a namespace pattern with whitespace or an `@` could never match and
+  silently turned its rule off, against ADR 0003; both are now
+  invalid (spec "Namespace patterns" amended);
+- any alias qualifier other than `global::`, not only an extern alias,
+  has no target, and so has an alias of a nullable type; the spec, the
+  README and the Risks say so, with tests;
+- a negated character class can match the separator (Risks);
+- the proposal placed the evaluation record in PR 2, unlike D9;
+- the TypeScript message is built only for the first import of a
+  target again.
+
 ## Risks / Trade-offs
 
 - **[A rule can be bypassed]** A fully qualified name in code, or a
@@ -317,8 +419,16 @@ commit:
   the whole project but is reported only in that file. → That is the
   file that introduced the dependency, and it is inside the rule's
   `from`.
-- **[A `.` in a character class]** `[.]` is translated to `[/]`.
-  → A namespace segment cannot contain `.`, so such a class can only
-  match a separator, which is what the translated class does.
+- **[A character class can match the separator]** `[.]` becomes `[/]`,
+  and a negated class such as `[!x]` also matches the separator, so
+  `Shop[!x]Data` matches `Shop.Data`, as the same class does in a path
+  pattern. → Classes are rare in layer rules; `*` and `?` keep to one
+  segment, which is what the README promises.
+- **[More ways around a rule]** An alias of an array or nullable type
+  (`using Rows = Shop.Infrastructure.Row[];`) and a name qualified by a
+  using alias (`using S = Shop;` then `using S::Infrastructure.Data;`)
+  have no target. → Syntax cannot tell a namespace alias from an extern
+  alias, and both forms are rare; the README lists them with the other
+  misses.
 - **[Larger model]** Every C# file now carries its usings. → A few
   strings per file; the token list is far larger.

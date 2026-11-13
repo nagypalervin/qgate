@@ -529,7 +529,7 @@ error   src/Shop.Domain/Order.cs:2  uses Shop.Infrastructure.Data, forbidden by 
   `Shop.InfrastructureTests`), `Shop.Infrastructure.**` also matches
   `Shop.Infrastructure`, and `**.Data` matches any name whose last
   segment is `Data`. An empty segment (`Shop..Data`, or a leading or
-  trailing `.`) or a `/` is an error.
+  trailing `.`), a `/`, whitespace or an `@` is an error.
 - **Every `using` directive counts:** `using`, `global using`,
   `using static` and aliases (`using Db = Shop.Infrastructure.Db;`), at
   the top of the file, inside a namespace or in any `#if` branch. The
@@ -550,8 +550,11 @@ error   src/Shop.Domain/Order.cs:2  uses Shop.Infrastructure.Data, forbidden by 
   - a short name inside a namespace block: in `namespace Shop { using
     Infrastructure; }` the name counts as `Infrastructure`, not
     `Shop.Infrastructure`, so write full names;
-  - aliases of tuple, array, pointer or built-in types, and names
-    qualified by an extern alias (`Legacy::Shop.Data`).
+  - aliases of tuple, array, pointer, nullable or keyword types (so
+    `using Rows = Shop.Infrastructure.Row[];` is not checked), and names
+    qualified by an alias other than `global::`, such as
+    `Legacy::Shop.Data` or, after `using S = Shop;`,
+    `S::Infrastructure.Data`.
 
 ### Leaving files out (`[files] exclude`)
 
