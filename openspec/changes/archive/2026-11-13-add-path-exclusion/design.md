@@ -171,9 +171,10 @@ directory instead of `~/.local/bin`), passed its checksum and installed
 
 ## GitHub rehearsal (task 3.2, 2026-11-13)
 
-- **Setup:** in `nagypalervin/qgate-rehearsal`, whose `main` takes
-  changes only through pull requests, a base branch
-  `base/migrations-0.5.0` holds:
+- **Setup:** in `nagypalervin/qgate-rehearsal`, a base branch
+  `base/migrations-0.5.0` holds what the pull requests compare with,
+  so the rehearsal leaves `main`, where other rehearsals start, as it
+  was:
   - the README's workflow at `@v0.5.0`, cut out unchanged;
   - an EF Core-style migration, `src/Data/Migrations/20261101120000_Init.cs`
     (three `CreateTable` calls).
@@ -194,9 +195,29 @@ directory instead of `~/.local/bin`), passed its checksum and installed
 - **Pull request 16, migration and setting together** (run
   43445792648), the case of D4: qgate printed "No regressions found."
   and the comment step wrote nothing ("no findings and no qgate
-  comment"), as the pull request comment spec says. There is no comment
-  to read, which is why the setting was also pushed onto pull request
-  15.
+  comment"), as the `ci-integration` scenario "A clean pull request"
+  says. There is no comment to read, which is why the setting was also
+  pushed onto pull request 15.
+- **Deviations from the task text,** made by the agent and recorded
+  here for Ervin's review at Gate 3:
+  - **3.1** said `grep` finds no `0.4.0`, but the roadmap row naming
+    the C# release predates the proposal and stays (see "README at
+    0.5.0"); the task now says so.
+  - **3.2** said to read both comments, which the scenario above rules
+    out for a clean pull request; the task now names the extra run on
+    pull request 15 that gives a second comment state to read.
+
+## Review of PR 2
+
+The `reviewer` subagent checked the pinned commit, every size and
+version, the workflow on the base branch (equal to the README's block)
+and each run log and comment state (through the comment's edit
+history) against GitHub. Fixed:
+- the record said the rehearsal repository's `main` takes changes only
+  through pull requests, which was true of the Azure one, not this one;
+- the deviations from the task text were not recorded as such;
+- "the pull request comment spec" now names the `ci-integration`
+  scenario.
 
 ## Risks / Trade-offs
 
