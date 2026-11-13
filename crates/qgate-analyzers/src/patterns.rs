@@ -10,6 +10,12 @@
 //! `..` segment or is empty is invalid; empty and `.` segments and a
 //! trailing `/` are ignored, except in a pattern with braces or a `\`
 //! escape.
+//!
+//! [`NamespacePatterns`] are the same globs over `.`-separated C# names
+//! (design D4 of `add-csharp-architecture`): `Shop.Infrastructure` also
+//! matches `Shop.Infrastructure.Data`, and `**.Data` any name ending in a
+//! `Data` segment. A namespace pattern with an empty segment or a `/` is
+//! invalid.
 
 use std::fmt;
 
@@ -80,6 +86,68 @@ impl PathPatterns {
     pub fn matches(&self, path: &str) -> bool {
         self.set.is_match(path)
     }
+}
+
+/// A compiled list of C# namespace patterns: a name matches when any
+/// pattern does. Each `.` is a segment separator, so the patterns follow
+/// the rules of [`PathPatterns`] with `.` in place of `/`.
+#[derive(Debug, Clone)]
+pub struct NamespacePatterns {
+    paths: PathPatterns,
+}
+
+impl NamespacePatterns {
+    /// Compile `patterns`, as written.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first pattern, as written, that is empty, has an empty
+    /// segment or a `/`, or is not a valid glob.
+    pub fn new(patterns: &[String]) -> Result<Self, InvalidPattern> {
+        let mut as_paths = Vec::with_capacity(patterns.len());
+        for written in patterns {
+            check_namespace(written).map_err(|detail| InvalidPattern {
+                pattern: written.clone(),
+                detail: detail.to_owned(),
+            })?;
+            as_paths.push(written.replace('.', "/"));
+        }
+        // Checked first: path spelling would drop the empty segments.
+        let paths = PathPatterns::new(&as_paths).map_err(|e| {
+            let pattern = patterns
+                .iter()
+                .find(|written| written.replace('.', "/") == e.pattern)
+                .cloned()
+                .unwrap_or_else(|| patterns.join(", "));
+            InvalidPattern {
+                pattern,
+                detail: e.detail,
+            }
+        })?;
+        Ok(Self { paths })
+    }
+
+    /// Whether the `.`-separated `name` matches any of the patterns.
+    #[must_use]
+    pub fn matches(&self, name: &str) -> bool {
+        self.paths.matches(&name.replace('.', "/"))
+    }
+}
+
+/// The spelling rules of a namespace pattern.
+fn check_namespace(pattern: &str) -> Result<(), &'static str> {
+    if pattern.is_empty() {
+        return Err("the pattern is empty");
+    }
+    if pattern.contains('/') {
+        return Err("namespace patterns are `.`-separated; `/` is not allowed");
+    }
+    if pattern.split('.').any(str::is_empty) {
+        return Err(
+            "a namespace pattern cannot have an empty segment (`..`, or a leading or trailing `.`)",
+        );
+    }
+    Ok(())
 }
 
 /// A pattern in the form paths have. Leading `./` are removed; a pattern
@@ -164,5 +232,67 @@ mod tests {
         assert!(invalid("src/../x").detail.contains("`..`"));
         assert!(invalid("./").detail.contains("empty"));
         assert_eq!(invalid("src/[a").pattern, "src/[a");
+    }
+
+    fn namespaces(written: &[&str]) -> NamespacePatterns {
+        let written: Vec<String> = written.iter().map(|&p| p.to_owned()).collect();
+        NamespacePatterns::new(&written).expect("valid patterns")
+    }
+
+    fn invalid_namespace(written: &str) -> InvalidPattern {
+        NamespacePatterns::new(&[written.to_owned()]).expect_err("invalid pattern")
+    }
+
+    // architecture-analysis: "A namespace and the names below it"
+    #[test]
+    fn a_namespace_matches_itself_and_below() {
+        let p = namespaces(&["Shop.Infrastructure"]);
+        assert!(p.matches("Shop.Infrastructure"));
+        assert!(p.matches("Shop.Infrastructure.Data.Db"));
+        assert!(!p.matches("Shop.InfrastructureTests"));
+        assert!(!p.matches("Shop"));
+        assert!(!p.matches("Other.Shop.Infrastructure"));
+    }
+
+    // architecture-analysis: "Any namespace ending in a segment"
+    #[test]
+    fn namespace_globs() {
+        let p = namespaces(&["**.Data"]);
+        assert!(p.matches("Shop.Data"));
+        assert!(p.matches("Shop.Orders.Data"));
+        assert!(!p.matches("Shop.Data.Rows"));
+        assert!(!p.matches("Shop.DataAccess"));
+        let p = namespaces(&["Shop.*.Data"]);
+        assert!(p.matches("Shop.Orders.Data"));
+        assert!(!p.matches("Shop.Orders.Sub.Data"));
+        let p = namespaces(&["Shop.Infrastructure.**"]);
+        assert!(p.matches("Shop.Infrastructure"));
+        assert!(p.matches("Shop.Infrastructure.Data"));
+        assert!(!p.matches("Shop.InfrastructureTests"));
+        let p = namespaces(&[
+            "Shop.{Infrastructure,Web}.**",
+            "Microsoft.EntityFrameworkCore",
+        ]);
+        assert!(p.matches("Shop.Web.Api"));
+        assert!(p.matches("Shop.Infrastructure"));
+        assert!(p.matches("Microsoft.EntityFrameworkCore.Metadata"));
+        assert!(!p.matches("Shop.Domain"));
+        assert!(!namespaces(&[]).matches("Shop"));
+    }
+
+    // architecture-analysis: "Empty segment"
+    #[test]
+    fn namespace_spelling() {
+        for written in ["Shop..Infrastructure", ".Shop", "Shop.", "."] {
+            let error = invalid_namespace(written);
+            assert_eq!(error.pattern, written);
+            assert!(error.detail.contains("empty segment"), "{written}: {error}");
+        }
+        assert!(invalid_namespace("").detail.contains("empty"));
+        let error = invalid_namespace("Shop/Infrastructure");
+        assert_eq!(error.pattern, "Shop/Infrastructure");
+        assert!(error.detail.contains('/'), "{error}");
+        // A glob error names the pattern as written, not its path form.
+        assert_eq!(invalid_namespace("Shop.[Infra").pattern, "Shop.[Infra");
     }
 }
