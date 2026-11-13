@@ -740,8 +740,8 @@ Build Service (&lt;organization&gt;)* instead; give that identity the
 permission. Without it, the `qgate comment` step fails the job for every
 pull request with findings, Warnings included; only pull requests
 without findings pass. The error names the permission and the build
-identity by its id, such as `Build\<id>`, and its hint names the
-project's Build Service in either case.
+identity by its id, such as `Build\<id>`, and tells which of the two
+Build Service identities that is; when it cannot tell, it names both.
 
 **What the pull request shows:**
 
