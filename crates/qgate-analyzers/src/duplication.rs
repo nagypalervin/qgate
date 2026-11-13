@@ -572,6 +572,27 @@ mod tests {
     const COPY: &str = include_str!("../fixtures/duplication/renamed_copy.ts");
     const OTHER: &str = include_str!("../fixtures/duplication/other_code.ts");
 
+    const DATE_CS: &str = include_str!("../fixtures/duplication/date_helper.cs");
+    const COPY_CS: &str = include_str!("../fixtures/duplication/renamed_copy.cs");
+
+    // duplication-analysis: "Copy of an existing C# file". The block runs
+    // from the method to the closing brace of its class in both files.
+    #[test]
+    fn renamed_copy_of_an_unchanged_csharp_file() {
+        let cs = |source| parse(Language::CSharp, source).expect("parses").tokens;
+        assert_eq!(
+            run(
+                &[("src/Orders/Format.cs", vec![], cs(COPY_CS))],
+                &[("src/Utils/Dates.cs", cs(DATE_CS))],
+            ),
+            [(
+                "src/Orders/Format.cs".to_owned(),
+                10,
+                "duplicates src/Utils/Dates.cs:5-12 (lines 10-17, 66 tokens)".to_owned()
+            )]
+        );
+    }
+
     // Requirement: Compared files, Duplicate block finding
 
     #[test]
