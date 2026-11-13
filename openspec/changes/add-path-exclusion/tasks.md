@@ -14,11 +14,11 @@ checks; commit messages and PR bodies are written to files first.
 
 ## 2. Release 0.5.0 (between the pull requests)
 
-- [ ] 2.1 After PR 1 merges and Ervin agrees, push `v0.5.0` and check the draft: six archives, `SHA256SUMS`, `sha256sum --check`, the Linux arm64 binary printing `qgate 0.5.0`. Ervin publishes. Record it in `design.md` on `change/add-path-exclusion-2`.
+- [x] 2.1 After PR 1 merges and Ervin agrees, push `v0.5.0` and check the draft: six archives, `SHA256SUMS`, `sha256sum --check`, the Linux arm64 binary printing `qgate 0.5.0`. Ervin publishes. Record it in `design.md` on `change/add-path-exclusion-2`.
 
 ## 3. README and rehearsal (PR 2, `change/add-path-exclusion-2`)
 
-- [ ] 3.1 Every README install block, `uses:` and the pinned commit at 0.5.0; `grep` finds no `0.4.0`.
+- [x] 3.1 Every README install block, `uses:` and the pinned commit at 0.5.0; `grep` finds no `0.4.0` outside the roadmap row that names the C# release.
 - [ ] 3.2 In the GitHub rehearsal repository, run the README workflow (`@v0.5.0`) on a pull request that adds a migration repeating an older one, with and without `exclude = ["**/Migrations/**"]`; read both comments through the API and record them in `design.md`.
 
 ## Workflow follow-up

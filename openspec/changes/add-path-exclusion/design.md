@@ -130,6 +130,45 @@ Nits fixed:
   helper;
 - the crate doc lists `patterns`.
 
+## Release 0.5.0 (task 2.1)
+
+- PR #24 merged as d408ea1. As Ervin agreed, the agent pushed the
+  annotated tag `v0.5.0` ("qgate 0.5.0") after `check-version.sh` and
+  `check-action-version.sh` accepted it on `main`.
+- Release run 43424632880: all nine jobs green.
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six. The Linux arm64 archive holds the binary,
+  `qgate-pr-comment.ps1` (byte for byte the one on `main`), `README.md`
+  and both licenses. Its binary (11,211,840 bytes) printed
+  `qgate 0.5.0`. In a throwaway repository, on a new migration
+  repeating an older one, it reported a duplicate Warning and a new
+  method of complexity 26 without the setting, and "No regressions
+  found." (exit 0) with `exclude = ["**/Migrations/**"]`.
+- Archive sizes in bytes against 0.4.0; the change is the CLI and
+  pattern code:
+
+  | Archive | 0.4.0 | 0.5.0 |
+  |---|---|---|
+  | `x86_64-unknown-linux-musl.tar.gz` | 2,134,656 | 2,140,993 |
+  | `aarch64-unknown-linux-musl.tar.gz` | 1,941,545 | 1,947,700 |
+  | `aarch64-apple-darwin.tar.gz` | 1,939,195 | 1,945,945 |
+  | `x86_64-apple-darwin.tar.gz` | 1,969,611 | 1,974,853 |
+  | `x86_64-pc-windows-msvc.zip` | 1,925,716 | 1,933,168 |
+  | `aarch64-pc-windows-msvc.zip` | 1,821,786 | 1,828,044 |
+
+- Ervin published the draft on 2026-11-13 (14:43 UTC); `releases/latest`
+  is `v0.5.0`.
+
+## README at 0.5.0 (task 3.1)
+
+Every install block, both `uses:` lines and the pinned commit
+(`d408ea1f7e17f7213df5b7bd70a18051e149a096`, `v0.5.0^{commit}`) name
+0.5.0. One `0.4.0` stays on purpose: the roadmap's "Languages" row says
+which release brought C#. The Linux install block, run as written
+against the published release (with the arm64 target and a scratch
+directory instead of `~/.local/bin`), passed its checksum and installed
+`qgate 0.5.0`.
+
 ## Risks / Trade-offs
 
 - **[A broad pattern hides real code]** `exclude = ["src"]` turns
