@@ -466,6 +466,12 @@ The Linux install block, run as written against the published release
   Pull request 1359, abandoned afterwards, unmerged. The rehearsal
   `main` holds no C#, so the domain files are new; a using added to an
   existing file is covered by the CLI tests and the evaluation.
+- **Deviation from D8:** D8 names one form, `using
+  Shop.Infrastructure.Data;`. The rehearsal used two others, a
+  `global using` of that namespace and a plain `using` of EF Core, so
+  that one run covers both entries of `to_namespaces` and a second
+  directive form. Task 3.2 asks for "a forbidden `using`", which both
+  are.
 - **Build 1340** on `ubuntu-latest` (image `ubuntu-26.04`, version
   20261111.196.1), reason `pullRequest`:
   - Install qgate (checksum OK), qgate report and qgate comment
@@ -484,6 +490,15 @@ The Linux install block, run as written against the published release
   (<organization>)", read through the REST API: "2 findings, 2 at or
   above `error`." and a table with exactly these two rows. `ShopDb.cs`
   and the `System` usings do not appear.
+
+## Review of PR 2
+
+The `reviewer` subagent checked the README versions and the pinned
+commit against the tag, each archive size of both releases and the
+release run with `gh`, the archive's script byte for byte, and the
+rehearsal record for consistency with the README's job and rule (the
+Azure facts need the private token). It found no blocker; its one nit,
+the rehearsal using other forms than D8's example, is recorded above.
 
 ## Risks / Trade-offs
 

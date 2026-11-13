@@ -11,9 +11,10 @@ the repository forbids in `qgate.toml`.
 ### Requirement: Forbid rules
 
 Each `[[architecture.forbid]]` table in `qgate.toml` SHALL define a rule
-with a `name`, a list of `from` patterns and a list of `to` patterns. A
-file whose path matches a `from` pattern SHALL NOT import a target that
-matches a `to` pattern.
+with a `name`, a list of `from` patterns, and a list of `to` patterns, a
+list of `to_namespaces` patterns, or both. A file whose path matches a
+`from` pattern SHALL NOT import a target that matches a `to` pattern, nor
+use a namespace that matches a `to_namespaces` pattern.
 
 #### Scenario: Domain importing the UI
 
@@ -29,6 +30,20 @@ matches a `to` pattern.
 - **AND** `src/app/page.ts` adds `import { Button } from "../ui/Button";`
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** no `architecture/forbidden-import` finding is reported
+
+#### Scenario: Domain using the infrastructure
+
+- **GIVEN** the rule `name = "domain-is-pure"`, `from = ["src/Shop.Domain/**"]`, `to_namespaces = ["Shop.Infrastructure"]`
+- **AND** the head version of `src/Shop.Domain/Order.cs` adds `using Shop.Infrastructure.Data;` on line 2
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** standard output contains `error   src/Shop.Domain/Order.cs:2  uses Shop.Infrastructure.Data, forbidden by "domain-is-pure"  [architecture/forbidden-import]`
+- **AND** the exit code is 1
+
+#### Scenario: Each list applies to its language
+
+- **GIVEN** a rule `imports` with `from = ["src/**"]` and `to = ["Shop.Infrastructure"]`, and a rule `usings` with `from = ["src/**"]` and `to_namespaces = ["Shop.Infrastructure"]`
+- **WHEN** `src/a.ts` adds `import "Shop.Infrastructure";` and `src/B.cs` adds `using Shop.Infrastructure;`
+- **THEN** two findings are reported: the import of `src/a.ts`, forbidden by `imports`, and the using of `src/B.cs`, forbidden by `usings`
 
 ### Requirement: Imports that count
 
@@ -166,13 +181,20 @@ wherever it moved. An added file has no base version.
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** only the import of `src/ui/B` is reported
 
+#### Scenario: Existing using, written another way
+
+- **GIVEN** a rule with `to_namespaces = ["Shop.Infrastructure"]`, and the base version of `src/Shop.Domain/Order.cs` has `using Shop.Infrastructure.Data;`
+- **WHEN** the head version writes it as `global using global::Shop.Infrastructure.Data;` and changes something else
+- **THEN** no `architecture/forbidden-import` finding is reported
+
 ### Requirement: Forbidden import finding
 
 Each new violation SHALL be one finding with rule
 `architecture/forbidden-import` and severity Error, at the head path of
 the file and the line of its first import of the target. The message SHALL
 be `imports <target>, forbidden by "<name>"`, with ` ("<specifier>")` after
-the target when the specifier differs from it.
+the target when the specifier differs from it; for a C# file it SHALL be
+`uses <target>, forbidden by "<name>"`.
 
 #### Scenario: Package import
 
@@ -190,6 +212,12 @@ the target when the specifier differs from it.
 - **GIVEN** two rules whose `from` and `to` both match the import of `src/ui/Button` by `src/domain/a.ts`
 - **THEN** one finding is reported for each rule
 
+#### Scenario: Same namespace used twice
+
+- **GIVEN** a rule with `to_namespaces = ["Microsoft.EntityFrameworkCore"]`
+- **WHEN** the head version of `src/Shop.Domain/Order.cs` adds `using Microsoft.EntityFrameworkCore;` on line 1 and `using M = Microsoft.EntityFrameworkCore;` on line 4
+- **THEN** one finding is reported, `uses Microsoft.EntityFrameworkCore`, on line 1
+
 ### Requirement: Unparsable files have no architecture findings
 
 A changed file that cannot be parsed in either version SHALL produce no
@@ -201,3 +229,81 @@ A changed file that cannot be parsed in either version SHALL produce no
 - **GIVEN** the head version of `src/domain/a.ts` imports `"../ui/Button"` and has a syntax error
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** the only finding for `src/domain/a.ts` is `input/unparsable`
+
+### Requirement: Usings that count
+
+The system SHALL treat as uses of a C# file its `using` directives,
+`global`, `static` and alias directives included, wherever they appear in
+the file: at the top, inside a namespace, or in any branch of an `#if`.
+`using` statements and declarations SHALL NOT count.
+
+#### Scenario: Every directive form
+
+- **GIVEN** a rule that forbids `src/Shop.Domain/**` to use `Shop.Infrastructure`
+- **WHEN** `src/Shop.Domain/A.cs` adds `using Shop.Infrastructure.A;`, `global using Shop.Infrastructure.B;`, `using static Shop.Infrastructure.C;` and `using D = Shop.Infrastructure.D;`
+- **THEN** four `architecture/forbidden-import` findings are reported, for `Shop.Infrastructure.A`, `Shop.Infrastructure.B`, `Shop.Infrastructure.C` and `Shop.Infrastructure.D`
+
+#### Scenario: Inside a namespace and an `#if`
+
+- **GIVEN** the same rule
+- **WHEN** `src/Shop.Domain/A.cs` adds `using Shop.Infrastructure.Debug;` between `#if DEBUG` and `#endif`, and `using Shop.Infrastructure.Data;` inside the body of `namespace Shop.Domain { ... }`
+- **THEN** findings are reported for `Shop.Infrastructure.Debug` and `Shop.Infrastructure.Data`
+
+#### Scenario: Using statements
+
+- **GIVEN** the same rule
+- **WHEN** a method in `src/Shop.Domain/A.cs` adds `using var db = new Shop.Infrastructure.Db();` and `using (db) { }`
+- **THEN** no `architecture/forbidden-import` finding is reported
+
+### Requirement: Using targets
+
+The target of a `using` directive SHALL be the namespace or type it
+names as written, without `global::`, without the `@` of verbatim
+identifiers, without whitespace or comments, and without type arguments.
+It SHALL NOT be resolved against an enclosing namespace. A directive
+whose alias names a tuple, array, pointer, nullable or keyword type, or
+whose name is qualified by an alias other than `global` (`X::`), SHALL
+have no target.
+
+#### Scenario: Normalized names
+
+- **WHEN** a C# file has `using global::Shop.Data;`, `using @class.Foo;` and `using L = System.Collections.Generic.List<Shop.Data.Row>;`
+- **THEN** the targets are `Shop.Data`, `class.Foo` and `System.Collections.Generic.List`
+
+#### Scenario: No target
+
+- **WHEN** a C# file has `using P = (int X, int Y);`, `using unsafe Ptr = int*;`, `using N = Shop.Data.Row?;` and `using Legacy::Shop.Data;`
+- **THEN** none of them has a target
+
+#### Scenario: As written inside a namespace
+
+- **GIVEN** a rule with `to_namespaces = ["Shop.Infrastructure"]`
+- **WHEN** `src/Shop.Domain/A.cs` adds `using Infrastructure;` inside `namespace Shop { ... }`
+- **THEN** the target is `Infrastructure` and no finding is reported
+
+### Requirement: Namespace patterns
+
+A `to_namespaces` pattern SHALL be a glob over `.`-separated names: `*`
+and `?` match within one segment, `**` matches any number of segments,
+and `[...]` is a character class. A pattern without glob characters SHALL
+also match every name below it, and a pattern ending in `.**` SHALL also
+match the name itself. A pattern that is empty, has an empty segment, or
+contains `/`, whitespace or `@` SHALL be invalid.
+
+#### Scenario: A namespace and the names below it
+
+- **GIVEN** `to_namespaces = ["Shop.Infrastructure"]`
+- **WHEN** files use `Shop.Infrastructure`, `Shop.Infrastructure.Data.Db` and `Shop.InfrastructureTests`
+- **THEN** the first two match and `Shop.InfrastructureTests` does not
+
+#### Scenario: Any namespace ending in a segment
+
+- **GIVEN** `to_namespaces = ["**.Data"]`
+- **THEN** `Shop.Data` and `Shop.Orders.Data` match, and `Shop.Data.Rows` and `Shop.DataAccess` do not
+
+#### Scenario: Empty segment
+
+- **GIVEN** a rule in `qgate.toml` with `to_namespaces = ["Shop..Infrastructure"]`
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** standard error names the rule and the pattern `Shop..Infrastructure`
+- **AND** the exit code is 2
