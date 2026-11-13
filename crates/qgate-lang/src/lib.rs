@@ -36,9 +36,11 @@
 
 mod common;
 mod csharp;
+mod generated;
 mod model;
 mod typescript;
 
+pub use generated::{csharp_generated_header, csharp_generated_name};
 pub use model::{FileModel, Function, Import, ParseError, Token};
 
 /// Parse `source`, written in `language`, into a [`FileModel`].
