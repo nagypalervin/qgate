@@ -221,6 +221,89 @@ violation only once, and the CLI needs no new branch.
    - the release record and the Azure rehearsal;
    - the journal entry and the archive.
 
+## Evaluation (task 1.7, 2026-11-13)
+
+**Repositories** (partial clones, nothing of theirs was built or run):
+- `jasontaylordev/CleanArchitecture` at e1ab4cc (2026-11-09): 110 C#
+  files, 193 using directives;
+- `dotnet/eShop` at 913acea (2026-10-15): 547 C# files, 762 using
+  directives.
+
+**Rules** a team would write, with `exclude = ["**/Migrations/**"]`:
+- **CleanArchitecture:**
+  - the domain must not use `CleanArchitecture.Application`, `.Infrastructure`,
+    `.Web` or `Microsoft.EntityFrameworkCore`;
+  - the application must not use the infrastructure, the web project
+    or EF Core.
+
+  The template allows EF Core in the application on purpose, so the
+  last rule is stricter than its authors' and is there to see a
+  finding.
+- **eShop:**
+  - the Ordering domain must not use `eShop.Ordering.Infrastructure`,
+    `eShop.Ordering.API` or EF Core;
+  - the Ordering infrastructure must not use the API;
+  - `Catalog.API` must not use `eShop.Ordering`.
+
+**(A) The last 30 non-merge commits that touch C#** (CleanArchitecture
+2026-02-18 to 2026-10-12, eShop 2024-10-24 to 2026-10-15), each with
+`check --base <commit>^ --worktree`:
+- 172 and 173 changed C# files;
+- no architecture finding. No commit adds a using these rules forbid,
+  and the grep below finds none in either tree;
+- every other finding is identical to qgate 0.5.0's on the same
+  commits (an exclude-only configuration, JSON compared for all 60):
+  - CleanArchitecture: 6 complexity increases, 14 duplicates and 4
+    `input/unparsable`:
+    - two `dotnet new` template files, whose `//#if` comments leave two
+      declaration heads;
+    - an `#if` whose branches close a lambda in a test factory, in two
+      commits;
+  - eShop: 19 complexity increases, 8 duplicates and 1
+    `input/unparsable`, an `#if` inside a method chain in
+    `MauiProgram.cs`.
+
+  These are the known limits of 0.4.0's C# reading, unchanged.
+- **Time per commit:** CleanArchitecture mean 0.08 s (max 0.12 s), eShop
+  mean 0.16 s (max 0.28 s). 0.5.0 took 0.06 s and 0.17 s on the same
+  commits. The first 0.6.0 pass took about 3 s a commit because the
+  partial clone fetched blobs, and the numbers above are from the second
+  pass.
+
+**(B) Every using at HEAD,** with the HEAD tree as a child of an empty
+commit:
+- **CleanArchitecture:** exactly one finding,
+  `src/Application/GlobalUsings.cs:4 uses Microsoft.EntityFrameworkCore`.
+  `grep` for the forbidden names in `src/Domain` and `src/Application`
+  finds that line and nothing else.
+- **eShop:** no finding. `grep` finds no forbidden name in the three
+  `from` directories, as text either.
+- **Time:** 0.13 s and 0.59 s for the whole tree.
+
+**What the trees say about the limits (D7, Risks):**
+- **Global usings are where the dependencies live:** 25 of
+  CleanArchitecture's 193 directives are global, as are 237 of eShop's
+  762, nearly all in `GlobalUsings.cs` files. Nine application files
+  of CleanArchitecture call EF Core methods with no using of their
+  own. A pull request adding a tenth reports nothing, because the
+  dependency entered once, in `GlobalUsings.cs`, as the README says.
+- **Usings nested in a namespace block:** none in CleanArchitecture,
+  and one in eShop (`src/OrderProcessor/.../GracePeriodConfirmedIntegrationEvent.cs:3`,
+  `using eShop.EventBus.Events;`). That one is a full name, so it is
+  read correctly. The limit of D7 does not show in either tree.
+
+**A violation on real code** (`--worktree`, CleanArchitecture):
+- `using CleanArchitecture.Infrastructure.Data;` added to
+  `src/Domain/Entities/TodoItem.cs` gives `error
+  src/Domain/Entities/TodoItem.cs:1  uses
+  CleanArchitecture.Infrastructure.Data, forbidden by
+  "domain-is-pure"` and exit code 1.
+- A new domain file that writes `new
+  CleanArchitecture.Infrastructure.Data.ApplicationDbContext(...)`
+  without a using gives nothing, the documented miss.
+
+**No finding the spec does not explain,** so nothing stops the release.
+
 ## Risks / Trade-offs
 
 - **[A rule can be bypassed]** A fully qualified name in code, or a

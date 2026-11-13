@@ -12,7 +12,7 @@ checks; commit messages and PR bodies are written to files first.
 - [x] 1.4 `qgate-cli`: failing end-to-end tests for the scenarios of "Forbid rules" ("Domain using the infrastructure", "Each list applies to its language"), "Existing using, written another way", "Same namespace used twice", "Usings that count", "As written inside a namespace", the invalid namespace pattern and the two configuration scenarios, plus a generated and an excluded C# file with a forbidden using, then the copy of `to_namespaces` (D6).
 - [x] 1.5 README: the architecture section's C# rules (`to_namespaces`, namespace patterns, which usings count, the limits of D7 and the risks); the C# section no longer says rules do not apply; check each sentence against a test.
 - [x] 1.6 Version 0.6.0 in `Cargo.toml` (with `Cargo.lock`) and every `QGATE_VERSION` of `action.yml`; both release checks pass locally for `v0.6.0`.
-- [ ] 1.7 Evaluation (D8) on `jasontaylordev/CleanArchitecture` and `dotnet/eShop` with layer rules and `exclude = ["**/Migrations/**"]`: findings checked by hand, time per commit, nested and global usings counted; record it in `design.md`. A finding the spec does not explain stops the release until Ervin decides.
+- [x] 1.7 Evaluation (D8) on `jasontaylordev/CleanArchitecture` and `dotnet/eShop` with layer rules and `exclude = ["**/Migrations/**"]`: findings checked by hand, time per commit, nested and global usings counted; record it in `design.md`. A finding the spec does not explain stops the release until Ervin decides.
 
 ## 2. Release 0.6.0 (between the pull requests)
 
