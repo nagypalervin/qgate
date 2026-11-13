@@ -27,6 +27,18 @@ use serde::Deserialize;
 pub struct Config {
     /// The `[architecture]` table.
     pub architecture: Architecture,
+    /// The `[files]` table.
+    pub files: Files,
+}
+
+/// The `[files]` table: which files revision mode leaves out (design D1
+/// of `add-path-exclusion`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Files {
+    /// Path patterns of files to leave out, as written. Their syntax is
+    /// checked where they are interpreted; an empty list excludes nothing.
+    pub exclude: Vec<String>,
 }
 
 /// The `[architecture]` table.
@@ -276,6 +288,34 @@ to = ["@prisma/client"]
         assert_eq!(err, "architecture.forbid rule \"r\": `to` is empty");
         let err = error("[[architecture.forbid]]\nname = \"r\"\nfrom = []\nto = [\"b\"]\n");
         assert_eq!(err, "architecture.forbid rule \"r\": `from` is empty");
+    }
+
+    // configuration: "Excluded paths"
+    #[test]
+    fn files_exclude() {
+        let config =
+            parse(b"[files]\nexclude = [\"**/Migrations/**\", \"vendor\"]\n").expect("valid");
+        assert_eq!(config.files.exclude, ["**/Migrations/**", "vendor"]);
+        assert_eq!(
+            parse(b"[files]\nexclude = []\n")
+                .expect("valid")
+                .files
+                .exclude,
+            Vec::<String>::new()
+        );
+        assert_eq!(parse(b"[files]\n").expect("valid"), Config::default());
+        assert_eq!(
+            parse(VALID.as_bytes()).expect("valid").files,
+            Files::default()
+        );
+    }
+
+    #[test]
+    fn files_table_errors() {
+        let unknown = error("[files]\ninclude = [\"src\"]\n");
+        assert!(unknown.contains("include"), "{unknown}");
+        let wrong_type = error("[files]\nexclude = \"src\"\n");
+        assert!(wrong_type.starts_with("line 2"), "{wrong_type}");
     }
 
     #[test]
