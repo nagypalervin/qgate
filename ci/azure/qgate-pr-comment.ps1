@@ -77,7 +77,11 @@ function Read-QgateReport {
 }
 
 function Get-PipelineContext {
-    <# The threads URL of this pull request and the token, from the environment. #>
+    <#
+    The threads URL of this pull request and the token, from the environment,
+    with the ids and names of the two Build Service identities for the
+    permission message (the ids may be missing).
+    #>
     $names = 'SYSTEM_COLLECTIONURI', 'SYSTEM_TEAMPROJECT', 'BUILD_REPOSITORY_ID', 'SYSTEM_PULLREQUEST_PULLREQUESTID'
     $values = @{}
     foreach ($name in $names) {
@@ -98,19 +102,39 @@ function Get-PipelineContext {
     $project = [uri]::EscapeDataString($values.SYSTEM_TEAMPROJECT)
     $repository = [uri]::EscapeDataString($values.BUILD_REPOSITORY_ID)
     $pullRequest = [uri]::EscapeDataString($values.SYSTEM_PULLREQUEST_PULLREQUESTID)
+
+    # The Build Service identities as the Security page lists them; the
+    # organization comes from the collection URI of Azure DevOps Services.
+    $organization = switch -Regex ($collection) {
+        '^https://dev\.azure\.com/([^/]+)/' { " ($([uri]::UnescapeDataString($Matches[1])))"; break }
+        '^https://([^./]+)\.visualstudio\.com/' { " ($($Matches[1]))"; break }
+        default { '' }
+    }
     [pscustomobject]@{
-        ThreadsUrl = "${collection}${project}/_apis/git/repositories/${repository}/pullRequests/${pullRequest}/threads"
-        Token      = $token
+        ThreadsUrl             = "${collection}${project}/_apis/git/repositories/${repository}/pullRequests/${pullRequest}/threads"
+        Token                  = $token
+        ProjectId              = $env:SYSTEM_TEAMPROJECTID
+        CollectionId           = $env:SYSTEM_COLLECTIONID
+        ProjectBuildService    = "$($values.SYSTEM_TEAMPROJECT) Build Service$organization"
+        CollectionBuildService = "Project Collection Build Service$organization"
     }
 }
 
 function Get-AzureErrorMessage {
-    <# A message for a failed REST call; StatusCode 0 means no answer. #>
+    <#
+    A message for a failed REST call; StatusCode 0 means no answer. The ids
+    and names of the two Build Service identities pick the one a missing
+    permission names (design D2 of fix-pr-comment-details).
+    #>
     param(
         [string] $Method,
         [string] $Uri,
         [int] $StatusCode,
-        [string] $Body
+        [string] $Body,
+        [string] $ProjectId,
+        [string] $CollectionId,
+        [string] $ProjectBuildService = '<project> Build Service (<organization>)',
+        [string] $CollectionBuildService = 'Project Collection Build Service (<organization>)'
     )
 
     # Azure DevOps answers with a JSON document; its message is the readable
@@ -124,10 +148,21 @@ function Get-AzureErrorMessage {
     }
 
     if ($StatusCode -eq 403 -and $Body -match 'TF401027') {
-        $identity = if ($Body -match "identity '([^']+)'") { " ($($Matches[1]))" } else { '' }
-        return "qgate: the build identity$identity may not comment on pull requests. " +
-        "Give the project's Build Service the 'Contribute to pull requests' permission on this repository " +
-        "(Project settings > Repositories > <repository> > Security)."
+        $identity = if ($Body -match "identity '([^']+)'") { $Matches[1] } else { '' }
+        $id = if ($identity -match '^Build\\(.+)$') { $Matches[1] } else { '' }
+        $start = 'qgate: the build identity' + $(if ($identity) { " ($identity)" }) + ' may not comment on pull requests. '
+        $hint = "the 'Contribute to pull requests' permission on this repository " +
+        '(Project settings > Repositories > <repository> > Security)'
+        # -eq on strings ignores case; an empty id matches nothing.
+        if ($id -and $id -eq $ProjectId) {
+            return "${start}Give '$ProjectBuildService' $hint."
+        }
+        if ($id -and $id -eq $CollectionId) {
+            return "${start}The pipeline's job authorization scope is the project collection: " +
+            "give '$CollectionBuildService' $hint."
+        }
+        return "${start}Give '$ProjectBuildService' $hint; if the pipeline's job authorization scope " +
+        "is the project collection, give it to '$CollectionBuildService' instead."
     }
     if ($StatusCode -eq 401) {
         return "qgate: Azure DevOps refused the token (401). Pass System.AccessToken to this step " +
@@ -166,7 +201,13 @@ function Invoke-Azure {
             $status = [int] $response.Value.StatusCode
         }
         $detail = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message }
-        throw (Get-AzureErrorMessage -Method $Method.ToUpperInvariant() -Uri $Uri -StatusCode $status -Body $detail)
+        $identities = @{
+            ProjectId              = $Context.ProjectId
+            CollectionId           = $Context.CollectionId
+            ProjectBuildService    = $Context.ProjectBuildService
+            CollectionBuildService = $Context.CollectionBuildService
+        }
+        throw (Get-AzureErrorMessage -Method $Method.ToUpperInvariant() -Uri $Uri -StatusCode $status -Body $detail @identities)
     }
 }
 

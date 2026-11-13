@@ -66,15 +66,40 @@ fn location_text(location: &Location) -> String {
     }
 }
 
-/// The message, followed by every related location (the path alone for
-/// one without a line).
+/// The message, followed by every related location the message does not
+/// already name (the path alone for one without a line).
 fn finding_text(f: &Finding) -> String {
-    let related: Vec<String> = f.related.iter().map(location_text).collect();
+    let related: Vec<String> = f
+        .related
+        .iter()
+        .filter_map(|location| {
+            let text = location_text(location);
+            (location.line.is_none() || !names(&f.message, &text)).then_some(text)
+        })
+        .collect();
     if related.is_empty() {
         f.message.clone()
     } else {
         format!("{}; also at {}", f.message, related.join(", "))
     }
+}
+
+/// Whether `message` names the location `text` (`<path>:<line>`): the
+/// text starts the message or follows whitespace, and no digit follows it,
+/// so `src/a.ts:1` is not named by `src/a.ts:10-19` or `lib/src/a.ts:1`
+/// (design D1 of `fix-pr-comment-details`).
+fn names(message: &str, text: &str) -> bool {
+    message.char_indices().any(|(i, _)| {
+        message[i..].starts_with(text)
+            && message[..i]
+                .chars()
+                .next_back()
+                .is_none_or(char::is_whitespace)
+            && !message[i + text.len()..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
+    })
 }
 
 /// Text that renders as itself in a GFM table cell: the characters that
@@ -292,6 +317,84 @@ mod tests {
             [
                 "| warning | src/b.ts:4 | 12 duplicated lines; also at src/a.ts:10, src/c.ts:3, src/no-line.ts | duplication/duplicate-block |"
             ]
+        );
+    }
+
+    /// The Finding cell of a one-finding report.
+    fn finding_cell(message: &str, related: Vec<Location>) -> String {
+        let mut f = finding(
+            Severity::Warning,
+            "duplication/duplicate-block",
+            message,
+            at("src/b.ts", Some(4)),
+        );
+        f.related = related;
+        let md = render_markdown(&[f], DEFAULT);
+        let row = rows(&md)[0];
+        row.split(" | ").nth(2).expect("four cells").to_owned()
+    }
+
+    #[test]
+    fn a_copy_the_message_names_is_not_repeated() {
+        assert_eq!(
+            finding_cell(
+                "duplicates src/grade.ts:1-19 (lines 1-19, 85 tokens)",
+                vec![at("src/grade.ts", Some(1))],
+            ),
+            "duplicates src/grade.ts:1-19 (lines 1-19, 85 tokens)"
+        );
+    }
+
+    #[test]
+    fn the_copies_the_message_does_not_name_are_listed() {
+        assert_eq!(
+            finding_cell(
+                "duplicates src/a.ts:1-6 (lines 4-9, 68 tokens, and 2 more)",
+                vec![
+                    at("src/a.ts", Some(1)),
+                    at("src/c.ts", Some(3)),
+                    at("src/d.ts", Some(7)),
+                ],
+            ),
+            "duplicates src/a.ts:1-6 (lines 4-9, 68 tokens, and 2 more); also at src/c.ts:3, src/d.ts:7"
+        );
+    }
+
+    #[test]
+    fn a_line_that_only_starts_the_named_line_is_listed() {
+        assert_eq!(
+            finding_cell(
+                "duplicates src/a.ts:10-19",
+                vec![at("src/a.ts", Some(1)), at("src/a.ts", Some(10))],
+            ),
+            "duplicates src/a.ts:10-19; also at src/a.ts:1"
+        );
+    }
+
+    #[test]
+    fn a_location_at_the_end_of_the_message_is_named() {
+        assert_eq!(
+            finding_cell("moved from src/a.ts:12", vec![at("src/a.ts", Some(12))]),
+            "moved from src/a.ts:12"
+        );
+    }
+
+    #[test]
+    fn a_path_that_only_ends_the_named_path_is_listed() {
+        assert_eq!(
+            finding_cell(
+                "duplicates lib/src/a.ts:1-6",
+                vec![at("lib/src/a.ts", Some(1)), at("src/a.ts", Some(1))],
+            ),
+            "duplicates lib/src/a.ts:1-6; also at src/a.ts:1"
+        );
+    }
+
+    #[test]
+    fn a_location_without_a_line_is_always_listed() {
+        assert_eq!(
+            finding_cell("duplicates src/n.ts", vec![at("src/n.ts", None)]),
+            "duplicates src/n.ts; also at src/n.ts"
         );
     }
 

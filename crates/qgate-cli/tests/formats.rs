@@ -8,7 +8,7 @@ mod support;
 
 use std::fmt::Write as _;
 
-use support::{Repo, function, stderr, stdout};
+use support::{DATE_HELPER, RENAMED_COPY, Repo, function, stderr, stdout};
 
 /// A repository with `base` committed on `main` and `head` committed on
 /// `feature`, which stays checked out, so `--base main` compares them.
@@ -129,6 +129,26 @@ fn markdown_report() {
     assert_eq!(out.status.code(), Some(1));
     let again = repo.qgate(&["--base", "main", "--format", "markdown"]);
     assert_eq!(stdout(&again), stdout(&out));
+}
+
+// Requirement: Markdown table cells, "A copy the message names", with the
+// duplication analyzer's real message (design D1 of
+// `fix-pr-comment-details`).
+#[test]
+fn markdown_duplicate_names_its_copy_once() {
+    let repo = change(
+        &[("src/utils/date.ts", DATE_HELPER)],
+        &[("src/orders/format.ts", RENAMED_COPY)],
+    );
+    let out = repo.qgate(&["--base", "main", "--format", "markdown"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let md = stdout(&out);
+    assert!(
+        md.ends_with(
+            "| warning | src/orders/format.ts:4 | duplicates src/utils/date.ts:1-6 (lines 4-9, 68 tokens) | duplication/duplicate-block |\n"
+        ),
+        "{md}"
+    );
 }
 
 #[test]
