@@ -709,6 +709,25 @@ mod tests {
         assert_eq!(lines, [1, 1, 2, 3, 3, 3, 3, 3, 3, 4]);
     }
 
+    // Requirement: Conditional compilation, "Branches that open blocks".
+    #[test]
+    fn branches_that_open_blocks_are_a_syntax_error() {
+        // The unbalanced block puts the whole namespace in one error node,
+        // so the first error is on its line.
+        assert_eq!(
+            parse(include_str!("../fixtures/csharp/syntax_error.cs")),
+            Err(ParseError::Syntax { line: 3 })
+        );
+        assert_eq!(
+            parse("class A {\n  void F() {\n    if (x) {\n  }\n}\n"),
+            Err(ParseError::Syntax { line: 1 })
+        );
+        assert_eq!(
+            parse("class A {\n  void F() { x = ; }\n}\n"),
+            Err(ParseError::Syntax { line: 2 })
+        );
+    }
+
     #[test]
     fn declarations_without_a_body() {
         let source = "interface I { void Open(); int Close(int c); }\n\

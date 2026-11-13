@@ -245,6 +245,28 @@ both, exit code 2, since unit names from two languages can never match.
      (Gate 1, question 6);
    - the journal entry and the archive.
 
+## Findings of PR 1 (tasks 1.4 to 1.8)
+
+- **Binary size (task 1.8).** A release build (`strip = true`, aarch64
+  Linux, rustc 1.99.1) of `qgate-cli`: 6,035,032 bytes before the
+  grammar (0cc7f0c), 11,408,984 bytes with it (+89%). `gzip -9` gives
+  1,559,258 and 1,884,075 bytes (+21%), which is closer to what a
+  release archive adds to a download. Accepted; feature-gating languages
+  (ADR 0001) stays the fallback if size starts to matter.
+- **A syntax error the shared error search missed (task 1.8).** For
+  `x = ;` the C# grammar inserts a zero-width `identifier` whose
+  `has_error` is true but whose `is_missing` and `is_error` are false,
+  so the file passed as valid. The search in `common.rs` now also
+  counts a node that has an error but no child with one. TypeScript's
+  tests pass unchanged; the change can only turn a file that wrongly
+  passed into `input/unparsable`.
+- **The line of an unbalanced block.** When an `#if`/`#else` leaves a
+  block open, the error node covers the whole enclosing namespace, so
+  the reported line is the namespace's (line 3 of
+  `fixtures/csharp/syntax_error.cs`), not the `#if`'s. The message
+  already says "or syntax the parser does not support yet"; the
+  evaluation (D8) shows whether a better line is worth a change.
+
 ## Risks / Trade-offs
 
 - **[`#if` branches that open blocks]** Such files cannot be parsed and

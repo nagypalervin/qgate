@@ -30,7 +30,10 @@ pub(crate) fn parse_tree(grammar: &Grammar, source: &str) -> Result<Tree, ParseE
 }
 
 /// Line of the earliest `ERROR` or missing node, if the tree has any.
-/// Only subtrees that contain an error are visited.
+/// Only subtrees that contain an error are visited. A node that has an
+/// error but no child with one is the error itself: the C# grammar's
+/// missing identifier reports `has_error` but not `is_missing` (task 1.8
+/// of `add-csharp-analysis`).
 fn first_error_line(root: Node<'_>) -> Option<u32> {
     if !root.has_error() {
         return None;
@@ -38,14 +41,15 @@ fn first_error_line(root: Node<'_>) -> Option<u32> {
     let mut first: Option<Node<'_>> = None;
     let mut pending = vec![root];
     while let Some(node) = pending.pop() {
-        if node.is_error() || node.is_missing() {
+        let mut cursor = node.walk();
+        let inner: Vec<Node<'_>> = node.children(&mut cursor).filter(Node::has_error).collect();
+        if node.is_error() || node.is_missing() || inner.is_empty() {
             if first.is_none_or(|f| node.start_byte() < f.start_byte()) {
                 first = Some(node);
             }
             continue;
         }
-        let mut cursor = node.walk();
-        pending.extend(node.children(&mut cursor).filter(Node::has_error));
+        pending.extend(inner);
     }
     first.map(line_of)
 }

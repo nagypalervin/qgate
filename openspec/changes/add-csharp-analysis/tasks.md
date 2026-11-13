@@ -14,7 +14,7 @@ first.
 - [x] 1.5 Failing fixture tests for decision points (D3): each counted kind once, `case 1: case 2:`, the `_` arm, `default`, optional parameters, `is not null`, and every scenario of "C# decision points" and "Conditional compilation". Then the counting until they pass.
 - [x] 1.6 Failing fixture tests for tokens (D4): the renamed-copy and different-members scenarios, usings, namespaces, preprocessor lines, comments, interpolated and raw strings, a byte order mark. Then the tokens until they pass.
 - [x] 1.7 `csharp_generated_name` and `csharp_generated_header` (D5) with unit tests: each name form in mixed case, a header after a byte order mark and `#nullable`, a block comment header, a marker after the first code (not generated), a file that does not parse.
-- [ ] 1.8 Syntax errors: the spike's `#if`/`#else` file gives `ParseError::Syntax` with its first error line. Record the release binary's size before and after the grammar in `design.md`.
+- [x] 1.8 Syntax errors: the spike's `#if`/`#else` file gives `ParseError::Syntax` with its first error line. Record the release binary's size before and after the grammar in `design.md`.
 
 ## 2. Wiring, evaluation and version (PR 2, `change/add-csharp-analysis-2`)
 
