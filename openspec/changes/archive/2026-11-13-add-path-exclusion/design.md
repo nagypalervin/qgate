@@ -130,6 +130,95 @@ Nits fixed:
   helper;
 - the crate doc lists `patterns`.
 
+## Release 0.5.0 (task 2.1)
+
+- PR #24 merged as d408ea1. As Ervin agreed, the agent pushed the
+  annotated tag `v0.5.0` ("qgate 0.5.0") after `check-version.sh` and
+  `check-action-version.sh` accepted it on `main`.
+- Release run 43424632880: all nine jobs green.
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six. The Linux arm64 archive holds the binary,
+  `qgate-pr-comment.ps1` (byte for byte the one on `main`), `README.md`
+  and both licenses. Its binary (11,211,840 bytes) printed
+  `qgate 0.5.0`. In a throwaway repository, on a new migration
+  repeating an older one, it reported a duplicate Warning and a new
+  method of complexity 26 without the setting, and "No regressions
+  found." (exit 0) with `exclude = ["**/Migrations/**"]`.
+- Archive sizes in bytes against 0.4.0; the change is the CLI and
+  pattern code:
+
+  | Archive | 0.4.0 | 0.5.0 |
+  |---|---|---|
+  | `x86_64-unknown-linux-musl.tar.gz` | 2,134,656 | 2,140,993 |
+  | `aarch64-unknown-linux-musl.tar.gz` | 1,941,545 | 1,947,700 |
+  | `aarch64-apple-darwin.tar.gz` | 1,939,195 | 1,945,945 |
+  | `x86_64-apple-darwin.tar.gz` | 1,969,611 | 1,974,853 |
+  | `x86_64-pc-windows-msvc.zip` | 1,925,716 | 1,933,168 |
+  | `aarch64-pc-windows-msvc.zip` | 1,821,786 | 1,828,044 |
+
+- Ervin published the draft on 2026-11-13 (14:43 UTC); `releases/latest`
+  is `v0.5.0`.
+
+## README at 0.5.0 (task 3.1)
+
+Every install block, both `uses:` lines and the pinned commit
+(`d408ea1f7e17f7213df5b7bd70a18051e149a096`, `v0.5.0^{commit}`) name
+0.5.0. One `0.4.0` stays on purpose: the roadmap's "Languages" row says
+which release brought C#. The Linux install block, run as written
+against the published release (with the arm64 target and a scratch
+directory instead of `~/.local/bin`), passed its checksum and installed
+`qgate 0.5.0`.
+
+## GitHub rehearsal (task 3.2, 2026-11-13)
+
+- **Setup:** in `nagypalervin/qgate-rehearsal`, a base branch
+  `base/migrations-0.5.0` holds what the pull requests compare with,
+  so the rehearsal leaves `main`, where other rehearsals start, as it
+  was:
+  - the README's workflow at `@v0.5.0`, cut out unchanged;
+  - an EF Core-style migration, `src/Data/Migrations/20261101120000_Init.cs`
+    (three `CreateTable` calls).
+
+  Both pull requests add `20261113120000_AddLines.cs`, the same model
+  under another class name. Neither was merged; both were closed.
+- **Pull request 15, without the setting** (run 43445787804): the
+  action installed `qgate 0.5.0 (x86_64-unknown-linux-musl)`, compared
+  with `origin/base/migrations-0.5.0` and created the comment, read
+  through the API: "1 finding, none at or above `error`.", with the one
+  row `warning | src/Data/Migrations/20261113120000\_AddLines.cs:6 |
+  duplicates src/Data/Migrations/20261101120000\_Init.cs:6-34 (lines
+  6-34, 173 tokens) | duplication/duplicate-block`.
+- **The same pull request, with `exclude = ["**/Migrations/**"]` pushed
+  on top** (run 43445969436): "updated the qgate comment: no regressions
+  found". The comment (same id) now reads "No regressions found.", with
+  the marker `count=0 failing=0`.
+- **Pull request 16, migration and setting together** (run
+  43445792648), the case of D4: qgate printed "No regressions found."
+  and the comment step wrote nothing ("no findings and no qgate
+  comment"), as the `ci-integration` scenario "A clean pull request"
+  says. There is no comment to read, which is why the setting was also
+  pushed onto pull request 15.
+- **Deviations from the task text,** made by the agent and recorded
+  here for Ervin's review at Gate 3:
+  - **3.1** said `grep` finds no `0.4.0`, but the roadmap row naming
+    the C# release predates the proposal and stays (see "README at
+    0.5.0"); the task now says so.
+  - **3.2** said to read both comments, which the scenario above rules
+    out for a clean pull request; the task now names the extra run on
+    pull request 15 that gives a second comment state to read.
+
+## Review of PR 2
+
+The `reviewer` subagent checked the pinned commit, every size and
+version, the workflow on the base branch (equal to the README's block)
+and each run log and comment state (through the comment's edit
+history) against GitHub. Fixed:
+- the record said the rehearsal repository's `main` takes changes only
+  through pull requests, which was true of the Azure one, not this one;
+- the deviations from the task text were not recorded as such;
+- "the pull request comment spec" now names the `ci-integration`
+  scenario.
+
 ## Risks / Trade-offs
 
 - **[A broad pattern hides real code]** `exclude = ["src"]` turns
