@@ -21,11 +21,11 @@ written to files first.
 
 ## 2. Release 0.3.1 (between the pull requests)
 
-- [ ] 2.1 After PR 1 merges, push `v0.3.1` (if Ervin asks the agent to) and check the draft: six archives, `SHA256SUMS`, `sha256sum --check`, the script's new hint in the archive, the Linux arm64 binary printing `qgate 0.3.1`. Ervin publishes. Record it in `design.md` on `change/fix-pr-comment-details-2`.
+- [x] 2.1 After PR 1 merges, push `v0.3.1` (if Ervin asks the agent to) and check the draft: six archives, `SHA256SUMS`, `sha256sum --check`, the script's new hint in the archive, the Linux arm64 binary printing `qgate 0.3.1`. Ervin publishes. Record it in `design.md` on `change/fix-pr-comment-details-2`.
 
 ## 3. README and rehearsal (PR 2, `change/fix-pr-comment-details-2`)
 
-- [ ] 3.1 Every install block, `uses:` and the pinned commit in the README at 0.3.1; check with `grep` that no `0.3.0` is left.
+- [x] 3.1 Every install block, `uses:` and the pinned commit in the README at 0.3.1; check with `grep` that no `0.3.0` is left.
 - [ ] 3.2 In the GitHub rehearsal repository, run the README workflow (`@v0.3.1`) on a pull request that adds a duplicate block; check through the API that the comment's row has no "also at" for the named copy. Record it in `design.md`.
 
 ## Workflow follow-up

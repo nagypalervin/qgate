@@ -88,6 +88,21 @@ Decided during task 1.2:
   record, one GitHub rehearsal run with a duplicate (the comment row
   without "also at"), the journal entry and the archive.
 
+## Release 0.3.1 (task 2.1)
+
+- PR #18 merged as f03ae2c. As Ervin agreed, the agent pushed the
+  annotated tag `v0.3.1` ("qgate 0.3.1") after `check-version.sh` and
+  `check-action-version.sh` accepted it on `main`.
+- Release run 43400095097: all nine jobs green.
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six. The Linux arm64 archive holds the binary,
+  `qgate-pr-comment.ps1`, `README.md` and both licenses; its script is
+  byte for byte the one on `main` (it names the Project Collection
+  Build Service), and both Windows zips hold the script. The Linux
+  arm64 binary printed `qgate 0.3.1`.
+- Ervin published the draft on 2026-11-13 (09:33 UTC); `releases/latest`
+  is `v0.3.1` and its files download.
+
 ## Risks / Trade-offs
 
 - **[The collection identity's form is not observed]** It is taken from
