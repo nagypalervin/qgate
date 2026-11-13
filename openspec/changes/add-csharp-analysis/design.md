@@ -73,8 +73,16 @@ the gain for two languages is small.
 - **Method-like units:** the type parameters and parameter list are
   part of their own segment: `Map<T>(ref T, params int[])`.
 - **Parameter list:** each parameter's modifiers (`ref`, `out`, `in`,
-  `params`, `this`, `scoped`) and type as written, whitespace removed
-  inside the type (`Dictionary<string,int>`), joined by `, `.
+  `params`, `this`, `scoped`) and type as written, joined by `, `.
+  Whitespace is removed except one space between two words, so
+  `Dictionary<string, int>` becomes `Dictionary<string,int>` and
+  `scoped Span<int>` keeps its space. (Task 1.4: the grammar parses
+  `scoped` as part of the type, so "one space after each modifier", the
+  first wording, would have glued it to the type. The spec says "between
+  two words" now.)
+- **`params`:** the grammar puts a `params` parameter's keyword and type
+  directly in the parameter list, not in a `parameter` node; the name
+  builder reads them from there.
 - **Special members:**
   - constructors `Cart(IClock)`; finalizers `~Cart()`;
   - operators `operator +(Inner, Inner)`; conversions

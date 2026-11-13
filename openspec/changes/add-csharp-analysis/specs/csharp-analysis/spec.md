@@ -101,7 +101,7 @@ accessor SHALL be named by its property, indexer or event followed by
 ### Requirement: C# parameter lists in names
 
 A parameter list SHALL hold each parameter's modifiers and type as
-written, without whitespace except one space after each modifier,
+written, without whitespace except one space between two words,
 joined by `, ` and enclosed in parentheses, or in brackets after `this`
 for an indexer. Names and default values SHALL be left out.
 
