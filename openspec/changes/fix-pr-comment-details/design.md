@@ -64,6 +64,18 @@ it is `Build\<id>`:
 The function gets the two ids as parameters, so the tests need no
 environment; `Invoke-Azure` passes them from the pipeline variables.
 
+Decided during task 1.2:
+- **The names come from `Get-PipelineContext`,** with the ids. The
+  ids are optional there: a missing one only leads to the fallback.
+- **`<organization>`** is the first path segment of a
+  `https://dev.azure.com/<organization>/` collection URI, or the host's
+  first label of `https://<organization>.visualstudio.com/`. Any other
+  URI (Azure DevOps Server) leaves the parenthesis out:
+  `<project> Build Service`.
+- **Without the variables** (the function called on its own) the names
+  are the README's placeholders,
+  `<project> Build Service (<organization>)`.
+
 ### D3. Release 0.3.1 and two pull requests
 
 - **PR 1,** `change/fix-pr-comment-details`: D1, D2, tests, README

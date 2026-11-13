@@ -14,6 +14,8 @@ BeforeAll {
         BUILD_REPOSITORY_ID              = '11111111-2222-3333-4444-555555555555'
         SYSTEM_PULLREQUEST_PULLREQUESTID = '42'
         SYSTEM_ACCESSTOKEN               = 'secret-token'
+        SYSTEM_TEAMPROJECTID             = '0000-project-id'
+        SYSTEM_COLLECTIONID              = '0000-collection-id'
     }
     $script:ThreadsUrl = 'https://dev.azure.com/example/My%20Project/_apis/git/repositories/11111111-2222-3333-4444-555555555555/pullRequests/42/threads'
 
@@ -77,20 +79,20 @@ BeforeAll {
 
     # A 403 answer to a thread write without the permission, in the shape
     # Azure DevOps sent in task 1.8.
-    function New-PermissionAnswer {
+    function New-PermissionAnswer([string] $Id = '0000-project-id') {
         # Indented JSON, the backslash escaped, and every ' escaped as a
         # JSON unicode escape (backslash, u0027), built here so no editor
-        # folds it back.
+        # folds it back. The identity is Build\<Id>.
         $quote = [char] 92 + 'u0027'
-        @'
+        (@'
 {
   "$id": "1",
   "innerException": null,
-  "message": "TF401027: You need the Git QPullRequestContributeQ permission to perform this action. Details: identity QBuild\\0000-project-idQ, scope QrepositoryQ.",
+  "message": "TF401027: You need the Git QPullRequestContributeQ permission to perform this action. Details: identity QBuild\\{id}Q, scope QrepositoryQ.",
   "typeKey": "GitNeedsPermissionException",
   "errorCode": 0
 }
-'@ -creplace 'Q', $quote
+'@ -creplace 'Q', $quote).Replace('{id}', $Id)
     }
 
     # The error record Invoke-RestMethod throws for an HTTP error answer.
@@ -161,6 +163,33 @@ Describe 'Get-PipelineContext' {
     It 'treats an unexpanded macro as a missing token' {
         $env:SYSTEM_ACCESSTOKEN = '$(System.AccessToken)'
         { Get-PipelineContext } | Should -Throw '*SYSTEM_ACCESSTOKEN: $(System.AccessToken)*'
+    }
+
+    It 'reads the ids and names the two Build Service identities' {
+        $context = Get-PipelineContext
+        $context.ProjectId | Should -BeExactly '0000-project-id'
+        $context.CollectionId | Should -BeExactly '0000-collection-id'
+        $context.ProjectBuildService | Should -BeExactly 'My Project Build Service (example)'
+        $context.CollectionBuildService | Should -BeExactly 'Project Collection Build Service (example)'
+    }
+
+    It 'takes the organization from a visualstudio.com collection URI' {
+        $env:SYSTEM_COLLECTIONURI = 'https://example.visualstudio.com/'
+        (Get-PipelineContext).ProjectBuildService | Should -BeExactly 'My Project Build Service (example)'
+    }
+
+    It 'leaves the organization out for any other collection URI' {
+        $env:SYSTEM_COLLECTIONURI = 'https://ado.example.com/tfs/DefaultCollection/'
+        $context = Get-PipelineContext
+        $context.ProjectBuildService | Should -BeExactly 'My Project Build Service'
+        $context.CollectionBuildService | Should -BeExactly 'Project Collection Build Service'
+    }
+
+    It 'does not need the ids' {
+        Remove-Item env:SYSTEM_TEAMPROJECTID, env:SYSTEM_COLLECTIONID
+        $context = Get-PipelineContext
+        $context.ProjectId | Should -BeNullOrEmpty
+        $context.CollectionId | Should -BeNullOrEmpty
     }
 }
 
@@ -289,6 +318,13 @@ Describe 'Invoke-Azure' {
             Should -Throw "qgate: the build identity (Build\0000-project-id) may not comment*'Contribute to pull requests'*"
     }
 
+    It 'names the identity of the pipeline variables in the permission message' {
+        Mock Invoke-RestMethod { throw (New-HttpError -Status 403 -Body (New-PermissionAnswer -Id '0000-collection-id')) }
+
+        { Invoke-Azure -Context $script:Context -Method Post -Uri 'https://x/threads' -Body @{} } |
+            Should -Throw "*Give 'Project Collection Build Service (example)' the 'Contribute to pull requests'*"
+    }
+
     It 'falls back to the exception message without error details' {
         Mock Invoke-RestMethod { throw (New-HttpError -Status 500) }
 
@@ -350,12 +386,58 @@ Describe 'Invoke-QgatePrComment' {
 }
 
 Describe 'Get-AzureErrorMessage' {
-    It 'names the permission and the identity for TF401027' {
-        $body = New-PermissionAnswer
-        $message = Get-AzureErrorMessage -Method 'POST' -Uri 'https://x/threads' -StatusCode 403 -Body $body
-        $message | Should -BeLike "*'Contribute to pull requests'*"
-        $message | Should -BeLike '*Build Service*'
-        $message | Should -BeLike '*(Build\0000-project-id)*'
+    BeforeAll {
+        # The permission message for an answer naming Build\<Id>, with the
+        # ids and names of the pipeline variables unless told otherwise.
+        function Get-PermissionMessage([string] $Id, [string] $Body, [switch] $NoVariables) {
+            if (-not $Body) { $Body = New-PermissionAnswer -Id $Id }
+            $ids = if ($NoVariables) { @{} } else {
+                @{
+                    ProjectId              = '0000-project-id'
+                    CollectionId           = '0000-collection-id'
+                    ProjectBuildService    = 'My Project Build Service (example)'
+                    CollectionBuildService = 'Project Collection Build Service (example)'
+                }
+            }
+            Get-AzureErrorMessage -Method 'POST' -Uri 'https://x/threads' -StatusCode 403 -Body $Body @ids
+        }
+
+        $script:Hint = "the 'Contribute to pull requests' permission on this repository " +
+        '(Project settings > Repositories > <repository> > Security)'
+    }
+
+    It 'names the project Build Service for the project id' {
+        Get-PermissionMessage -Id '0000-project-id' | Should -BeExactly (
+            'qgate: the build identity (Build\0000-project-id) may not comment on pull requests. ' +
+            "Give 'My Project Build Service (example)' $script:Hint.")
+    }
+
+    It 'names the Project Collection Build Service for the collection id, in any case' {
+        Get-PermissionMessage -Id '0000-COLLECTION-ID' | Should -BeExactly (
+            'qgate: the build identity (Build\0000-COLLECTION-ID) may not comment on pull requests. ' +
+            "The pipeline's job authorization scope is the project collection: " +
+            "give 'Project Collection Build Service (example)' $script:Hint.")
+    }
+
+    It 'names both identities for an unknown id' {
+        Get-PermissionMessage -Id '0000-other-id' | Should -BeExactly (
+            'qgate: the build identity (Build\0000-other-id) may not comment on pull requests. ' +
+            "Give 'My Project Build Service (example)' $script:Hint; if the pipeline's job authorization " +
+            "scope is the project collection, give it to 'Project Collection Build Service (example)' instead.")
+    }
+
+    It 'names both identities when the answer names none' {
+        $body = '{"message":"TF401027: You need the Git ''PullRequestContribute'' permission to perform this action."}'
+        $message = Get-PermissionMessage -Body $body
+        $message | Should -BeLike 'qgate: the build identity may not comment on pull requests. Give *'
+        $message | Should -BeLike "*'My Project Build Service (example)'*'Project Collection Build Service (example)' instead."
+    }
+
+    It 'names both identities without the pipeline variables' {
+        Get-PermissionMessage -Id '0000-project-id' -NoVariables | Should -BeExactly (
+            'qgate: the build identity (Build\0000-project-id) may not comment on pull requests. ' +
+            "Give '<project> Build Service (<organization>)' $script:Hint; if the pipeline's job authorization " +
+            "scope is the project collection, give it to 'Project Collection Build Service (<organization>)' instead.")
     }
 
     It 'reports the message of a JSON answer, not the whole document' {

@@ -15,7 +15,7 @@ written to files first.
   - a related location without a line always listed.
 
   Then change `finding_text` until they pass. Check that the existing CLI test of the Markdown report still holds.
-- [ ] 1.2 Write failing Pester tests in `ci/azure/qgate-pr-comment.Tests.ps1` (design D2): the project id, the collection id (any case), an unknown id, no identity, and no variables. Then change `Get-AzureErrorMessage` and pass the ids from `Get-PipelineContext`.
+- [x] 1.2 Write failing Pester tests in `ci/azure/qgate-pr-comment.Tests.ps1` (design D2): the project id, the collection id (any case), an unknown id, no identity, and no variables. Then change `Get-AzureErrorMessage` and pass the ids from `Get-PipelineContext`.
 - [ ] 1.3 README "In Azure Pipelines": drop "and its hint names the project's Build Service in either case"; say that the hint names the identity the error names.
 - [ ] 1.4 Version 0.3.1 in `Cargo.toml` (with `Cargo.lock`) and in every `QGATE_VERSION` of `action.yml`; run both release checks locally for `v0.3.1`.
 
