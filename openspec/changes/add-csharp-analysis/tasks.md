@@ -19,8 +19,8 @@ first.
 ## 2. Wiring, evaluation and version (PR 2, `change/add-csharp-analysis-2`)
 
 - [x] 2.1 Analyzer fixture pairs: `crates/qgate-analyzers/fixtures/complexity/csharp_*` (an increase, a new complex method, an overload added above another) and `fixtures/duplication/*.cs`, with failing tests first.
-- [ ] 2.2 CLI, revision mode: `.cs` among changed files, generated files skipped by name and header (D5), one duplication index per family (D6). Failing CLI tests first for each scenario of the modified `revision-input` and `duplication-analysis` requirements and of "Generated C# files are skipped", including the working tree.
-- [ ] 2.3 CLI, two-file form: `.cs` accepted, C# with TypeScript rejected (D7), the unsupported-type message names `.cs`. Failing CLI tests first for the scenarios of "Supported input files".
+- [x] 2.2 CLI, revision mode: `.cs` among changed files, generated files skipped by name and header (D5), one duplication index per family (D6). Failing CLI tests first for each scenario of the modified `revision-input` and `duplication-analysis` requirements and of "Generated C# files are skipped", including the working tree.
+- [x] 2.3 CLI, two-file form: `.cs` accepted, C# with TypeScript rejected (D7), the unsupported-type message names `.cs`. Failing CLI tests first for the scenarios of "Supported input files".
 - [ ] 2.4 Evaluation (D8) on the two repositories Ervin approved at Gate 1: script in the scratchpad, results and the hand check of ten findings recorded in `design.md`. Stop and ask Ervin if a cause affects many files.
 - [ ] 2.5 README: C# in the status line, the checks it gets, its decision points and names, generated files, the two-file form; the roadmap row "Languages" in progress. Check every sentence against a test or the evaluation.
 - [ ] 2.6 Version 0.4.0 in `Cargo.toml` (with `Cargo.lock`) and every `QGATE_VERSION` of `action.yml`; both release checks pass locally for `v0.4.0`.

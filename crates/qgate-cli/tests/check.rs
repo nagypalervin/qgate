@@ -317,18 +317,34 @@ fn different_supported_extensions() {
 fn unsupported_extension() {
     let out = qgate(&["check", "js/before.js", "js/after.js"]);
     assert!(stderr(&out).contains("js/before.js"), "{}", stderr(&out));
-    assert!(stderr(&out).contains("unsupported file type"));
+    assert!(
+        stderr(&out).contains("unsupported file type (expected .ts, .mts, .cts, .tsx or .cs)"),
+        "{}",
+        stderr(&out)
+    );
     assert_eq!(stdout(&out), "");
     assert_eq!(out.status.code(), Some(2));
 }
 
-// C# stays off in the CLI until PR 2 of `add-csharp-analysis` wires it in;
-// PR 2 replaces this test with the scenarios of "Supported input files".
 #[test]
-fn csharp_is_not_analyzed_yet() {
+fn csharp_input() {
     let out = qgate(&["check", "cs/Before.cs", "cs/After.cs"]);
-    assert!(stderr(&out).contains("cs/Before.cs"), "{}", stderr(&out));
-    assert!(stderr(&out).contains("unsupported file type"));
+    assert_eq!(
+        stdout(&out),
+        "warning cs/After.cs:5  Cart.Total(int): cyclomatic complexity 2 -> 3 (+1)  \
+         [complexity/cyclomatic-increase]\n",
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn csharp_compared_with_typescript() {
+    let out = qgate(&["check", "same.ts", "cs/After.cs"]);
+    assert!(stderr(&out).contains("same.ts"), "{}", stderr(&out));
+    assert!(stderr(&out).contains("cs/After.cs"), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "");
     assert_eq!(out.status.code(), Some(2));
 }
 

@@ -511,13 +511,23 @@ fn check(args: &ArgMatches) -> Result<Vec<Finding>, String> {
             .ok_or_else(|| format!("missing <{name}>"))
     };
     let (before_path, after_path) = (path("before")?, path("after")?);
+    let (before_language, after_language) = (language_for(before_path)?, language_for(after_path)?);
+    // Unit names of two languages never match (design D7 of
+    // `add-csharp-analysis`).
+    if before_language.family() != after_language.family() {
+        return Err(format!(
+            "{} and {}: a C# file cannot be compared with a TypeScript file",
+            before_path.display(),
+            after_path.display()
+        ));
+    }
     let change = FileChange {
         path: after_path.clone(),
         // Two files are compared as one file; the architecture rules,
         // which would care about a rename, do not run in this form.
         old_path: None,
-        before: load(before_path)?,
-        after: load(after_path)?,
+        before: load(before_path, before_language)?,
+        after: load(after_path, after_language)?,
     };
 
     let mut findings = ComplexityAnalyzer.analyze(&change);
@@ -611,13 +621,15 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
         };
         changed_paths.insert(file.path.clone());
         match file_change(&repo, &file, language)? {
-            Ok(change) => {
+            Some(Ok(change)) => {
                 for analyzer in &analyzers {
                     findings.extend(analyzer.analyze(&change));
                 }
                 analyzed.push(change);
             }
-            Err(not_analyzed) => findings.push(not_analyzed),
+            Some(Err(not_analyzed)) => findings.push(not_analyzed),
+            // Generated: neither analyzed nor compared.
+            None => {}
         }
     }
     if !analyzed.is_empty() {
@@ -640,7 +652,9 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
 /// one git process and parsed one at a time (design D5 of
 /// `add-duplicate-detection`). A changed file that could not be analyzed
 /// takes no part; an unchanged one that cannot be read or parsed is
-/// skipped silently.
+/// skipped silently. Each language family has its own index, so code is
+/// compared only with code of its own family (design D6 of
+/// `add-csharp-analysis`), and generated C# files take no part.
 fn duplication(
     repo: &Repository,
     base: &str,
@@ -655,7 +669,7 @@ fn duplication(
     // The base tokens of supported files that are gone (deleted, or
     // renamed to another language); one that cannot be read or parsed
     // counts as empty.
-    let mut gone: Vec<(String, Vec<Token>)> = Vec::new();
+    let mut gone: Vec<(String, Family, Vec<Token>)> = Vec::new();
     for (path, id) in left {
         // A deleted JavaScript file's code counts too, like a renamed one's.
         let language = match language_of(path) {
@@ -664,33 +678,47 @@ fn duplication(
             None => continue,
         };
         let tokens = match read_source(&mut reader, id)? {
+            Some(bytes) if generated_by_header(language, &bytes) => continue,
             Some(bytes) => match parse_blob(language, bytes)? {
                 Ok(model) => model.tokens,
                 Err(_) => Vec::new(),
             },
             None => Vec::new(),
         };
-        gone.push((path.clone(), tokens));
+        gone.push((path.clone(), language.family(), tokens));
     }
     let paths: Vec<String> = changes
         .iter()
         .map(|change| change.path.to_string_lossy().into_owned())
         .collect();
-    let mut sources: Vec<ChangedSource<'_>> = changes
-        .iter()
-        .zip(&paths)
-        .map(|(change, path)| ChangedSource {
-            path,
-            before: &change.before.tokens,
-            after: &change.after.tokens,
-        })
-        .collect();
-    sources.extend(gone.iter().map(|(path, tokens)| ChangedSource {
-        path,
-        before: tokens,
-        after: &[],
-    }));
-    let mut index = DuplicationIndex::new(&sources);
+    let family_of = |path: &str| language_of(path).map(Language::family);
+    // One index per family with an analyzed change.
+    let mut indexes: Vec<(Family, DuplicationIndex)> = Vec::new();
+    for family in [Family::TypeScript, Family::CSharp] {
+        let mut sources: Vec<ChangedSource<'_>> = changes
+            .iter()
+            .zip(&paths)
+            .filter(|(_, path)| family_of(path) == Some(family))
+            .map(|(change, path)| ChangedSource {
+                path,
+                before: &change.before.tokens,
+                after: &change.after.tokens,
+            })
+            .collect();
+        if sources.is_empty() {
+            continue;
+        }
+        sources.extend(
+            gone.iter()
+                .filter(|(_, gone_family, _)| *gone_family == family)
+                .map(|(path, _, tokens)| ChangedSource {
+                    path,
+                    before: tokens,
+                    after: &[],
+                }),
+        );
+        indexes.push((family, DuplicationIndex::new(&sources)));
+    }
     let tree = repo
         .files_at(&head.revision)
         .map_err(|e| git_message(&e, base, head))?;
@@ -701,14 +729,23 @@ fn duplication(
         let Some(language) = language_of(&file.path) else {
             continue;
         };
+        let Some((_, index)) = indexes.iter_mut().find(|(f, _)| *f == language.family()) else {
+            continue;
+        };
         let Some(bytes) = read_source(&mut reader, &file.id)? else {
             continue;
         };
+        if generated_by_header(language, &bytes) {
+            continue;
+        }
         if let Ok(model) = parse_blob(language, bytes)? {
             index.add(&file.path, &model.tokens);
         }
     }
-    Ok(index.findings())
+    Ok(indexes
+        .iter()
+        .flat_map(|(_, index)| index.findings())
+        .collect())
 }
 
 /// One blob through the batch reader: `None` if git cannot give it as a
@@ -753,12 +790,13 @@ fn architecture_analyzer(config: &Config) -> Result<ArchitectureAnalyzer, String
 }
 
 /// Both versions of one changed file as models, or an `input/unparsable`
-/// finding if either cannot be parsed. Git failures are errors.
+/// finding if either cannot be parsed, or `None` if the head version is
+/// generated C# by its header. Git failures are errors.
 fn file_change(
     repo: &Repository,
     file: &ChangedFile,
     language: Language,
-) -> Result<Result<FileChange, Finding>, String> {
+) -> Result<Option<Result<FileChange, Finding>>, String> {
     let not_analyzed = |reason: String, line: Option<u32>| Finding {
         rule: UNPARSABLE_RULE.to_owned(),
         severity: Severity::Warning,
@@ -773,15 +811,18 @@ fn file_change(
     };
 
     let after_bytes = repo.read_blob(&file.after).map_err(|e| e.to_string())?;
+    if generated_by_header(language, &after_bytes) {
+        return Ok(None);
+    }
     let after = match parse_blob(language, after_bytes)? {
         Ok(model) => model,
         Err(Unparsable::NotUtf8) => {
-            return Ok(Err(not_analyzed("not valid UTF-8".to_owned(), None)));
+            return Ok(Some(Err(not_analyzed("not valid UTF-8".to_owned(), None))));
         }
         Err(Unparsable::Syntax(line)) => {
             let reason =
                 format!("syntax error on line {line} (or syntax the parser does not support yet)");
-            return Ok(Err(not_analyzed(reason, Some(line))));
+            return Ok(Some(Err(not_analyzed(reason, Some(line)))));
         }
     };
 
@@ -821,26 +862,26 @@ fn file_change(
                 Ok(model) => model,
                 Err(Unparsable::NotUtf8) => {
                     let reason = "the base version is not valid UTF-8".to_owned();
-                    return Ok(Err(not_analyzed(reason, None)));
+                    return Ok(Some(Err(not_analyzed(reason, None))));
                 }
                 Err(Unparsable::Syntax(line)) => {
                     let reason = format!(
                         "syntax error on line {line} of the base version \
                          (or syntax the parser does not support yet)"
                     );
-                    return Ok(Err(not_analyzed(reason, None)));
+                    return Ok(Some(Err(not_analyzed(reason, None))));
                 }
             }
         }
         _ => FileModel::default(),
     };
 
-    Ok(Ok(FileChange {
+    Ok(Some(Ok(FileChange {
         path: PathBuf::from(&file.path),
         old_path,
         before,
         after,
-    }))
+    })))
 }
 
 /// Why one version of a file could not be analyzed.
@@ -871,19 +912,25 @@ fn is_javascript(path: &str) -> bool {
         .is_some_and(|ext| matches!(ext, "js" | "jsx" | "mjs" | "cjs"))
 }
 
-/// The language qgate analyzes for an extension. C# stays off until PR 2
-/// of `add-csharp-analysis` wires it in (generated files, one duplication
-/// index per language family).
-fn supported(ext: &str) -> Option<Language> {
-    Language::from_extension(ext).filter(|language| language.family() == Family::TypeScript)
-}
-
-/// The language of a path, from its extension.
+/// The language of a path in revision mode, from its extension. A C#
+/// file generated by its name is not supported: it is skipped everywhere,
+/// like a file of another language (design D5 of `add-csharp-analysis`).
 fn language_of(path: &str) -> Option<Language> {
     Path::new(path)
         .extension()
         .and_then(|ext| ext.to_str())
-        .and_then(supported)
+        .and_then(Language::from_extension)
+        .filter(|&language| {
+            language != Language::CSharp || !qgate_lang::csharp_generated_name(path)
+        })
+}
+
+/// Whether one version of a file is generated C# by its header comment;
+/// such a file is skipped like one generated by its name. A file that is
+/// not UTF-8 is not generated here: parsing reports it.
+fn generated_by_header(language: Language, bytes: &[u8]) -> bool {
+    language == Language::CSharp
+        && std::str::from_utf8(bytes).is_ok_and(qgate_lang::csharp_generated_header)
 }
 
 /// The message for a git error. An unknown `base` gets the shallow-clone
@@ -914,16 +961,24 @@ fn git_message(error: &GitError, base: &str, head: &Head) -> String {
     }
 }
 
-/// Pick the language from the extension, read and parse one input file.
-fn load(path: &Path) -> Result<FileModel, String> {
-    let shown = path.display();
-    let language = path
-        .extension()
+/// The language of an input file of the two-file form, from its
+/// extension. Generated C# files are analyzed here: skipping them is a
+/// rule of revision mode.
+fn language_for(path: &Path) -> Result<Language, String> {
+    path.extension()
         .and_then(|ext| ext.to_str())
-        .and_then(supported)
+        .and_then(Language::from_extension)
         .ok_or_else(|| {
-            format!("{shown}: unsupported file type (expected .ts, .mts, .cts or .tsx)")
-        })?;
+            format!(
+                "{}: unsupported file type (expected .ts, .mts, .cts, .tsx or .cs)",
+                path.display()
+            )
+        })
+}
+
+/// Read and parse one input file of the two-file form.
+fn load(path: &Path, language: Language) -> Result<FileModel, String> {
+    let shown = path.display();
     let source = fs::read_to_string(path).map_err(|e| format!("{shown}: {e}"))?;
     qgate_lang::parse(language, &source).map_err(|e| match e {
         ParseError::Syntax { line } => {
