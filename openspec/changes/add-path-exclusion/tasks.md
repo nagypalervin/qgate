@@ -10,7 +10,7 @@ checks; commit messages and PR bodies are written to files first.
 - [x] 1.2 `qgate-analyzers`: move the pattern code into `patterns.rs` as `PathPatterns` (D2) with unit tests for matching and spelling; the architecture analyzer uses it, and its existing tests pass unchanged.
 - [x] 1.3 `qgate-cli`: failing CLI tests for each scenario of "Excluded paths" and for an excluded `.js` file renamed to `.ts`, then `FileSelection` replacing the free `language_of` in every caller (D3) and the error of D5.
 - [x] 1.4 README: the `[files] exclude` setting in the `qgate.toml` section, and the C# section's note on migrations pointing to it; check each sentence against a test.
-- [ ] 1.5 Version 0.5.0 in `Cargo.toml` (with `Cargo.lock`) and every `QGATE_VERSION` of `action.yml`; both release checks pass locally for `v0.5.0`.
+- [x] 1.5 Version 0.5.0 in `Cargo.toml` (with `Cargo.lock`) and every `QGATE_VERSION` of `action.yml`; both release checks pass locally for `v0.5.0`.
 
 ## 2. Release 0.5.0 (between the pull requests)
 

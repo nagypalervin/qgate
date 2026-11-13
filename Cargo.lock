@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "qgate-analyzers"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "globset",
  "qgate-core",
@@ -140,7 +140,7 @@ dependencies = [
 
 [[package]]
 name = "qgate-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "clap",
  "qgate-analyzers",
@@ -155,7 +155,7 @@ dependencies = [
 
 [[package]]
 name = "qgate-config"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "toml",
@@ -163,15 +163,15 @@ dependencies = [
 
 [[package]]
 name = "qgate-core"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "qgate-git"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "qgate-lang"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "qgate-core",
  "tree-sitter",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "qgate-report"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "qgate-core",
  "serde",

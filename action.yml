@@ -27,14 +27,14 @@ runs:
       shell: pwsh
       run: '& "$env:GITHUB_ACTION_PATH/ci/github/qgate-action.ps1" -Step Install'
       env:
-        QGATE_VERSION: 0.4.0
+        QGATE_VERSION: 0.5.0
         QGATE_INPUT_BASE: ${{ inputs.base }}
 
     - name: qgate report
       shell: pwsh
       run: '& "$env:GITHUB_ACTION_PATH/ci/github/qgate-action.ps1" -Step Report'
       env:
-        QGATE_VERSION: 0.4.0
+        QGATE_VERSION: 0.5.0
         QGATE_INPUT_BASE: ${{ inputs.base }}
         QGATE_INPUT_FAIL_ON: ${{ inputs.fail-on }}
 
@@ -43,13 +43,13 @@ runs:
       shell: pwsh
       run: '& "$env:GITHUB_ACTION_PATH/ci/github/qgate-action.ps1" -Step Comment'
       env:
-        QGATE_VERSION: 0.4.0
+        QGATE_VERSION: 0.5.0
         GITHUB_TOKEN: ${{ github.token }}
 
     - name: qgate check
       shell: pwsh
       run: '& "$env:GITHUB_ACTION_PATH/ci/github/qgate-action.ps1" -Step Gate'
       env:
-        QGATE_VERSION: 0.4.0
+        QGATE_VERSION: 0.5.0
         QGATE_INPUT_BASE: ${{ inputs.base }}
         QGATE_INPUT_FAIL_ON: ${{ inputs.fail-on }}
