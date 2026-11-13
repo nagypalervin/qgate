@@ -26,7 +26,7 @@ written to files first.
 ## 3. README and rehearsal (PR 2, `change/fix-pr-comment-details-2`)
 
 - [x] 3.1 Every install block, `uses:` and the pinned commit in the README at 0.3.1; check with `grep` that no `0.3.0` is left.
-- [ ] 3.2 In the GitHub rehearsal repository, run the README workflow (`@v0.3.1`) on a pull request that adds a duplicate block; check through the API that the comment's row has no "also at" for the named copy. Record it in `design.md`.
+- [x] 3.2 In the GitHub rehearsal repository, run the README workflow (`@v0.3.1`) on a pull request that adds a duplicate block; check through the API that the comment's row has no "also at" for the named copy. Record it in `design.md`.
 
 ## Workflow follow-up
 
