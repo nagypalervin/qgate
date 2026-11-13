@@ -147,8 +147,13 @@ Counted node kinds:
     interpolations are tokens as usual.
 - **Kept text:** keywords, `predefined_type` (`int`, `string`), operators
   and punctuation.
-- **No tokens:** `using_directive`, the namespace's name, preprocessor
-  nodes, comments and `;`.
+- **No tokens:** `using_directive`, the namespace's keyword and name
+  (a file-scoped declaration as a whole), preprocessor nodes, comments
+  and `;`. (Task 1.6: the spec first named only the namespace's name,
+  which left a lone `namespace` token in every file-scoped file.)
+- **Contextual keywords:** the grammar parses `when`, `value` and the
+  like as an `identifier` with a keyword inside, so an `identifier` node
+  is one token and its children are not entered.
 - **Types are code in C#.** Removing them as TypeScript does would remove
   half of every declaration; generic arguments become `$id` tokens like
   any name, so a renamed copy with renamed types still matches.

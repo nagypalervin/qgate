@@ -3,14 +3,16 @@
 //!
 //! One walk over the syntax tree finds the function units and names them
 //! by their enclosing types and their own signature (design D2), so an
-//! overload keeps its name when another one is added above it.
+//! overload keeps its name when another one is added above it. The same
+//! walk counts decision points (D3) and records the normalized tokens
+//! for finding copies (D4).
 
 use std::collections::HashSet;
 
 use tree_sitter::Node;
 
 use crate::common::{line_of, parse_tree, unique_segment};
-use crate::{FileModel, Function, ParseError};
+use crate::{FileModel, Function, ParseError, Token};
 
 /// Parse C# source into a [`FileModel`].
 pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
@@ -19,7 +21,8 @@ pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
     walker.walk(tree.root_node());
     Ok(FileModel {
         functions: walker.functions,
-        ..FileModel::default()
+        imports: Vec::new(),
+        tokens: walker.tokens,
     })
 }
 
@@ -67,12 +70,28 @@ const DECISION_KINDS: &[&str] = &[
     "or_pattern",
 ];
 
+/// Literals that become one `$lit` each, without entering them. A
+/// format in an interpolation (`{x:D2}`) is a literal too.
+const LITERAL_KINDS: &[&str] = &[
+    "string_literal",
+    "verbatim_string_literal",
+    "raw_string_literal",
+    "character_literal",
+    "integer_literal",
+    "real_literal",
+    "interpolation_format_clause",
+];
+
+/// The text parts of an interpolated string: a run of them is one `$lit`.
+const TEXT_PART_KINDS: &[&str] = &["string_content", "escape_sequence", "raw_string_content"];
+
 /// What entering a node pushed, so leaving it can pop the same. An
 /// expression-bodied property pushes two segments: its name and `get`.
 #[derive(Default)]
 struct Frame {
     segments: usize,
     scopes: usize,
+    muted: bool,
 }
 
 struct Walker<'s> {
@@ -86,6 +105,14 @@ struct Walker<'s> {
     scopes: Vec<Option<usize>>,
     /// Units in source order.
     functions: Vec<Function>,
+    /// Normalized tokens in source order.
+    tokens: Vec<Token>,
+    /// Whether the walk is inside a subtree that produces no tokens; the
+    /// frame of the node that opened it closes it.
+    muted: bool,
+    /// Whether the last token was a text part of an interpolated string,
+    /// so the next one continues the same literal.
+    in_text_run: bool,
 }
 
 impl<'s> Walker<'s> {
@@ -96,6 +123,9 @@ impl<'s> Walker<'s> {
             taken: HashSet::new(),
             scopes: Vec::new(),
             functions: Vec::new(),
+            tokens: Vec::new(),
+            muted: false,
+            in_text_run: false,
         }
     }
 
@@ -104,9 +134,14 @@ impl<'s> Walker<'s> {
     fn walk(&mut self, root: Node<'_>) {
         let mut cursor = root.walk();
         let mut frames = Vec::new();
+        // The ancestors of the current node, so no node has to ask
+        // tree-sitter for its parent.
+        let mut ancestors: Vec<Node<'_>> = Vec::new();
         loop {
-            frames.push(self.enter(cursor.node()));
+            let node = cursor.node();
+            frames.push(self.enter(node, ancestors.last().copied()));
             if cursor.goto_first_child() {
+                ancestors.push(node);
                 continue;
             }
             loop {
@@ -119,13 +154,15 @@ impl<'s> Walker<'s> {
                 if !cursor.goto_parent() {
                     return;
                 }
+                ancestors.pop();
             }
         }
     }
 
-    fn enter(&mut self, node: Node<'_>) -> Frame {
+    fn enter(&mut self, node: Node<'_>, parent: Option<Node<'_>>) -> Frame {
         let kind = node.kind();
         let mut frame = Frame::default();
+        self.record_token(node, parent, &mut frame);
         if TYPE_KINDS.contains(&kind) {
             if let Some(name) = node.child_by_field_name("name") {
                 self.segments.push(self.text(name));
@@ -179,6 +216,61 @@ impl<'s> Walker<'s> {
         self.segments.truncate(segments);
         let scopes = self.scopes.len() - frame.scopes;
         self.scopes.truncate(scopes);
+        if frame.muted {
+            self.muted = false;
+        }
+    }
+
+    /// Record the normalized token `node` is, if any (design D4), and
+    /// mute the subtrees that produce none.
+    fn record_token(&mut self, node: Node<'_>, parent: Option<Node<'_>>, frame: &mut Frame) {
+        if self.muted {
+            return;
+        }
+        let kind = node.kind();
+        if produces_no_tokens(node, parent) {
+            self.muted = true;
+            frame.muted = true;
+        } else if node.is_named() && LITERAL_KINDS.contains(&kind) {
+            self.push_token("$lit".to_owned(), node, false);
+            if node.child_count() > 0 {
+                self.muted = true;
+                frame.muted = true;
+            }
+        } else if node.is_named()
+            && TEXT_PART_KINDS.contains(&kind)
+            && parent.is_some_and(|p| p.kind() == "interpolated_string_expression")
+        {
+            if !self.in_text_run {
+                self.push_token("$lit".to_owned(), node, true);
+            }
+        } else if kind == "identifier" {
+            // An identifier is one token even when the grammar puts a
+            // contextual keyword inside it (`when`, `value`).
+            let text = if is_member_name(node, parent) {
+                self.text(node)
+            } else {
+                "$id".to_owned()
+            };
+            self.push_token(text, node, false);
+            if node.child_count() > 0 {
+                self.muted = true;
+                frame.muted = true;
+            }
+        } else if node.child_count() == 0 && kind != ";" {
+            let text = self.text(node);
+            if !text.is_empty() {
+                self.push_token(text, node, false);
+            }
+        }
+    }
+
+    fn push_token(&mut self, text: String, node: Node<'_>, text_part: bool) {
+        self.tokens.push(Token {
+            text,
+            line: line_of(node),
+        });
+        self.in_text_run = text_part;
     }
 
     /// A unit's own name: its signature (design D2).
@@ -291,6 +383,39 @@ impl<'s> Walker<'s> {
     fn text(&self, node: Node<'_>) -> String {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
     }
+}
+
+/// Subtrees that produce no tokens: `using` directives, a namespace's
+/// keyword and name, preprocessor lines and comments (design D4). A
+/// file-scoped namespace declaration holds nothing else.
+fn produces_no_tokens(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
+    let kind = node.kind();
+    matches!(
+        kind,
+        "using_directive" | "comment" | "file_scoped_namespace_declaration"
+    ) || kind.starts_with("preproc_")
+        || parent.is_some_and(|p| {
+            p.kind() == "namespace_declaration"
+                && (kind == "namespace" || is_field(p, "name", node))
+        })
+}
+
+/// Whether `node` is the member name of `x.Name`, `x?.Name` or `p->Name`,
+/// which keeps its text.
+fn is_member_name(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
+    parent.is_some_and(|p| {
+        matches!(
+            p.kind(),
+            "member_access_expression" | "member_binding_expression"
+        ) && is_field(p, "name", node)
+    })
+}
+
+/// Whether `node` is the `field` child of `parent`.
+fn is_field(parent: Node<'_>, field: &str, node: Node<'_>) -> bool {
+    parent
+        .child_by_field_name(field)
+        .is_some_and(|f| f.id() == node.id())
 }
 
 /// Whether the node adds one to the enclosing unit's complexity.
@@ -493,6 +618,95 @@ mod tests {
             complexities(include_str!("../fixtures/csharp/top_level.cs")),
             pairs(&[("Twice(int)", 2)])
         );
+    }
+
+    /// The normalized token texts of `source`.
+    fn tokens(source: &str) -> Vec<String> {
+        parse(source)
+            .expect("source parses")
+            .tokens
+            .into_iter()
+            .map(|t| t.text)
+            .collect()
+    }
+
+    fn texts(line: &str) -> Vec<String> {
+        line.split(' ').map(str::to_owned).collect()
+    }
+
+    // Requirement: C# normalized tokens, "Renamed copy".
+    #[test]
+    fn a_renamed_copy_has_the_same_tokens() {
+        let a = "class A { string Fmt(DateTime d) { var y = d.Year; return $\"{y}-\"; } }";
+        let b = "class B { string FormatOrderDate(DateTime when) { var year = when.Year; return $\"{year}/\"; } }";
+        assert_eq!(tokens(a), tokens(b));
+        assert_eq!(
+            tokens(a),
+            texts(
+                "class $id { string $id ( $id $id ) { var $id = $id . Year return $ \" { $id } $lit \" } }"
+            )
+        );
+    }
+
+    // Requirement: C# normalized tokens, "Different members".
+    #[test]
+    fn member_names_keep_their_text() {
+        let year = tokens("class A { int F(D d) => d.Year + d?.Year + p->Year; }");
+        let month = tokens("class A { int F(D d) => d.Month + d?.Month + p->Month; }");
+        assert_ne!(year, month);
+        assert_eq!(
+            year,
+            texts("class $id { int $id ( $id $id ) => $id . Year + $id ? . Year + $id -> Year }")
+        );
+    }
+
+    #[test]
+    fn each_literal_is_one_placeholder() {
+        let source = "class A { object F() => new object[] { \"e\\t\", @\"v\", 'c', \"\"\"raw\"\"\", 1.5m, 0x1F, true, null }; }";
+        assert_eq!(
+            tokens(source),
+            texts(
+                "class $id { object $id ( ) => new object [ ] { $lit , $lit , $lit , $lit , $lit , $lit , true , null } }"
+            )
+        );
+    }
+
+    #[test]
+    fn interpolated_strings_keep_their_shape() {
+        // A run of text and escapes is one literal; a format is one too.
+        assert_eq!(
+            tokens("class A { string F(int y) => $\"{y}-\\n{y:D2}x\"; }"),
+            texts("class $id { string $id ( int $id ) => $ \" { $id } $lit { $id $lit } $lit \" }")
+        );
+    }
+
+    // Requirement: C# code without tokens.
+    #[test]
+    fn usings_namespaces_preprocessor_and_comments_have_no_tokens() {
+        let source = "using System;\nusing static System.Math;\nglobal using Alias = System.Text;\n\
+                      namespace A.B;\n#nullable enable\n#region R\n/// <summary>doc</summary>\n\
+                      // line\n/* block */\nclass T { }\n#endregion\nnamespace C { class U { } }\n";
+        assert_eq!(tokens(source), texts("class $id { } { class $id { } }"));
+        assert_eq!(
+            tokens("using System;\nusing System.Linq;\nnamespace Shop.Orders;\n"),
+            Vec::<String>::new()
+        );
+    }
+
+    // Requirement: C# files, "A file with a byte order mark".
+    #[test]
+    fn a_byte_order_mark_is_ignored() {
+        let source = "\u{feff}class A { int F(bool a) { if (a) { } return 0; } }";
+        let model = parse(source).expect("parses");
+        assert_eq!(model.functions[0].cyclomatic, 2);
+        assert_eq!(model.tokens[0].text, "class");
+    }
+
+    #[test]
+    fn tokens_carry_their_line() {
+        let model = parse("class A\n{\n    int F() => 1;\n}\n").expect("parses");
+        let lines: Vec<u32> = model.tokens.iter().map(|t| t.line).collect();
+        assert_eq!(lines, [1, 1, 2, 3, 3, 3, 3, 3, 3, 4]);
     }
 
     #[test]

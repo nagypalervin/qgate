@@ -168,8 +168,9 @@ punctuation SHALL keep their text.
 
 ### Requirement: C# code without tokens
 
-`using` directives, the name of a namespace declaration, preprocessor
-directives, comments and semicolons SHALL produce no tokens.
+`using` directives, the keyword and name of a namespace declaration,
+preprocessor directives, comments and semicolons SHALL produce no
+tokens.
 
 #### Scenario: Usings and namespaces are not compared
 
