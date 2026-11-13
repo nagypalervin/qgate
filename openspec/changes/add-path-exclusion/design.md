@@ -169,6 +169,35 @@ against the published release (with the arm64 target and a scratch
 directory instead of `~/.local/bin`), passed its checksum and installed
 `qgate 0.5.0`.
 
+## GitHub rehearsal (task 3.2, 2026-11-13)
+
+- **Setup:** in `nagypalervin/qgate-rehearsal`, whose `main` takes
+  changes only through pull requests, a base branch
+  `base/migrations-0.5.0` holds:
+  - the README's workflow at `@v0.5.0`, cut out unchanged;
+  - an EF Core-style migration, `src/Data/Migrations/20261101120000_Init.cs`
+    (three `CreateTable` calls).
+
+  Both pull requests add `20261113120000_AddLines.cs`, the same model
+  under another class name. Neither was merged; both were closed.
+- **Pull request 15, without the setting** (run 43445787804): the
+  action installed `qgate 0.5.0 (x86_64-unknown-linux-musl)`, compared
+  with `origin/base/migrations-0.5.0` and created the comment, read
+  through the API: "1 finding, none at or above `error`.", with the one
+  row `warning | src/Data/Migrations/20261113120000\_AddLines.cs:6 |
+  duplicates src/Data/Migrations/20261101120000\_Init.cs:6-34 (lines
+  6-34, 173 tokens) | duplication/duplicate-block`.
+- **The same pull request, with `exclude = ["**/Migrations/**"]` pushed
+  on top** (run 43445969436): "updated the qgate comment: no regressions
+  found". The comment (same id) now reads "No regressions found.", with
+  the marker `count=0 failing=0`.
+- **Pull request 16, migration and setting together** (run
+  43445792648), the case of D4: qgate printed "No regressions found."
+  and the comment step wrote nothing ("no findings and no qgate
+  comment"), as the pull request comment spec says. There is no comment
+  to read, which is why the setting was also pushed onto pull request
+  15.
+
 ## Risks / Trade-offs
 
 - **[A broad pattern hides real code]** `exclude = ["src"]` turns

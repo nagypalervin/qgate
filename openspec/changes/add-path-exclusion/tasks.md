@@ -19,7 +19,7 @@ checks; commit messages and PR bodies are written to files first.
 ## 3. README and rehearsal (PR 2, `change/add-path-exclusion-2`)
 
 - [x] 3.1 Every README install block, `uses:` and the pinned commit at 0.5.0; `grep` finds no `0.4.0` outside the roadmap row that names the C# release.
-- [ ] 3.2 In the GitHub rehearsal repository, run the README workflow (`@v0.5.0`) on a pull request that adds a migration repeating an older one, with and without `exclude = ["**/Migrations/**"]`; read both comments through the API and record them in `design.md`.
+- [x] 3.2 In the GitHub rehearsal repository, run the README workflow (`@v0.5.0`) on a pull request that adds a migration repeating an older one, with and without `exclude = ["**/Migrations/**"]`; read the comments through the API (a pull request with the setting from its first run gets none, so the setting is also pushed onto the one without it) and record them in `design.md`.
 
 ## Workflow follow-up
 
