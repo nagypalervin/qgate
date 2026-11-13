@@ -373,6 +373,9 @@ both, exit code 2, since unit names from two languages can never match.
 
   The designers and snapshots were skipped as intended; the migrations
   have no header, so they take part. Put to Ervin before 0.4.0 (D8).
+  **Ervin decided (2026-11-13):** 0.4.0 ships this way, with the README
+  saying so; the next change adds a general exclude list to
+  `qgate.toml`, which also covers other unwanted files.
 - **Names in practice:** signatures make some names long, for example
   `OrderStatusChangedToAwaitingValidationIntegrationEventHandler.Handle(OrderStatusChangedToAwaitingValidationIntegrationEvent)`;
   no reported name carried a `#2`.
@@ -414,8 +417,8 @@ in throwaway repositories, and asked for:
   two-file form; the header rule is "any comment before the first code"
   and both markers → fixed, and the spec's "TypeScript and JavaScript
   with each other" now reads "TypeScript with TypeScript".
-- **EF Core migrations report duplicates** → measured above, put to
-  Ervin.
+- **EF Core migrations report duplicates** → measured above; Ervin
+  chose to ship and follow up with an exclude list.
 - **Tests that no mutation failed:** the corpus routed by family, the
   family filter on deleted files, and the header check on corpus and
   deleted files → four tests; each of the four mutations now fails one.
@@ -439,8 +442,8 @@ in throwaway repositories, and asked for:
 - **[Generated files outside the convention]** EF Core migrations
   themselves have no header and repeat `CreateTable` blocks: a new
   migration reports about two duplicate Warnings (evaluation). → The
-  README says so; Ervin decides between shipping it that way and a
-  follow-up (an exclude list in `qgate.toml`).
+  README says so; an exclude list in `qgate.toml` is the next change
+  (Ervin's decision).
 - **[Grammar lag]** C# 13 and 14 syntax newer than the grammar (0.23.5,
   2025) is a syntax error, reported as "syntax the parser does not
   support yet". → The message already says so; the grammar is updated
