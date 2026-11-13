@@ -29,6 +29,7 @@ use clap::{Arg, ArgAction, ArgMatches, Command, ValueEnum, value_parser};
 use qgate_analyzers::architecture::{ArchitectureAnalyzer, ForbidRule};
 use qgate_analyzers::complexity::ComplexityAnalyzer;
 use qgate_analyzers::duplication::{ChangedSource, DuplicationIndex};
+use qgate_analyzers::patterns::PathPatterns;
 use qgate_analyzers::{Analyzer, FileChange};
 use qgate_config::Config;
 use qgate_core::{Finding, Location, Severity};
@@ -596,7 +597,9 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
         .changes(base, &head.revision)
         .map_err(|e| git_message(&e, base, &head))?;
     // Checked before any file is analyzed.
-    let architecture = architecture_analyzer(&load_config(&repo, base, &head)?)?;
+    let config = load_config(&repo, base, &head)?;
+    let architecture = architecture_analyzer(&config)?;
+    let selection = FileSelection::new(&config)?;
     let mut analyzers: Vec<&dyn Analyzer> = vec![&ComplexityAnalyzer];
     if !architecture.is_empty() {
         analyzers.push(&architecture);
@@ -608,12 +611,12 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
     // duplication, so moving it is not a new copy.
     let mut left = Vec::new();
     for file in files {
-        let Some(language) = language_of(&file.path) else {
+        let Some(language) = selection.language_of(&file.path) else {
             // Renamed from TypeScript to a language qgate does not read:
             // its old code left. (JavaScript renamed to JavaScript is
             // neither compared nor gone.)
             if let (Some(old), Some(id)) = (&file.old_path, &file.before) {
-                if language_of(old).is_some() {
+                if selection.language_of(old).is_some() {
                     left.push((old.clone(), id.clone()));
                 }
             }
@@ -624,16 +627,16 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
         // code left that family, as if renamed to a language qgate does not
         // read, and the file counts as added (design D7).
         if let (Some(old), Some(id)) = (&file.old_path, &file.before) {
-            let old_family = match language_of(old) {
+            let old_family = match selection.language_of(old) {
                 Some(old_language) => Some(old_language.family()),
-                None if is_javascript(old) => Some(Family::TypeScript),
+                None if selection.is_javascript(old) => Some(Family::TypeScript),
                 None => None,
             };
             if old_family.is_some_and(|family| family != language.family()) {
                 left.push((old.clone(), id.clone()));
             }
         }
-        match file_change(&repo, &file, language)? {
+        match file_change(&repo, &file, language, &selection)? {
             Some(Ok(change)) => {
                 for analyzer in &analyzers {
                     findings.extend(analyzer.analyze(&change));
@@ -661,6 +664,7 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
             &analyzed,
             &left,
             &changed_paths,
+            &selection,
         )?);
     }
     sort(&mut findings);
@@ -682,6 +686,7 @@ fn duplication(
     changes: &[FileChange],
     left: &[(String, BlobId)],
     changed_paths: &HashSet<String>,
+    selection: &FileSelection,
 ) -> Result<Vec<Finding>, String> {
     let mut reader = repo
         .blob_reader()
@@ -692,9 +697,9 @@ fn duplication(
     let mut gone: Vec<(String, Family, Vec<Token>)> = Vec::new();
     for (path, id) in left {
         // A deleted JavaScript file's code counts too, like a renamed one's.
-        let language = match language_of(path) {
+        let language = match selection.language_of(path) {
             Some(language) => language,
-            None if is_javascript(path) => Language::Tsx,
+            None if selection.is_javascript(path) => Language::Tsx,
             None => continue,
         };
         let tokens = match read_source(&mut reader, id)? {
@@ -711,7 +716,7 @@ fn duplication(
         .iter()
         .map(|change| change.path.to_string_lossy().into_owned())
         .collect();
-    let family_of = |path: &str| language_of(path).map(Language::family);
+    let family_of = |path: &str| selection.language_of(path).map(Language::family);
     // One index per family with an analyzed change.
     let mut indexes: Vec<(Family, DuplicationIndex)> = Vec::new();
     for family in [Family::TypeScript, Family::CSharp] {
@@ -746,7 +751,7 @@ fn duplication(
         if changed_paths.contains(&file.path) {
             continue;
         }
-        let Some(language) = language_of(&file.path) else {
+        let Some(language) = selection.language_of(&file.path) else {
             continue;
         };
         let Some((_, index)) = indexes.iter_mut().find(|(f, _)| *f == language.family()) else {
@@ -816,6 +821,7 @@ fn file_change(
     repo: &Repository,
     file: &ChangedFile,
     language: Language,
+    selection: &FileSelection,
 ) -> Result<Option<Result<FileChange, Finding>>, String> {
     let not_analyzed = |reason: String, line: Option<u32>| Finding {
         rule: UNPARSABLE_RULE.to_owned(),
@@ -851,7 +857,9 @@ fn file_change(
     let mut old_path = file.old_path.as_ref().map(PathBuf::from);
     // A file renamed from the other language family counts as added.
     let old_language = match &file.old_path {
-        Some(old) => language_of(old).filter(|l| l.family() == language.family()),
+        Some(old) => selection
+            .language_of(old)
+            .filter(|l| l.family() == language.family()),
         None => Some(language),
     };
     let before = match (&file.before, old_language) {
@@ -863,7 +871,10 @@ fn file_change(
         // any added file.
         (Some(id), None)
             if language.family() == Family::TypeScript
-                && file.old_path.as_deref().is_some_and(is_javascript) =>
+                && file
+                    .old_path
+                    .as_deref()
+                    .is_some_and(|old| selection.is_javascript(old)) =>
         {
             let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
             // The code it already had is not new either: its tokens count
@@ -957,6 +968,39 @@ fn language_of(path: &str) -> Option<Language> {
         .filter(|&language| {
             language != Language::CSharp || !qgate_lang::csharp_generated_name(path)
         })
+}
+
+/// Which files revision mode reads: those whose language qgate knows,
+/// minus the ones `[files] exclude` names (design D3 of
+/// `add-path-exclusion`). Every path, of a changed, renamed, deleted or
+/// unchanged file, goes through it, so an excluded path is unsupported
+/// everywhere.
+struct FileSelection {
+    exclude: PathPatterns,
+}
+
+impl FileSelection {
+    /// The selection the configuration asks for; an invalid pattern is a
+    /// configuration error.
+    fn new(config: &Config) -> Result<Self, String> {
+        let exclude = PathPatterns::new(&config.files.exclude)
+            .map_err(|e| format!("{CONFIG_FILE}: files.exclude: {e}"))?;
+        Ok(Self { exclude })
+    }
+
+    /// The language of a path that takes part, or `None`.
+    fn language_of(&self, path: &str) -> Option<Language> {
+        if self.exclude.matches(path) {
+            None
+        } else {
+            language_of(path)
+        }
+    }
+
+    /// Whether a path is a JavaScript file that takes part.
+    fn is_javascript(&self, path: &str) -> bool {
+        !self.exclude.matches(path) && is_javascript(path)
+    }
 }
 
 /// Whether one version of a file is generated C# by its header comment;
