@@ -18,15 +18,20 @@
 //! `/`-separated paths, where a pattern without glob characters also
 //! matches everything below it (`react` matches `react/jsx-runtime`), and
 //! `dir/**` also matches `dir`.
+//!
+//! C# files have no imports but `using` directives: a rule's
+//! `to_namespaces` ([`NamespacePatterns`]) matches the names they use,
+//! and `to` never does (design D5 of `add-csharp-architecture`).
 
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::fmt;
 use std::path::Path;
 
 use qgate_core::{Finding, Location, Severity};
 use qgate_lang::FileModel;
 
-use crate::patterns::PathPatterns;
+use crate::patterns::{InvalidPattern, NamespacePatterns, PathPatterns};
 // The spelling tests below call it directly.
 #[cfg(test)]
 use crate::patterns::normalize;
@@ -44,6 +49,8 @@ pub struct ForbidRule {
     pub from: Vec<String>,
     /// Patterns for import targets.
     pub to: Vec<String>,
+    /// Patterns for the namespaces C# `using` directives name.
+    pub to_namespaces: Vec<String>,
 }
 
 /// A pattern that is not a valid glob.
@@ -80,6 +87,7 @@ struct CompiledRule {
     name: String,
     from: PathPatterns,
     to: PathPatterns,
+    to_namespaces: NamespacePatterns,
 }
 
 impl ArchitectureAnalyzer {
@@ -92,10 +100,16 @@ impl ArchitectureAnalyzer {
         let rules = rules
             .iter()
             .map(|rule| {
+                let named = |e: InvalidPattern| PatternError {
+                    rule: rule.name.clone(),
+                    pattern: e.pattern,
+                    detail: e.detail,
+                };
                 Ok(CompiledRule {
                     name: rule.name.clone(),
                     from: compile(&rule.name, &rule.from)?,
                     to: compile(&rule.name, &rule.to)?,
+                    to_namespaces: NamespacePatterns::new(&rule.to_namespaces).map_err(named)?,
                 })
             })
             .collect::<Result<_, PatternError>>()?;
@@ -109,7 +123,9 @@ impl ArchitectureAnalyzer {
     }
 
     /// The violations of one version of a file: for each (rule index,
-    /// target), the line and specifier of the first import of the target.
+    /// target), the line of the first import or using of the target and
+    /// how the finding shows it. A file has imports (TypeScript) or usings
+    /// (C#), never both, so the two kinds of target cannot meet in a key.
     fn violations(
         &self,
         path: &str,
@@ -124,10 +140,25 @@ impl ArchitectureAnalyzer {
                 let Some(target) = target(path, &import.specifier) else {
                     continue;
                 };
-                if rule.to.matches(&target) {
+                if !rule.to.matches(&target) {
+                    continue;
+                }
+                // The first import of the target wins.
+                if let Entry::Vacant(slot) = found.entry((index, target)) {
+                    let target = &slot.key().1;
+                    let shown = if import.specifier == *target {
+                        format!("imports {target}")
+                    } else {
+                        format!("imports {target} (\"{}\")", import.specifier)
+                    };
+                    slot.insert((import.line, shown));
+                }
+            }
+            for using in &model.usings {
+                if rule.to_namespaces.matches(&using.name) {
                     found
-                        .entry((index, target))
-                        .or_insert_with(|| (import.line, import.specifier.clone()));
+                        .entry((index, using.name.clone()))
+                        .or_insert_with(|| (using.line, format!("uses {}", using.name)));
                 }
             }
         }
@@ -150,27 +181,17 @@ impl Analyzer for ArchitectureAnalyzer {
         self.violations(&path, &change.after)
             .into_iter()
             .filter(|(key, _)| !base.contains_key(key))
-            .map(|((index, target), (line, specifier))| {
-                let shown = if specifier == target {
-                    target
-                } else {
-                    format!("{target} (\"{specifier}\")")
-                };
-                Finding {
-                    rule: RULE.to_owned(),
-                    severity: Severity::Error,
-                    message: format!(
-                        "imports {shown}, forbidden by \"{}\"",
-                        self.rules[index].name
-                    ),
-                    location: Location {
-                        path: change.path.clone(),
-                        line: Some(line),
-                        end_line: None,
-                    },
-                    metric: None,
-                    related: Vec::new(),
-                }
+            .map(|((index, _), (line, shown))| Finding {
+                rule: RULE.to_owned(),
+                severity: Severity::Error,
+                message: format!("{shown}, forbidden by \"{}\"", self.rules[index].name),
+                location: Location {
+                    path: change.path.clone(),
+                    line: Some(line),
+                    end_line: None,
+                },
+                metric: None,
+                related: Vec::new(),
             })
             .collect()
     }
@@ -229,12 +250,34 @@ mod tests {
 
     use super::*;
 
+    fn strings(items: &[&str]) -> Vec<String> {
+        items.iter().map(|&s| s.to_owned()).collect()
+    }
+
     fn rule(name: &str, from: &[&str], to: &[&str]) -> ForbidRule {
         ForbidRule {
             name: name.to_owned(),
-            from: from.iter().map(|&s| s.to_owned()).collect(),
-            to: to.iter().map(|&s| s.to_owned()).collect(),
+            from: strings(from),
+            to: strings(to),
+            to_namespaces: Vec::new(),
         }
+    }
+
+    fn namespace_rule(name: &str, from: &[&str], to_namespaces: &[&str]) -> ForbidRule {
+        ForbidRule {
+            name: name.to_owned(),
+            from: strings(from),
+            to: Vec::new(),
+            to_namespaces: strings(to_namespaces),
+        }
+    }
+
+    fn domain_uses_no_infrastructure() -> ForbidRule {
+        namespace_rule(
+            "domain-is-pure",
+            &["src/Shop.Domain/**"],
+            &["Shop.Infrastructure", "Microsoft.EntityFrameworkCore"],
+        )
     }
 
     fn domain_is_pure() -> ForbidRule {
@@ -250,11 +293,23 @@ mod tests {
         before: &str,
         after: &str,
     ) -> Vec<(u32, String)> {
+        run_in(Language::TypeScript, rules, old_path, path, before, after)
+    }
+
+    /// [`run`] for sources in `language`.
+    fn run_in(
+        language: Language,
+        rules: &[ForbidRule],
+        old_path: Option<&str>,
+        path: &str,
+        before: &str,
+        after: &str,
+    ) -> Vec<(u32, String)> {
         let change = FileChange {
             path: PathBuf::from(path),
             old_path: old_path.map(PathBuf::from),
-            before: parse(Language::TypeScript, before).expect("before parses"),
-            after: parse(Language::TypeScript, after).expect("after parses"),
+            before: parse(language, before).expect("before parses"),
+            after: parse(language, after).expect("after parses"),
         };
         ArchitectureAnalyzer::new(rules)
             .expect("valid rules")
@@ -277,6 +332,19 @@ mod tests {
                 $path,
                 include_str!(concat!("../fixtures/architecture/", $case, "/before.ts")),
                 include_str!(concat!("../fixtures/architecture/", $case, "/after.ts")),
+            )
+        };
+    }
+
+    macro_rules! cs_fixture {
+        ($rules:expr, $old:expr, $path:expr, $case:literal) => {
+            run_in(
+                Language::CSharp,
+                $rules,
+                $old,
+                $path,
+                include_str!(concat!("../fixtures/architecture/", $case, "/before.cs")),
+                include_str!(concat!("../fixtures/architecture/", $case, "/after.cs")),
             )
         };
     }
@@ -629,6 +697,139 @@ mod tests {
         assert_eq!(messages.len(), 2, "{messages:?}");
         assert!(messages[0].ends_with("\"domain-is-pure\""));
         assert!(messages[1].ends_with("\"no-buttons\""));
+    }
+
+    // C# usings (add-csharp-architecture)
+
+    // "Domain using the infrastructure"
+    #[test]
+    fn domain_using_the_infrastructure() {
+        assert_eq!(
+            cs_fixture!(
+                &[domain_uses_no_infrastructure()],
+                None,
+                "src/Shop.Domain/Order.cs",
+                "csharp_new_using"
+            ),
+            [finding(
+                2,
+                "uses Shop.Infrastructure.Data, forbidden by \"domain-is-pure\""
+            )]
+        );
+        // Outside `from`.
+        assert_eq!(
+            cs_fixture!(
+                &[domain_uses_no_infrastructure()],
+                None,
+                "src/Shop.Web/Order.cs",
+                "csharp_new_using"
+            ),
+            []
+        );
+    }
+
+    // "Existing using, written another way"
+    #[test]
+    fn existing_using_written_another_way() {
+        assert_eq!(
+            cs_fixture!(
+                &[domain_uses_no_infrastructure()],
+                None,
+                "src/Shop.Domain/Order.cs",
+                "csharp_existing"
+            ),
+            []
+        );
+    }
+
+    // "Moved within the domain" and "Moved into the domain", for C#.
+    #[test]
+    fn renamed_csharp_files() {
+        let rules = [domain_uses_no_infrastructure()];
+        assert_eq!(
+            cs_fixture!(
+                &rules,
+                Some("src/Shop.Domain/Order.cs"),
+                "src/Shop.Domain/Sales/Order.cs",
+                "csharp_existing"
+            ),
+            []
+        );
+        assert_eq!(
+            cs_fixture!(
+                &rules,
+                Some("src/Shop.Application/Order.cs"),
+                "src/Shop.Domain/Order.cs",
+                "csharp_existing"
+            ),
+            [finding(
+                1,
+                "uses Shop.Infrastructure.Data, forbidden by \"domain-is-pure\""
+            )]
+        );
+    }
+
+    // "Same namespace used twice"
+    #[test]
+    fn same_namespace_used_twice() {
+        assert_eq!(
+            cs_fixture!(
+                &[domain_uses_no_infrastructure()],
+                None,
+                "src/Shop.Domain/Order.cs",
+                "csharp_twice"
+            ),
+            [finding(
+                1,
+                "uses Microsoft.EntityFrameworkCore, forbidden by \"domain-is-pure\""
+            )]
+        );
+    }
+
+    // "Each list applies to its language"
+    #[test]
+    fn each_list_applies_to_its_language() {
+        // A path pattern that would match any C# name, and a namespace
+        // pattern that would match any TypeScript target.
+        let rules = [
+            rule("imports", &["src/**"], &["**"]),
+            namespace_rule("usings", &["src/**"], &["**"]),
+        ];
+        let messages: Vec<String> = fixture!(&rules, None, "src/domain/order.ts", "new_import")
+            .into_iter()
+            .map(|(_, m)| m)
+            .collect();
+        assert_eq!(
+            messages,
+            ["imports src/ui/Button (\"../ui/Button\"), forbidden by \"imports\""]
+        );
+        let messages: Vec<String> = cs_fixture!(&rules, None, "src/Order.cs", "csharp_new_using")
+            .into_iter()
+            .map(|(_, m)| m)
+            .collect();
+        assert_eq!(
+            messages,
+            ["uses Shop.Infrastructure.Data, forbidden by \"usings\""]
+        );
+    }
+
+    // "Empty segment": the rule is named, as for `from` and `to`.
+    #[test]
+    fn invalid_namespace_pattern() {
+        let error = ArchitectureAnalyzer::new(&[namespace_rule(
+            "domain-is-pure",
+            &["src/**"],
+            &["Shop..Infrastructure"],
+        )])
+        .expect_err("invalid pattern");
+        assert_eq!(error.rule, "domain-is-pure");
+        assert_eq!(error.pattern, "Shop..Infrastructure");
+        assert!(
+            error
+                .to_string()
+                .starts_with("rule \"domain-is-pure\": invalid pattern \"Shop..Infrastructure\": "),
+            "{error}"
+        );
     }
 
     #[test]

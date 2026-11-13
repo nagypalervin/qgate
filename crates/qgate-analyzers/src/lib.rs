@@ -8,14 +8,15 @@
 //!
 //! - [`complexity`]: per-function cyclomatic complexity increase, and new
 //!   functions that are already complex.
-//! - [`architecture`]: imports a change introduces against a forbid rule.
+//! - [`architecture`]: imports and C# usings a change introduces against
+//!   a forbid rule.
 //! - [`duplication`]: blocks a change newly duplicates. A repository-level
 //!   analysis with its own index rather than an [`Analyzer`].
 //!
 //! Shared with the CLI:
 //!
 //! - [`patterns`]: path patterns, for architecture rules and the
-//!   `[files] exclude` setting.
+//!   `[files] exclude` setting, and namespace patterns for C# rules.
 //!
 //! Planned:
 //!

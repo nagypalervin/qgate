@@ -34,6 +34,7 @@ pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, Parse
     Ok(FileModel {
         functions,
         imports,
+        usings: Vec::new(),
         tokens,
     })
 }
@@ -1048,6 +1049,8 @@ mod tests {
                 ("./m2", 44),
             ]
         );
+        // Usings are C#'s.
+        assert_eq!(model.usings, []);
     }
 
     #[test]

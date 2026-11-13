@@ -3,7 +3,8 @@
 use std::fmt;
 
 /// Everything qgate extracted from one source file: its function units,
-/// its imports (TypeScript only) and its normalized tokens.
+/// its imports (TypeScript only), its usings (C# only) and its normalized
+/// tokens.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileModel {
     /// Function units in source order. Qualified names are unique within
@@ -11,6 +12,9 @@ pub struct FileModel {
     pub functions: Vec<Function>,
     /// Imports in source order, wherever they appear in the file.
     pub imports: Vec<Import>,
+    /// `using` directives in source order, wherever they appear in the
+    /// file (design D1 of `add-csharp-architecture`).
+    pub usings: Vec<Using>,
     /// The file's code as normalized tokens, in source order, for
     /// comparing code: see [`Token`].
     pub tokens: Vec<Token>,
@@ -43,6 +47,19 @@ pub struct Import {
     /// `../ui/Button` or `react`. Escapes are not decoded.
     pub specifier: String,
     /// 1-based line of the specifier's string literal.
+    pub line: u32,
+}
+
+/// One C# `using` directive that names a namespace or type: plain,
+/// `global`, `static` or an alias. `using` statements are not directives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Using {
+    /// The name it uses, normalized: without `global::`, the `@` of
+    /// verbatim identifiers, whitespace, comments and type arguments,
+    /// e.g. `Shop.Infrastructure.Data`. Not resolved against an enclosing
+    /// namespace.
+    pub name: String,
+    /// 1-based line where the directive starts.
     pub line: u32,
 }
 
