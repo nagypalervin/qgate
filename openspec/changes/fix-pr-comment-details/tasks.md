@@ -6,11 +6,12 @@ written to files first.
 
 ## 1. Fixes and version (PR 1, `change/fix-pr-comment-details`)
 
-- [ ] 1.1 Write failing unit tests in `crates/qgate-report/src/markdown.rs` (design D1):
+- [x] 1.1 Write failing unit tests in `crates/qgate-report/src/markdown.rs` (design D1):
   - a duplicate whose only related location the message names: no "also at";
   - a duplicate with "and 2 more": the named copy left out, the other two listed;
   - `src/a.ts:1` kept when the message names `src/a.ts:10-19`, and `src/a.ts:10` left out;
   - a location named at the very end of the message left out;
+  - `src/a.ts:1` kept when the message names `lib/src/a.ts:1-6` (added, design D1);
   - a related location without a line always listed.
 
   Then change `finding_text` until they pass. Check that the existing CLI test of the Markdown report still holds.

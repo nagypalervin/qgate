@@ -28,10 +28,11 @@ formats, or the Azure script's other messages.
 ### D1. Leave out a related location the message names
 
 A related location with a line is left out when the message contains
-`<path>:<line>` followed by a character that is not an ASCII digit, or
-at the end. Plain substring search, no regular expression, so a path's
-characters need no escaping. A location without a line is always
-listed (the message cannot name it by the same form).
+`<path>:<line>` at its start or after whitespace, followed by a
+character that is not an ASCII digit, or at the end. Plain substring
+search, no regular expression, so a path's characters need no
+escaping. A location without a line is always listed (the message
+cannot name it by the same form).
 
 - **Why text, not the rule id:** the report crate stays free of
   analyzer knowledge, and any later finding that names a location in
@@ -40,6 +41,12 @@ listed (the message cannot name it by the same form).
   locations, so the message is the only place it names the copy.
 - **Why the digit check:** `src/a.ts:1` must not match
   `src/a.ts:10-19`.
+- **Why the check before it** (added during task 1.1; the proposal had
+  only the digit check): `src/a.ts:1` must not match `lib/src/a.ts:1-6`
+  either, since a duplicate's copies can sit in such paths. Whitespace
+  or the start is the only boundary accepted, so a path quoted any
+  other way, such as `(src/a.ts:1)`, is listed again: at worst the
+  row repeats a location, as before this change, and never loses one.
 - **Only Markdown.** JSON keeps every related location, as data.
 
 ### D2. The identity in the Azure hint

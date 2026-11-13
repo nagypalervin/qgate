@@ -13,7 +13,8 @@ finding's path, message or rule contains:
 The Location cell SHALL be `<path>:<line>`, or `<path>` for a finding
 without a line. A finding's related locations SHALL be listed in its
 Finding cell after the message, except one whose `<path>:<line>` the
-message already names, followed by a character that is not a digit.
+message already names: at the start of the message or after
+whitespace, and not followed by a digit.
 
 #### Scenario: A message with table and HTML characters
 
@@ -38,3 +39,9 @@ message already names, followed by a character that is not a digit.
 - **GIVEN** a finding whose message names `src/a.ts:10-19` and whose related locations are `src/a.ts` line 1 and `src/a.ts` line 10
 - **WHEN** the Markdown report is rendered
 - **THEN** the Finding cell lists `src/a.ts:1` after the message, and not `src/a.ts:10`
+
+#### Scenario: A path the message names only as part of a longer path
+
+- **GIVEN** a finding whose message names `lib/src/a.ts:1-6` and whose related locations are `lib/src/a.ts` line 1 and `src/a.ts` line 1
+- **WHEN** the Markdown report is rendered
+- **THEN** the Finding cell lists `src/a.ts:1` after the message, and not `lib/src/a.ts:1`
