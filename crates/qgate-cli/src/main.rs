@@ -809,8 +809,7 @@ fn architecture_analyzer(config: &Config) -> Result<ArchitectureAnalyzer, String
             name: rule.name.clone(),
             from: rule.from.clone(),
             to: rule.to.clone().unwrap_or_default(),
-            // Read from the configuration in task 1.4.
-            to_namespaces: Vec::new(),
+            to_namespaces: rule.to_namespaces.clone().unwrap_or_default(),
         })
         .collect();
     ArchitectureAnalyzer::new(&rules).map_err(|e| format!("{CONFIG_FILE}: {e}"))
