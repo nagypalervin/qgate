@@ -1427,3 +1427,22 @@ fn invalid_configuration_on_disk() {
     let err = failed(&repo.qgate(&["--base", "HEAD~1", "--worktree"]));
     assert!(err.contains("qgate.toml"), "{err}");
 }
+
+// C# stays off in the CLI until PR 2 of `add-csharp-analysis` wires it in;
+// PR 2 replaces this test with the C# scenarios of `revision-input`.
+#[test]
+fn csharp_files_are_not_analyzed_yet() {
+    let repo = Repo::new();
+    repo.write("src/Cart.cs", "class Cart { int F(int a) { return a; } }\n");
+    repo.commit("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    let complex = "if (a > 0) { a++; } ".repeat(12);
+    repo.write(
+        "src/Cart.cs",
+        format!("class Cart {{ int F(int a) {{ {complex}return a; }} }}\n"),
+    );
+    repo.commit("feature");
+    let out = repo.qgate(&["--base", "main"]);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(0));
+}

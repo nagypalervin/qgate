@@ -33,7 +33,7 @@ use qgate_analyzers::{Analyzer, FileChange};
 use qgate_config::Config;
 use qgate_core::{Finding, Location, Severity};
 use qgate_git::{BlobId, BlobReader, ChangedFile, Changes, GitError, Repository};
-use qgate_lang::{FileModel, Language, ParseError, Token};
+use qgate_lang::{Family, FileModel, Language, ParseError, Token};
 use qgate_report::{
     ReportSummary, render_azure, render_github, render_json, render_markdown, render_text,
 };
@@ -871,12 +871,19 @@ fn is_javascript(path: &str) -> bool {
         .is_some_and(|ext| matches!(ext, "js" | "jsx" | "mjs" | "cjs"))
 }
 
+/// The language qgate analyzes for an extension. C# stays off until PR 2
+/// of `add-csharp-analysis` wires it in (generated files, one duplication
+/// index per language family).
+fn supported(ext: &str) -> Option<Language> {
+    Language::from_extension(ext).filter(|language| language.family() == Family::TypeScript)
+}
+
 /// The language of a path, from its extension.
 fn language_of(path: &str) -> Option<Language> {
     Path::new(path)
         .extension()
         .and_then(|ext| ext.to_str())
-        .and_then(Language::from_extension)
+        .and_then(supported)
 }
 
 /// The message for a git error. An unknown `base` gets the shallow-clone
@@ -913,7 +920,7 @@ fn load(path: &Path) -> Result<FileModel, String> {
     let language = path
         .extension()
         .and_then(|ext| ext.to_str())
-        .and_then(Language::from_extension)
+        .and_then(supported)
         .ok_or_else(|| {
             format!("{shown}: unsupported file type (expected .ts, .mts, .cts or .tsx)")
         })?;
