@@ -132,11 +132,15 @@ mod tests {
 
     /// Run the analyzer on a before/after fixture pair.
     fn run(before: &str, after: &str) -> Vec<Finding> {
+        run_in(Language::TypeScript, before, after)
+    }
+
+    fn run_in(language: Language, before: &str, after: &str) -> Vec<Finding> {
         let change = FileChange {
             path: PathBuf::from(PATH),
             old_path: None,
-            before: parse(Language::TypeScript, before).expect("before parses"),
-            after: parse(Language::TypeScript, after).expect("after parses"),
+            before: parse(language, before).expect("before parses"),
+            after: parse(language, after).expect("after parses"),
         };
         ComplexityAnalyzer.analyze(&change)
     }
@@ -242,6 +246,26 @@ mod tests {
         assert_eq!(
             fixture!("rename"),
             vec![new(Severity::Warning, "calculateTotal", 3, 12)]
+        );
+    }
+
+    // complexity-analysis: "A C# method that got more complex";
+    // csharp-analysis: "An overload added above".
+    #[test]
+    fn csharp_methods() {
+        assert_eq!(
+            run_in(
+                Language::CSharp,
+                include_str!("../fixtures/complexity/csharp/before.cs"),
+                include_str!("../fixtures/complexity/csharp/after.cs"),
+            ),
+            vec![
+                // the new overload `Cart.Total(string)` (4) is not reported,
+                // and `Cart.Total(int)` is still matched by its signature
+                increase(Severity::Warning, "Cart.Total(int)", 14, 3, 5),
+                increase(Severity::Error, "Cart.Shipping(string)", 23, 2, 7),
+                new(Severity::Warning, "Cart.Report(int[])", 33, 11),
+            ]
         );
     }
 

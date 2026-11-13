@@ -206,8 +206,19 @@ Counted node kinds:
     follow-up could add the first.
 - **CLI, by name:** a file is skipped before it is read: changed files,
   the corpus and the base side.
-- **CLI, by header:** checked on the head version of a changed file and
-  on each corpus file; a skipped file is neither analyzed nor indexed.
+- **CLI, by header:** checked on both versions of a changed file, on
+  each corpus file and on each deleted file; a skipped file is neither
+  analyzed nor indexed.
+- **Which version decides** (review of PR 2): each version by its own
+  name and header. A generated head version is skipped, and its base
+  code counts as code that left (as for a file renamed to a generated
+  name), so moving that code elsewhere is no new copy. A generated base
+  version is no base, so the file counts as added: its units are new,
+  as for a file renamed from a `.Designer.cs`.
+- **Encoding:** the header is checked on a lossy UTF-8 decode, so a
+  generated file with a Latin-1 byte further down is still skipped
+  (review of PR 2: it was `input/unparsable`). A UTF-16 file is not
+  recognized and stays "not valid UTF-8".
 - **Two-file form:** analyzes what it is given; skipping is a
   revision-mode rule.
 - **Why in `qgate-lang`:** it is knowledge about C#, and the CLI stays
@@ -222,6 +233,11 @@ Counted node kinds:
   findings, which the report sorts as before. The analyzer is unchanged.
 - **Why:** tokens of two languages can coincide (`$id ( $id ) { return
   $id . ...`), and a TypeScript file can never reuse a C# copy anyway.
+- **Renames across families** (review of PR 2): a `.cs` file renamed to
+  `.ts` or the reverse, or a `.js` file renamed to `.cs`, counts as
+  added, and its old code as code that left its own family, like a
+  rename from a language qgate does not read. Before, the C# base was
+  compared with the TypeScript head.
 
 ### D7. The two-file form
 
@@ -282,6 +298,88 @@ both, exit code 2, since unit names from two languages can never match.
   already says "or syntax the parser does not support yet"; the
   evaluation (D8) shows whether a better line is worth a change.
 
+## Evaluation (task 2.4, 2026-11-13)
+
+- **Binary:** this branch at 815d341, release build (aarch64 Linux).
+- **Repositories:** `dotnet/eShop` (head 913acea, 2026-10-15) and
+  `jasontaylordev/CleanArchitecture` (head e1ab4cc, 2026-11-09), full
+  clones.
+- **Commits:**
+  - eShop squashes its pull requests (2 merge commits in 349), so both
+    repositories used the last 30 first-parent commits that change a
+    `.cs` file;
+  - each ran as `qgate check --base <commit>^1 --head <commit> --format
+    json`;
+  - script and raw results: `eval-scripts/` in the agent's scratchpad.
+
+| | eShop | CleanArchitecture |
+|---|---|---|
+| `.cs` files changed (not deleted) | 168 | 146 |
+| skipped as generated, by name / by header | 0 / 1 (`Protos/Basket.cs`, protobuf) | 0 / 0 |
+| `input/unparsable` | 1 | 4 (2 files) |
+| `complexity/cyclomatic-increase` | 19 | 6 (4 in `.cs`) |
+| `duplication/duplicate-block` | 8 (2 in `.ts`) | 14 |
+| run time per commit, median / max | 0.11 s / 0.13 s | 0.03 s / 0.05 s |
+| exit codes | 30 × 0 | 30 × 0 |
+
+- **Unparsable files, by cause:**
+  - **`#if` inside an expression** (the known limitation):
+    `src/ClientApp/MauiProgram.cs` puts `#if !WINDOWS` /
+    `.UseMauiMaps()` / `#endif` into a fluent call chain.
+  - **`#if` branches that close a block** (the known limitation):
+    `tests/Application.FunctionalTests/CustomWebApplicationFactory.cs`
+    closes `});` inside its `#else` branch. Two findings, in two
+    commits, one of them for the base version.
+  - **Template sources, not C#:** two
+    `templates/ca-use-case/.../CleanArchitectureUseCase.cs` files hold
+    `//#if (hasReturnType)` markers of `dotnet new` around two record
+    headers; as written they are not valid C#, so unparsable is right.
+  - **Rate:** 5 findings on 314 changed files, 4 distinct files. No
+    cause affects many files, so nothing changes before 0.4.0.
+- **Ten findings checked by hand against the diff,** all correct:
+  - **Complexity:**
+    - `PaginatedList<T>.HasPreviousPage.get` 1 → 2: an `&&`;
+    - `CreateTodoListCommandHandler.Handle(...)` 1 → 2: a `??`;
+    - `CatalogContextSeed.SeedAsync(CatalogContext)` 4 → 8: `??`, two
+      `&&`, `?[]`;
+    - `WebNavigatingEventArgsConverter.Convert(...)` 2 → 3: `if` and a
+      new `??`;
+    - `Extensions.UseDefaultOpenApi(this WebApplication)` 3 → 5: `?:`
+      and `foreach`;
+    - the `ChatState` constructor 2 → 3: a `?.`.
+  - **Duplication:** renamed copies between
+    - `WebAppComponents` and `HybridApp` `CatalogService.cs` (132
+      tokens);
+    - two services' `Program.cs` (64 tokens, a byte order mark at the
+      start);
+    - `TodoLists.cs` and `TodoItems.cs` endpoints (179 tokens);
+    - `DeleteTodoListTests` and `DeleteTodoItemTests` (69 tokens).
+    A block can start at the last token of a line that only ends like
+    its copy (`TodoLists.cs:24`), as in TypeScript.
+- **Generated files in the repositories:** eShop has 15 `.cs` files
+  with a header marker: 9 EF Core migration designers that are also
+  generated by name, 4 model snapshots and 2 protobuf files.
+  CleanArchitecture has none. The "skipped as generated" row above was
+  counted by the evaluation script's own copy of the rule (`run.py`),
+  not read from the binary, which reports nothing for a skipped file.
+- **EF Core migrations themselves** (review of PR 2): none of the 30
+  commits touched one, so the risk below was not answered. Two more
+  eShop commits, run the same way:
+  - `b9af96e` adds one migration,
+    `20240106121712_UseEnumForOrderStatus.cs`: 2 `duplicate-block`
+    Warnings, against the Ordering and the Catalog `Initial` migrations;
+  - `fc61f90`, the initial commit, adds 6 migrations: 15 Warnings
+    between them.
+
+  The designers and snapshots were skipped as intended; the migrations
+  have no header, so they take part. Put to Ervin before 0.4.0 (D8).
+  **Ervin decided (2026-11-13):** 0.4.0 ships this way, with the README
+  saying so; the next change adds a general exclude list to
+  `qgate.toml`, which also covers other unwanted files.
+- **Names in practice:** signatures make some names long, for example
+  `OrderStatusChangedToAwaitingValidationIntegrationEventHandler.Handle(OrderStatusChangedToAwaitingValidationIntegrationEvent)`;
+  no reported name carried a `#2`.
+
 ## Review of PR 1
 
 The `reviewer` subagent compared TypeScript's `parse()` before and after
@@ -309,6 +407,31 @@ snippets) without a difference, and asked for:
   `tree-sitter-language`, the grammar has the build dependency `cc`,
   which `tree-sitter-typescript` already brings.
 
+## Review of PR 2
+
+The `reviewer` subagent ran mutations of the new CLI code and edge cases
+in throwaway repositories, and asked for:
+- **`qgate check --help`** still naming TypeScript only → fixed.
+- **README:** unchanged `.js` files are never compared, contrary to
+  "TypeScript and JavaScript together"; duplication does not run in the
+  two-file form; the header rule is "any comment before the first code"
+  and both markers → fixed, and the spec's "TypeScript and JavaScript
+  with each other" now reads "TypeScript with TypeScript".
+- **EF Core migrations report duplicates** → measured above; Ervin
+  chose to ship and follow up with an exclude list.
+- **Tests that no mutation failed:** the corpus routed by family, the
+  family filter on deleted files, and the header check on corpus and
+  deleted files → four tests; each of the four mutations now fails one.
+- **A generated file that is not UTF-8** was `input/unparsable` → D5.
+- **Nits:**
+  - a file that becomes generated lost its base code, and the spec did
+    not say which version decides → D5, the new requirement "Versions
+    of a generated file" with a test for each scenario;
+  - renames across families → D6;
+  - CLI tests for "Branches that open blocks", a generated file in the
+    working tree and one that does not parse → added;
+  - the evaluation's generated-file counts → corrected above.
+
 ## Risks / Trade-offs
 
 - **[`#if` the grammar cannot place]** Branches that each open a block,
@@ -316,10 +439,11 @@ snippets) without a difference, and asked for:
   or a base list, around a modifier or around an `else if`: such files
   get `input/unparsable`. → The evaluation counts them; tree-sitter
   cannot pick a branch, and a preprocessor pass is a change of its own.
-- **[Generated files outside the convention]** For example EF Core
-  migrations themselves, which have no header and may repeat
-  `CreateTable` blocks. → The evaluation shows whether they report
-  duplicates; an exclude list in `qgate.toml` would be the follow-up.
+- **[Generated files outside the convention]** EF Core migrations
+  themselves have no header and repeat `CreateTable` blocks: a new
+  migration reports about two duplicate Warnings (evaluation). → The
+  README says so; an exclude list in `qgate.toml` is the next change
+  (Ervin's decision).
 - **[Grammar lag]** C# 13 and 14 syntax newer than the grammar (0.23.5,
   2025) is a syntax error, reported as "syntax the parser does not
   support yet". → The message already says so; the grammar is updated

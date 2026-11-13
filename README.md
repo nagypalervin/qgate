@@ -2,11 +2,12 @@
 
 **Detects where your codebase starts to break under fast, AI-assisted development.**
 
-> Status: early. `qgate check` compares TypeScript code between two git
-> revisions (or two files) for cyclomatic complexity, newly duplicated
-> code and, with a [`qgate.toml`](#architecture-rules-qgatetoml),
-> forbidden imports. It reports on pull requests in GitHub Actions and
-> Azure Pipelines; more analyzers follow the [roadmap](#roadmap) below.
+> Status: early. `qgate check` compares TypeScript and [C#](#c) code
+> between two git revisions (or two files) for cyclomatic complexity,
+> newly duplicated code and, in TypeScript with a
+> [`qgate.toml`](#architecture-rules-qgatetoml), forbidden imports. It
+> reports on pull requests in GitHub Actions and Azure Pipelines; more
+> analyzers follow the [roadmap](#roadmap) below.
 
 ## Try it
 
@@ -74,17 +75,18 @@ Or build it from a clone of this repository, with Rust 1.85 or later:
 cargo install --locked --path crates/qgate-cli
 ```
 
-Then, in a git repository with TypeScript code, check what your branch
-changed compared with `main`:
+Then, in a git repository with TypeScript or C# code, check what your
+branch changed compared with `main`:
 
 ```sh
 qgate check --base main
 ```
 
 qgate compares the merge base of `main` and `HEAD` with `HEAD` (what a
-pull request shows) and analyzes every changed `.ts`, `.mts`, `.cts` and
-`.tsx` file. `--head <rev>` checks another revision instead of `HEAD`,
-and `--worktree` checks your uncommitted work (see
+pull request shows) and analyzes every changed `.ts`, `.mts`, `.cts`,
+`.tsx` and `.cs` file, except generated C# files (see [C#](#c)).
+`--head <rev>` checks another revision instead of `HEAD`, and
+`--worktree` checks your uncommitted work (see
 [below](#checking-uncommitted-work)). Paths in the output are relative to
 the repository root.
 
@@ -118,7 +120,8 @@ Exit codes:
   line on standard error says why the run failed, for example
   `qgate: failing: 1 finding at or above "error" (see --fail-on)`;
 - `2`: the check could not run, for example: an invalid invocation, an
-  unsupported or unparsable file in the two-file form, an unknown revision,
+  unsupported or unparsable file in the two-file form, a C# file compared
+  with a TypeScript file, an unknown revision,
   revisions without a merge base, a directory outside a git repository, or
   no `git` on the `PATH`. This wins over `1`.
 
@@ -411,7 +414,8 @@ src/orders/total.ts:1 complexity/cyclomatic-increase
 ### Duplicated code
 
 In `--base` mode qgate compares the code a change adds with every
-TypeScript file of the checked revision and reports a new copy:
+TypeScript file of the checked revision, or for C# with every C# file,
+and reports a new copy:
 
 ```
 warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 tokens)  [duplication/duplicate-block]
@@ -421,7 +425,10 @@ warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 
   - variable names and literal values are ignored, so a helper copied
     under other names is still a copy;
   - member names (`.getFullYear`), keywords and operators are compared;
-  - comments, semicolons, imports and type annotations are ignored.
+  - comments and semicolons are ignored, and so are imports and type
+    annotations in TypeScript, and `using` directives, namespace
+    declarations and preprocessor directives in C#. C# types are
+    compared like other names.
 - **Copies across files only.** A block counts when it occurs in two or
   more files; repetition within one file (a data table, similar test
   cases one after another) does not.
@@ -437,7 +444,7 @@ warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 
 ### Architecture rules (`qgate.toml`)
 
 Put a `qgate.toml` at the repository root to forbid imports between parts
-of your code:
+of your TypeScript code (C# `using` directives are not checked yet):
 
 ```toml
 [[architecture.forbid]]
@@ -490,6 +497,51 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
   TypeScript grammar
   cannot parse yet (`export type * from`, `import("./x").Foo<T>`), which
   are reported as `input/unparsable` instead.
+
+### C#
+
+`.cs` files get the complexity check in every form and the duplication
+check in `--base` and `--worktree` mode, and so in the Claude Code hook
+and the MCP server, which run the same check. Architecture rules do not
+apply to C# yet: a `using` names a namespace, not a file, so it needs
+rules of its own.
+
+- **Units and names.** Methods, constructors, finalizers, operators,
+  local functions and property, indexer and event accessors with a body
+  are measured; lambdas count towards the unit they are in. A unit is
+  named by its types and its signature, without the namespace:
+  `Cart.Total(int)`, `Cart.Owner.get`, `Result<T>.Ok()`,
+  `Cart.Total(int).Twice(int)` for a local function. So an overload
+  added above another keeps both names, and moving a file to another
+  namespace changes nothing. Changing a parameter's type makes the
+  method new, like a rename.
+- **Decision points:** `if`, `for`, `foreach`, `while`, `do`, each `case`
+  label, each switch expression arm except `_`, `when`, `catch`, `?:`,
+  `&&`, `||`, `??`, `??=`, `?.`, `?[]`, and the patterns `and` and `or`.
+  Unlike TypeScript, optional parameter values do not count: the caller
+  passes them.
+- **Generated files are skipped** in `--base` and `--worktree` mode, by
+  Roslyn's convention: names ending in `.Designer.cs`, `.generated.cs`,
+  `.g.cs` or `.g.i.cs`, names starting with `TemporaryGeneratedFile_`,
+  and files with an `<auto-generated` or `<autogenerated` comment
+  before their first code (such as EF Core migration designers and
+  model snapshots). They are neither analyzed nor compared, and a
+  generated base version counts as no base: a file that stops being
+  generated is new. The two-file form analyzes the files it is given.
+- **EF Core migrations themselves are not generated** by this
+  convention: they have no header, so they are analyzed, and a new
+  migration that repeats an older one's table definitions is reported
+  as a copy (a Warning).
+- **Preprocessor directives are not evaluated.** The code of every `#if`
+  branch counts, and a directive's condition does not. A file is
+  reported as `input/unparsable` where `#if` splits code the parser
+  cannot read: branches that each open or close a block, or an `#if`
+  inside an expression, an argument list, an initializer or a base
+  list, or around a modifier or an `else if`. In the last 30 C# commits
+  of `dotnet/eShop` and of `jasontaylordev/CleanArchitecture`, which
+  changed 314 C# files, this hit 2 files.
+- **Not read:** C# script (`.csx`), Razor (`.cshtml`, `.razor`), VB.NET
+  and F#, and files that are not UTF-8 (`input/unparsable`).
 
 ### In GitHub Actions
 
@@ -829,7 +881,7 @@ Design principles:
 | **M2** | Architecture rules (`qgate.toml`), duplication detection | done |
 | **M3** | Checking while coding: the working tree as head, JSON output, a Claude Code hook, an MCP server, so agents check their own changes before opening a pull request | done |
 | **M4** | CI integration: release binaries, GitHub Action, Azure DevOps Pipelines, pull request comments | done |
-| **Languages** | C# next to TypeScript: complexity and duplication first; architecture rules for `using` need a design of their own | next |
+| **Languages** | C# next to TypeScript: complexity and duplication first; architecture rules for `using` need a design of their own | in progress |
 | **M5** | Change risk from git history: hotspots (code that is both complex and changed often), code changed without its tests | planned |
 | **M6** | Baseline and trends over time, optional AI summary | planned |
 | **Later** | A git pre-commit hook, which needs a check of the staged changes (`--staged`); SARIF output, once a consumer fits a tool that reports only what got worse | not planned yet |
