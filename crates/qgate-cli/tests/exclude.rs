@@ -200,3 +200,54 @@ fn an_excluded_file_is_still_an_import_target() {
         "{out}{err}"
     );
 }
+
+/// `contents` with enough other code that git sees an added file rather
+/// than a rename of a deleted one.
+fn with_other_code(contents: &str) -> String {
+    let mut text = String::from(contents);
+    for i in 0..12 {
+        text.push_str(&function(&format!("other{i}"), 1));
+    }
+    text
+}
+
+// "Excluded paths": a deleted excluded file, TypeScript or JavaScript, is
+// no code that existed before (design D3).
+#[test]
+fn a_deleted_excluded_file_is_no_earlier_code() {
+    for vendor in ["vendor/date.ts", "vendor/date.js"] {
+        let repo = Repo::new();
+        repo.write("qgate.toml", "[files]\nexclude = [\"vendor\"]\n");
+        repo.write(vendor, DATE_HELPER);
+        repo.write("src/utils/date.ts", DATE_HELPER);
+        repo.commit("base");
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        repo.git(&["rm", "-q", vendor]);
+        repo.write("src/orders/format.ts", with_other_code(RENAMED_COPY));
+        repo.commit("change");
+        let out = repo.qgate(&["--base", "main"]);
+        assert!(
+            stdout(&out).contains("src/orders/format.ts:4  duplicates src/utils/date.ts:1-6"),
+            "{vendor}: {}{}",
+            stdout(&out),
+            stderr(&out)
+        );
+    }
+}
+
+// A file renamed into an excluded directory: its old code left, so a
+// copy of it elsewhere is no new copy (design D3).
+#[test]
+fn a_file_renamed_into_an_excluded_directory_keeps_its_old_code() {
+    let repo = Repo::new();
+    repo.write("qgate.toml", "[files]\nexclude = [\"vendor\"]\n");
+    repo.write("src/a.ts", DATE_HELPER);
+    repo.write("vendor/README.md", "vendored\n");
+    repo.commit("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.git(&["mv", "src/a.ts", "vendor/a.ts"]);
+    repo.write("src/b.ts", RENAMED_COPY);
+    repo.commit("move");
+    let out = repo.qgate(&["--base", "main"]);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+}

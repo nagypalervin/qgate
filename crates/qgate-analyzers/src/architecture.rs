@@ -14,7 +14,7 @@
 //!   one that leaves the root has no target;
 //! - any other specifier (`react`, `@/ui/Button`) is its own target.
 //!
-//! Patterns are [`PathPatterns`](crate::patterns::PathPatterns): globs over
+//! Patterns are [`PathPatterns`]: globs over
 //! `/`-separated paths, where a pattern without glob characters also
 //! matches everything below it (`react` matches `react/jsx-runtime`), and
 //! `dir/**` also matches `dir`.

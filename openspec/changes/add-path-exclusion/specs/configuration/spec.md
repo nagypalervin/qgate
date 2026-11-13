@@ -9,7 +9,8 @@ table, with the syntax and spelling of architecture rule patterns (see
 "Patterns" and "Pattern spelling" in `architecture-analysis`). In
 revision mode a version of a file whose path matches one SHALL be left
 out as if its extension were not supported: not analyzed, not compared
-for copies, and no code that existed before.
+for copies, and no code that existed before, also when it is a deleted
+or renamed JavaScript file.
 
 #### Scenario: Migrations left out
 
@@ -19,9 +20,15 @@ for copies, and no code that existed before.
 
 #### Scenario: An excluded file is no original
 
-- **GIVEN** `exclude = ["vendor"]`, and the change adds `src/Format.cs`, which copies a block of the unchanged `vendor/Dates.cs`
+- **GIVEN** `exclude = ["vendor"]`, and the change adds `src/orders/format.ts`, which copies a block of the unchanged `vendor/date.ts`
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** no `duplication/duplicate-block` finding is reported
+
+#### Scenario: A deleted excluded file is no earlier code
+
+- **GIVEN** `exclude = ["vendor"]`, `vendor/date.js` and `src/utils/date.ts` share a block, and the change deletes `vendor/date.js` and adds `src/orders/format.ts` with the block and other code
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** a `duplication/duplicate-block` finding for `src/orders/format.ts` names `src/utils/date.ts`
 
 #### Scenario: Renamed out of an excluded directory
 

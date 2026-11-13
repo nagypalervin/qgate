@@ -112,6 +112,24 @@ settings.
    - the GitHub rehearsal (Gate 1, question 4);
    - the journal entry and the archive.
 
+## Review of PR 1
+
+The `reviewer` subagent compared the architecture error messages of
+`main` and the branch byte for byte, and mutated each `FileSelection`
+call. The ones it could observe died, except the two for deleted files:
+no test deleted an excluded file. Fixed with a test for a deleted
+excluded `.ts` and `.js` file, which kills both, and one for a file
+renamed into an excluded directory. The spec now says that a deleted or
+renamed JavaScript file is no earlier code when excluded, and adds a
+scenario for it.
+
+Nits fixed:
+- the scenario "An excluded file is no original" is written in the
+  test's language;
+- task 1.2's text names the one change to the architecture tests'
+  helper;
+- the crate doc lists `patterns`.
+
 ## Risks / Trade-offs
 
 - **[A broad pattern hides real code]** `exclude = ["src"]` turns

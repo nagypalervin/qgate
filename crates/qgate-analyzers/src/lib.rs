@@ -12,6 +12,11 @@
 //! - [`duplication`]: blocks a change newly duplicates. A repository-level
 //!   analysis with its own index rather than an [`Analyzer`].
 //!
+//! Shared with the CLI:
+//!
+//! - [`patterns`]: path patterns, for architecture rules and the
+//!   `[files] exclude` setting.
+//!
 //! Planned:
 //!
 //! - `tests`: changed code without changed tests, coverage drop (M5)
