@@ -21,7 +21,7 @@ checks; commit messages and PR bodies are written to files first.
 ## 3. README, roadmap and rehearsal (PR 2, `change/add-csharp-architecture-2`)
 
 - [x] 3.1 Every README install block, `uses:` and the pinned commit at 0.6.0; `grep` finds no `0.5.0`. The roadmap's "Languages" row names the C# rules, and the "Later" row no longer lists them.
-- [ ] 3.2 Azure rehearsal (D8): the README's Linux job at 0.6.0 in the rehearsal project, on a pull request that adds a forbidden `using` to a domain file; read the comment thread and the build issues through the REST API and record them in `design.md`. Abandon the pull request afterwards.
+- [x] 3.2 Azure rehearsal (D8): the README's Linux job at 0.6.0 in the rehearsal project, on a pull request that adds a forbidden `using` to a domain file; read the comment thread and the build issues through the REST API and record them in `design.md`. Abandon the pull request afterwards.
 
 ## Workflow follow-up
 

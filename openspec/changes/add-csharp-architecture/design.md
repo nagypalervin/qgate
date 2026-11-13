@@ -446,6 +446,45 @@ The Linux install block, run as written against the published release
 (with the arm64 target and a scratch directory instead of
 `~/.local/bin`), passed its checksum and installed `qgate 0.6.0`.
 
+## Azure Pipelines rehearsal (task 3.2, 2026-11-13)
+
+- **Setup:** in the rehearsal project `qgate-rehearsal`, pipeline 36, a
+  branch from `main` whose `azure-pipelines.yml` is the line `jobs:` and
+  the README's Linux job at 0.6.0, cut out unchanged (`diff`:
+  `0a1 > jobs:`). The branch adds:
+  - `qgate.toml` with the README's rule: `from =
+    ["src/Shop.Domain/**"]`, `to_namespaces = ["Shop.Infrastructure",
+    "Microsoft.EntityFrameworkCore"]`;
+  - `src/Shop.Domain/Order.cs`, with `using System;` and
+    `using Microsoft.EntityFrameworkCore;`;
+  - `src/Shop.Domain/GlobalUsings.cs`, with
+    `global using System.Collections.Generic;` and
+    `global using Shop.Infrastructure.Data;`;
+  - `src/Shop.Infrastructure/ShopDb.cs`, which uses EF Core and the
+    domain: outside `from`, so it must not be reported.
+
+  Pull request 1359, abandoned afterwards, unmerged. The rehearsal
+  `main` holds no C#, so the domain files are new; a using added to an
+  existing file is covered by the CLI tests and the evaluation.
+- **Build 1340** on `ubuntu-latest` (image `ubuntu-26.04`, version
+  20261111.196.1), reason `pullRequest`:
+  - Install qgate (checksum OK), qgate report and qgate comment
+    succeeded;
+  - `qgate comment`: "created the qgate comment (2 findings, 2 at or
+    above error)";
+  - qgate check failed, as it should, with two build issues of code
+    `architecture/forbidden-import`:
+    - error at `src/Shop.Domain/GlobalUsings.cs` line 2, `uses
+      Shop.Infrastructure.Data, forbidden by "domain-is-pure"`;
+    - error at `src/Shop.Domain/Order.cs` line 2, `uses
+      Microsoft.EntityFrameworkCore, forbidden by "domain-is-pure"`.
+  - The job carried the hosted pool's warning that `ubuntu-latest`
+    moves to Ubuntu 26 from 2026-10-19; this run already had it.
+- **Thread 4561,** active, by "qgate-rehearsal Build Service
+  (<organization>)", read through the REST API: "2 findings, 2 at or
+  above `error`." and a table with exactly these two rows. `ShopDb.cs`
+  and the `System` usings do not appear.
+
 ## Risks / Trade-offs
 
 - **[A rule can be bypassed]** A fully qualified name in code, or a
