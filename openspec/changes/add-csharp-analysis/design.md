@@ -70,6 +70,10 @@ the gain for two languages is small.
 
 - **Path:** enclosing types and units joined by `.`; namespaces left
   out, so moving a file to another namespace keeps every name.
+- **Generic types** keep their type parameter list as written:
+  `Result<T>.Ok()` next to `Result.Ok()`. Without it the two would get
+  `#2` by source order (review of PR 1). Renaming `T` renames the
+  type's units, a rare edit accepted like a parameter type change.
 - **Method-like units:** the type parameters and parameter list are
   part of their own segment: `Map<T>(ref T, params int[])`.
 - **Parameter list:** each parameter's modifiers (`ref`, `out`, `in`,
@@ -85,11 +89,13 @@ the gain for two languages is small.
   builder reads them from there.
 - **Special members:**
   - constructors `Cart(IClock)`; finalizers `~Cart()`;
-  - operators `operator +(Inner, Inner)`; conversions
-    `implicit operator int(K)`;
+  - operators `operator +(Inner, Inner)`, and `operator checked +` for a
+    checked one; conversions `implicit operator int(K)`;
   - indexers `this[int]`;
-  - explicit interface implementations keep their interface:
-    `IDisposable.Dispose()`.
+  - an explicit interface implementation of any member keeps its
+    interface before its name: `IDisposable.Dispose()`, `I.P.get`,
+    `I.this[int].get`, `IAdd<C>.operator +(C, C)` (review of PR 1: first
+    only methods did).
 - **Accessors:** `.get`, `.set`, `.init`, `.add`, `.remove` after the
   property, indexer or event.
 - **Collisions:** the existing `#2` rule handles any that remain, such
@@ -140,17 +146,26 @@ Counted node kinds:
 - **Placeholders:**
   - an `identifier` becomes `$id`, except the name of a
     `member_access_expression` or `member_binding_expression`, which
-    keeps its text (as a TypeScript member name does);
+    keeps its text (as a TypeScript member name does), also inside a
+    `generic_name` (`x.Cast<int>()`; review of PR 1);
   - a literal node becomes one `$lit` without descending: string,
     verbatim and raw string, character, integer and real;
-  - in an interpolated string, each text part becomes `$lit` and the
-    interpolations are tokens as usual.
+  - in an interpolated string, a run of text parts and escapes becomes
+    one `$lit`, as a template's run does in TypeScript; a format
+    (`{x:D2}`) becomes one `$lit`; the interpolations are tokens as
+    usual.
 - **Kept text:** keywords, `predefined_type` (`int`, `string`), operators
   and punctuation.
 - **No tokens:** `using_directive`, the namespace's keyword and name
-  (a file-scoped declaration as a whole), preprocessor nodes, comments
-  and `;`. (Task 1.6: the spec first named only the namespace's name,
-  which left a lone `namespace` token in every file-scoped file.)
+  (a file-scoped declaration as a whole), preprocessor directives,
+  comments and `;`. (Task 1.6: the spec first named only the
+  namespace's name, which left a lone `namespace` token in every
+  file-scoped file.)
+- **`#if` branches hold code.** The grammar nests the code of an `#if`,
+  `#elif` or `#else` branch inside the directive's node. Only the
+  directive tokens and the `condition` are muted, and decision points in
+  muted code do not count, so `#if A && B` adds nothing (review of PR 1:
+  first every `preproc_` subtree was muted, which hid the code).
 - **Contextual keywords:** the grammar parses `when`, `value` and the
   like as an `identifier` with a keyword inside, so an `identifier` node
   is one token and its children are not entered.
@@ -267,9 +282,38 @@ both, exit code 2, since unit names from two languages can never match.
   already says "or syntax the parser does not support yet"; the
   evaluation (D8) shows whether a better line is worth a change.
 
+## Review of PR 1
+
+The `reviewer` subagent compared TypeScript's `parse()` before and after
+the refactor on 3,976 inputs (every fixture, mutations and broken
+snippets) without a difference, and asked for:
+- **Blocker:** code in `#if` branches had no tokens → D4.
+- **`#if` conditions counted** `&&` and `||` → D4.
+- **Generic member names** (`x.Cast<int>()`) became `$id` → D4.
+- **Explicit implementations of properties, indexers, events and
+  operators** lost their interface → D2.
+- **`Result` and `Result<T>`** in one file collided → D2.
+- **The "Conditional compilation" requirement promised too much:** the
+  grammar also fails on an `#if` inside an expression, an argument
+  list, a collection initializer or a base list, around a modifier, and
+  around an `else if`. The spec now says that a file the parser cannot
+  read with its directives in place is unparsable, and Ervin was told
+  that Gate 1 question 4 covers more than blocks; the evaluation counts
+  these files.
+- **Token wording:** "each run" of interpolated text and formats
+  recorded in the spec and D4.
+- **Nits:** a dead `record_struct_declaration`, `operator checked`,
+  anonymous methods untested, crate docs naming TypeScript only, no test
+  for the CLI guard, a non-exhaustive grammar choice, a parent call the
+  comments said was avoided, and the dependency claim: besides
+  `tree-sitter-language`, the grammar has the build dependency `cc`,
+  which `tree-sitter-typescript` already brings.
+
 ## Risks / Trade-offs
 
-- **[`#if` branches that open blocks]** Such files cannot be parsed and
+- **[`#if` the grammar cannot place]** Branches that each open a block,
+  and an `#if` inside an expression, an argument list, an initializer
+  or a base list, around a modifier or around an `else if`: such files
   get `input/unparsable`. → The evaluation counts them; tree-sitter
   cannot pick a branch, and a preprocessor pass is a change of its own.
 - **[Generated files outside the convention]** For example EF Core

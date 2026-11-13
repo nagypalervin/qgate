@@ -25,6 +25,7 @@ class D
     int Optional(int x = 1) { return x; }
     bool NotNull(object? o) => o is not null && !(o is string);
     void Lambda(List<int> xs) { xs.ForEach(x => { if (x > 0) { } }); }
+    void Anonymous(List<int> xs) { xs.ForEach(delegate (int x) { if (x > 0) { } }); }
     void Default(int n) { switch (n) { default: break; } }
     int Discard(int d) => d switch { _ => 0 };
     int Goto(int n) { if (n > 0) goto end; n++; end: return n; }
@@ -52,6 +53,18 @@ class D
     {
 #if DEBUG
         if (a) { }
+#endif
+    }
+
+    // Directives are not evaluated: their conditions do not count.
+    void Directives(bool a)
+    {
+#if DEBUG && (TRACE || NET8)
+        if (a) { }
+#elif X || Y
+        Log(1);
+#else
+        Log(2);
 #endif
     }
 }

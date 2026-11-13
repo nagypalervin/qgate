@@ -32,7 +32,6 @@ const TYPE_KINDS: &[&str] = &[
     "class_declaration",
     "struct_declaration",
     "record_declaration",
-    "record_struct_declaration",
     "interface_declaration",
 ];
 
@@ -139,7 +138,7 @@ impl<'s> Walker<'s> {
         let mut ancestors: Vec<Node<'_>> = Vec::new();
         loop {
             let node = cursor.node();
-            frames.push(self.enter(node, ancestors.last().copied()));
+            frames.push(self.enter(node, &ancestors));
             if cursor.goto_first_child() {
                 ancestors.push(node);
                 continue;
@@ -159,13 +158,25 @@ impl<'s> Walker<'s> {
         }
     }
 
-    fn enter(&mut self, node: Node<'_>, parent: Option<Node<'_>>) -> Frame {
+    /// `ancestors` are the node's ancestors, its parent last.
+    fn enter(&mut self, node: Node<'_>, ancestors: &[Node<'_>]) -> Frame {
         let kind = node.kind();
+        let parent = ancestors.last().copied();
         let mut frame = Frame::default();
-        self.record_token(node, parent, &mut frame);
+        self.record_token(node, ancestors, &mut frame);
         if TYPE_KINDS.contains(&kind) {
+            // A generic type keeps its type parameters: `Result<T>` and
+            // `Result` can share a file.
             if let Some(name) = node.child_by_field_name("name") {
-                self.segments.push(self.text(name));
+                // The grammar gives a type's list no field name.
+                let mut cursor = node.walk();
+                let type_parameters = node
+                    .named_children(&mut cursor)
+                    .find(|c| c.kind() == "type_parameter_list")
+                    .map(|t| compact(&self.text(t)))
+                    .unwrap_or_default();
+                self.segments
+                    .push(format!("{}{type_parameters}", self.text(name)));
                 frame.segments += 1;
             }
             self.scopes.push(None);
@@ -187,7 +198,9 @@ impl<'s> Walker<'s> {
             if let Some(name) = node.child_by_field_name("name") {
                 self.open_unit(&self.text(name), line_of(name), &mut frame);
             }
-        } else if is_decision_point(node) {
+        } else if !self.muted && is_decision_point(node, parent) {
+            // Not in muted code: the condition of `#if DEBUG && TRACE` is
+            // not code of the unit.
             if let Some(Some(index)) = self.scopes.last() {
                 self.functions[*index].cyclomatic += 1;
             }
@@ -223,11 +236,12 @@ impl<'s> Walker<'s> {
 
     /// Record the normalized token `node` is, if any (design D4), and
     /// mute the subtrees that produce none.
-    fn record_token(&mut self, node: Node<'_>, parent: Option<Node<'_>>, frame: &mut Frame) {
+    fn record_token(&mut self, node: Node<'_>, ancestors: &[Node<'_>], frame: &mut Frame) {
         if self.muted {
             return;
         }
         let kind = node.kind();
+        let parent = ancestors.last().copied();
         if produces_no_tokens(node, parent) {
             self.muted = true;
             frame.muted = true;
@@ -247,7 +261,7 @@ impl<'s> Walker<'s> {
         } else if kind == "identifier" {
             // An identifier is one token even when the grammar puts a
             // contextual keyword inside it (`when`, `value`).
-            let text = if is_member_name(node, parent) {
+            let text = if is_member_name(node, ancestors) {
                 self.text(node)
             } else {
                 "$id".to_owned()
@@ -257,7 +271,7 @@ impl<'s> Walker<'s> {
                 self.muted = true;
                 frame.muted = true;
             }
-        } else if node.child_count() == 0 && kind != ";" {
+        } else if node.child_count() == 0 && kind != ";" && !kind.starts_with('#') {
             let text = self.text(node);
             if !text.is_empty() {
                 self.push_token(text, node, false);
@@ -273,7 +287,8 @@ impl<'s> Walker<'s> {
         self.in_text_run = text_part;
     }
 
-    /// A unit's own name: its signature (design D2).
+    /// A unit's own name: its signature (design D2), after the interface
+    /// it implements explicitly, if any.
     fn unit_name(&self, node: Node<'_>) -> String {
         let params = node
             .child_by_field_name("parameters")
@@ -284,27 +299,33 @@ impl<'s> Walker<'s> {
                 .map(|n| self.text(n))
                 .unwrap_or_default()
         };
+        // `operator checked +` is a member of its own.
+        let checked = if has_child(node, &["checked"]) {
+            "checked "
+        } else {
+            ""
+        };
+        let interface = self.interface(node);
         match node.kind() {
             "destructor_declaration" => format!("~{}({params})", name("name")),
-            "operator_declaration" => format!("operator {}({params})", name("operator")),
+            "operator_declaration" => {
+                format!(
+                    "{interface}operator {checked}{}({params})",
+                    name("operator")
+                )
+            }
             "conversion_operator_declaration" => {
                 // `implicit` or `explicit`, as written.
-                let mut cursor = node.walk();
-                let direction = node
-                    .children(&mut cursor)
-                    .find(|c| matches!(c.kind(), "implicit" | "explicit"))
-                    .map(|c| c.kind())
-                    .unwrap_or_default();
-                format!("{direction} operator {}({params})", compact(&name("type")))
+                let direction = if has_child(node, &["implicit"]) {
+                    "implicit"
+                } else {
+                    "explicit"
+                };
+                let ty = compact(&name("type"));
+                format!("{interface}{direction} operator {checked}{ty}({params})")
             }
             _ => {
-                // Methods, local functions and constructors; a method can
-                // implement an interface member explicitly.
-                let interface = node
-                    .named_children(&mut node.walk())
-                    .find(|c| c.kind() == "explicit_interface_specifier")
-                    .map(|c| compact(&self.text(c)))
-                    .unwrap_or_default();
+                // Methods, local functions and constructors.
                 let type_parameters = node
                     .child_by_field_name("type_parameters")
                     .map(|t| compact(&self.text(t)))
@@ -314,19 +335,32 @@ impl<'s> Walker<'s> {
         }
     }
 
-    /// The name of a property, event or indexer: `this[int]` for an
-    /// indexer.
+    /// `I.` or `IAdd<C>.` for a member that implements an interface member
+    /// explicitly, otherwise empty.
+    fn interface(&self, node: Node<'_>) -> String {
+        let mut cursor = node.walk();
+        node.named_children(&mut cursor)
+            .find(|c| c.kind() == "explicit_interface_specifier")
+            .map(|c| compact(&self.text(c)))
+            .unwrap_or_default()
+    }
+
+    /// The name of a property, event or indexer, after the interface it
+    /// implements explicitly: `this[int]` for an indexer.
     fn member_name(&self, node: Node<'_>) -> String {
+        let interface = self.interface(node);
         if node.kind() == "indexer_declaration" {
             let params = node
                 .child_by_field_name("parameters")
                 .map(|p| self.parameter_list(p))
                 .unwrap_or_default();
-            return format!("this[{params}]");
+            return format!("{interface}this[{params}]");
         }
-        node.child_by_field_name("name")
+        let name = node
+            .child_by_field_name("name")
             .map(|n| self.text(n))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        format!("{interface}{name}")
     }
 
     /// The line of a member's name, or of `operator` or `this` for one
@@ -386,29 +420,44 @@ impl<'s> Walker<'s> {
 }
 
 /// Subtrees that produce no tokens: `using` directives, a namespace's
-/// keyword and name, preprocessor lines and comments (design D4). A
-/// file-scoped namespace declaration holds nothing else.
+/// keyword and name, comments, and preprocessor directives (design D4). A
+/// file-scoped namespace declaration holds nothing else. The branches of
+/// an `#if` hold code, which keeps its tokens; only their conditions are
+/// muted (the `#if`, `#elif`, `#else` and `#endif` tokens are skipped as
+/// leaves).
 fn produces_no_tokens(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
     let kind = node.kind();
+    if matches!(kind, "preproc_if" | "preproc_elif" | "preproc_else") {
+        return false;
+    }
     matches!(
         kind,
         "using_directive" | "comment" | "file_scoped_namespace_declaration"
     ) || kind.starts_with("preproc_")
-        || parent.is_some_and(|p| {
-            p.kind() == "namespace_declaration"
-                && (kind == "namespace" || is_field(p, "name", node))
+        || parent.is_some_and(|p| match p.kind() {
+            "namespace_declaration" => kind == "namespace" || is_field(p, "name", node),
+            "preproc_if" | "preproc_elif" => is_field(p, "condition", node),
+            _ => false,
         })
 }
 
 /// Whether `node` is the member name of `x.Name`, `x?.Name` or `p->Name`,
-/// which keeps its text.
-fn is_member_name(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
-    parent.is_some_and(|p| {
-        matches!(
-            p.kind(),
-            "member_access_expression" | "member_binding_expression"
-        ) && is_field(p, "name", node)
-    })
+/// or of `x.Name<T>`, which keeps its text. `ancestors` end with its
+/// parent.
+fn is_member_name(node: Node<'_>, ancestors: &[Node<'_>]) -> bool {
+    let is_name_of = |child: Node<'_>, parent: Option<&Node<'_>>| {
+        parent.is_some_and(|p| {
+            matches!(
+                p.kind(),
+                "member_access_expression" | "member_binding_expression"
+            ) && is_field(*p, "name", child)
+        })
+    };
+    let mut up = ancestors.iter().rev();
+    match up.next() {
+        Some(p) if p.kind() == "generic_name" => is_name_of(*p, up.next()),
+        parent => is_name_of(node, parent),
+    }
 }
 
 /// Whether `node` is the `field` child of `parent`.
@@ -418,8 +467,15 @@ fn is_field(parent: Node<'_>, field: &str, node: Node<'_>) -> bool {
         .is_some_and(|f| f.id() == node.id())
 }
 
+/// Whether `node` has a child (named or not) of one of `kinds`.
+fn has_child(node: Node<'_>, kinds: &[&str]) -> bool {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .any(|c| kinds.contains(&c.kind()))
+}
+
 /// Whether the node adds one to the enclosing unit's complexity.
-fn is_decision_point(node: Node<'_>) -> bool {
+fn is_decision_point(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
     let kind = node.kind();
     if DECISION_KINDS.contains(&kind) {
         return true;
@@ -429,7 +485,7 @@ fn is_decision_point(node: Node<'_>) -> bool {
         "assignment_expression" => operator_in(node, &["??="]),
         // Each `case` label of a switch statement; `default` does not
         // count, as `else` does not.
-        "case" => !node.is_named() && node.parent().is_some_and(|p| p.kind() == "switch_section"),
+        "case" => !node.is_named() && parent.is_some_and(|p| p.kind() == "switch_section"),
         // An arm counts unless its pattern is the discard `_`.
         "switch_expression_arm" => node.named_child(0).is_some_and(|p| p.kind() != "discard"),
         _ => false,
@@ -534,6 +590,18 @@ mod tests {
                 ("Outer.Inner.operator +(Inner, Inner)", 29),
                 ("Outer.Inner.~Inner()", 31),
                 ("Ext.Count(this string?, in int, scoped Span<int>)", 37),
+                // explicit implementations keep their interface
+                ("Impl.I.P.get", 42),
+                ("Impl.J.P.get", 43),
+                ("Impl.I.this[int].get", 44),
+                ("Impl.I.Ev.add", 45),
+                ("Impl.I.Ev.remove", 45),
+                ("Impl.IAdd<Impl>.operator +(Impl, Impl)", 46),
+                ("Impl.operator +(Impl, Impl)", 47),
+                ("Impl.operator checked +(Impl, Impl)", 48),
+                // a generic type keeps its type parameters
+                ("Result.Ok()", 51),
+                ("Result<T>.Ok()", 52),
             ])
         );
     }
@@ -592,6 +660,8 @@ mod tests {
                 ("D.NotNull(object?)", 2),
                 // a lambda counts towards its method
                 ("D.Lambda(List<int>)", 2),
+                // so does an anonymous method
+                ("D.Anonymous(List<int>)", 2),
                 ("D.Default(int)", 1),
                 ("D.Discard(int)", 1),
                 // `goto` does not count
@@ -602,6 +672,8 @@ mod tests {
                 ("D.F(int)", 4),
                 ("D.Errors(A?)", 5),
                 ("D.Guarded(bool)", 2),
+                // the `if` counts; `&&` and `||` in `#if` and `#elif` do not
+                ("D.Directives(bool)", 2),
             ])
         );
     }
@@ -677,6 +749,37 @@ mod tests {
         assert_eq!(
             tokens("class A { string F(int y) => $\"{y}-\\n{y:D2}x\"; }"),
             texts("class $id { string $id ( int $id ) => $ \" { $id } $lit { $id $lit } $lit \" }")
+        );
+    }
+
+    // Requirement: Conditional compilation.
+    #[test]
+    fn code_in_directive_branches_has_tokens() {
+        let source = "class C { void F(bool a) {\n#if DEBUG && TRACE\n if (a) { Log(a); }\n\
+                      #elif X\n Log(1);\n#else\n Log(2);\n#endif\n} }";
+        assert_eq!(
+            tokens(source),
+            texts(
+                "class $id { void $id ( bool $id ) { if ( $id ) { $id ( $id ) } $id ( $lit ) $id ( $lit ) } }"
+            )
+        );
+        assert_eq!(
+            tokens("#if NET8\nclass A { }\n#endif\n"),
+            texts("class $id { }")
+        );
+    }
+
+    // Requirement: C# normalized tokens: a generic member keeps its name.
+    #[test]
+    fn generic_member_names_keep_their_text() {
+        let cast = tokens("class A { object F(X x) => x.Cast<int>() ?? x?.OfType<int>(); }");
+        let filter = tokens("class A { object F(X x) => x.Where<int>() ?? x?.Select<int>(); }");
+        assert_ne!(cast, filter);
+        assert_eq!(
+            cast,
+            texts(
+                "class $id { object $id ( $id $id ) => $id . Cast < int > ( ) ?? $id ? . OfType < int > ( ) }"
+            )
         );
     }
 

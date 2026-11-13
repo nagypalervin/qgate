@@ -14,16 +14,22 @@
 //! `export const GET = withAuth(async () => {...})` the functions passed
 //! through the call form one unit named `GET`.
 //!
-//! The model also lists the file's [`Import`]s: the module specifier of
-//! every `import` and `export ... from` declaration, `import x =
-//! require(...)`, and `import(...)` or `require(...)` call with a string
-//! literal, as written and with its line. Resolving specifiers is up to
-//! the analyzers.
+//! For TypeScript, the model also lists the file's [`Import`]s: the
+//! module specifier of every `import` and `export ... from` declaration,
+//! `import x = require(...)`, and `import(...)` or `require(...)` call
+//! with a string literal, as written and with its line. Resolving
+//! specifiers is up to the analyzers. A C# file has no imports yet.
 //!
 //! Finally, the model holds the file's code as normalized [`Token`]s for
 //! finding copies: identifiers become `$id` and literals `$lit`, while
-//! member names, keywords and punctuation keep their text; comments,
-//! semicolons, imports and type-level code produce none.
+//! member names, keywords and punctuation keep their text; comments and
+//! semicolons produce none, nor do TypeScript's imports and type-level
+//! code, or C#'s `using` directives, namespace declarations and
+//! preprocessor directives. C# types are code and keep their tokens.
+//!
+//! C# units are named by their types and signature, such as
+//! `Cart.Total(int)`; [`csharp_generated_name`] and
+//! [`csharp_generated_header`] tell generated C# files.
 //!
 //! ```
 //! use qgate_lang::{Language, parse};

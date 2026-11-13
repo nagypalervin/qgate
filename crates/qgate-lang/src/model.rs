@@ -3,7 +3,7 @@
 use std::fmt;
 
 /// Everything qgate extracted from one source file: its function units,
-/// its imports and its normalized tokens.
+/// its imports (TypeScript only) and its normalized tokens.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileModel {
     /// Function units in source order. Qualified names are unique within
@@ -17,12 +17,15 @@ pub struct FileModel {
 }
 
 /// One normalized token. Identifiers become `$id`; strings, numbers,
-/// regexes and each text part of a template or JSX text become `$lit`.
-/// Member names, object keys, keywords, operators and punctuation keep
-/// their text. Comments, semicolons, the shebang line, imports,
-/// `export ... from` and type-level code produce no tokens, so two copies
-/// that differ only in names, values, types or semicolons have the same
-/// tokens.
+/// regexes and each run of text in a template, JSX text or C#
+/// interpolated string become `$lit`. Member names, object keys,
+/// keywords, operators and punctuation keep their text. Comments and
+/// semicolons produce no tokens; in TypeScript neither do the shebang
+/// line, imports, `export ... from` and type-level code, and in C#
+/// neither do `using` directives, namespace declarations and preprocessor
+/// directives (code in an `#if` branch keeps its tokens). So two copies
+/// that differ only in names, values or layout have the same tokens; in
+/// TypeScript also those that differ only in types.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     /// The normalized text.

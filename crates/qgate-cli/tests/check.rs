@@ -322,6 +322,16 @@ fn unsupported_extension() {
     assert_eq!(out.status.code(), Some(2));
 }
 
+// C# stays off in the CLI until PR 2 of `add-csharp-analysis` wires it in;
+// PR 2 replaces this test with the scenarios of "Supported input files".
+#[test]
+fn csharp_is_not_analyzed_yet() {
+    let out = qgate(&["check", "cs/Before.cs", "cs/After.cs"]);
+    assert!(stderr(&out).contains("cs/Before.cs"), "{}", stderr(&out));
+    assert!(stderr(&out).contains("unsupported file type"));
+    assert_eq!(out.status.code(), Some(2));
+}
+
 // Requirement: Unreadable input files
 
 #[test]

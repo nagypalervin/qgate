@@ -36,4 +36,18 @@ namespace Shop
     {
         public static int Count(this string? s, in int start, scoped Span<int> buf) => 0;
     }
+
+    class Impl : I, J
+    {
+        int I.P => 1;
+        int J.P => 2;
+        int I.this[int i] => 0;
+        event EventHandler I.Ev { add { } remove { } }
+        static Impl IAdd<Impl>.operator +(Impl a, Impl b) => a;
+        public static Impl operator +(Impl a, Impl b) => a;
+        public static Impl operator checked +(Impl a, Impl b) => a;
+    }
+
+    class Result { static Result Ok() => new(); }
+    class Result<T> where T : notnull { static Result<T> Ok() => new(); }
 }

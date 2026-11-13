@@ -69,7 +69,10 @@ Each question has a recommendation; design.md has the reasons.
    as listed.*
 4. **A file whose `#if` branches open blocks** cannot be parsed and gets
    the usual `input/unparsable` Warning. The evaluation measures how
-   often that happens. *Recommended: accept for now.*
+   often that happens. *Recommended: accept for now.* (Found in the
+   review of PR 1: the same holds for an `#if` inside an expression,
+   an argument list, an initializer or a base list, around a modifier
+   and around an `else if`; put to Ervin with PR 1.)
 5. **Evaluation on real code before the release:** qgate on the recent
    history of two public C# repositories (by default `dotnet/eShop` and
    `jasontaylordev/CleanArchitecture`, or ones Ervin names), recording
@@ -115,8 +118,8 @@ evaluation.
     duplication comparison;
   - fixture-based tests in `qgate-analyzers` and CLI tests.
 - **Dependency:** `tree-sitter-c-sharp` (MIT, from the tree-sitter
-  organization, no further dependencies than `tree-sitter-language`,
-  which `tree-sitter-typescript` already brings). The spike parsed C# 12
+  organization). Its dependencies, `tree-sitter-language` and the build
+  dependency `cc`, both come with `tree-sitter-typescript` already. The spike parsed C# 12
   syntax with it under `tree-sitter` 0.26.
 - **Binary size:** the grammar adds its parse tables to every release
   binary; the size goes into the release record.

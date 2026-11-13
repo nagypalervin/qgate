@@ -79,12 +79,13 @@ be a unit.
 
 ### Requirement: C# qualified names
 
-A unit's name SHALL be the names of its enclosing types and units,
-joined by `.`, followed by its own name; namespaces SHALL be left out.
-A method, constructor, finalizer, operator or local function SHALL
-carry its type parameters and its parameter list in its own name. An
-accessor SHALL be named by its property, indexer or event followed by
-`.get`, `.set`, `.init`, `.add` or `.remove`.
+A unit's name SHALL be the names of its enclosing types (with their
+type parameters) and units, joined by `.`, followed by its own name;
+namespaces SHALL be left out. A method, constructor, finalizer,
+operator or local function SHALL carry its type parameters and its
+parameter list. An accessor SHALL be named by its property, indexer or
+event and `.get`, `.set`, `.init`, `.add` or `.remove`. An explicit
+interface implementation SHALL keep its interface.
 
 #### Scenario: Names in a class
 
@@ -97,6 +98,18 @@ accessor SHALL be named by its property, indexer or event followed by
 - **GIVEN** `class Outer { class Inner { T Map<T>(ref T x, params int[] ys) { int Add(int a, int b) => a + b; return x; } public static Inner operator +(Inner a, Inner b) => a; ~Inner() {} } }`
 - **WHEN** the file is analyzed
 - **THEN** the units are named `Outer.Inner.Map<T>(ref T, params int[])`, `Outer.Inner.Map<T>(ref T, params int[]).Add(int, int)`, `Outer.Inner.operator +(Inner, Inner)` and `Outer.Inner.~Inner()`
+
+#### Scenario: A generic and a plain type of one name
+
+- **GIVEN** `class Result { static Result Ok() => new(); }` and `class Result<T> { static Result<T> Ok() => new(); }` in one file
+- **WHEN** the file is analyzed
+- **THEN** the units are named `Result.Ok()` and `Result<T>.Ok()`, whatever their order
+
+#### Scenario: Explicit interface implementations
+
+- **GIVEN** a class `Impl` with `int I.P => 1;`, `int J.P => 2;` and `static Impl IAdd<Impl>.operator +(Impl a, Impl b) => a;`
+- **WHEN** the file is analyzed
+- **THEN** the units are named `Impl.I.P.get`, `Impl.J.P.get` and `Impl.IAdd<Impl>.operator +(Impl, Impl)`
 
 ### Requirement: C# parameter lists in names
 
@@ -149,10 +162,11 @@ pattern combinator `and` and `or`.
 ### Requirement: C# normalized tokens
 
 In C#, these rules SHALL replace the TypeScript ones of
-`duplication-analysis`. Identifiers SHALL become the identifier placeholder, except the name
-after `.`, `?.` or `->`, which keeps its text. Each string, character
-and number literal, and each text part of an interpolated or raw
-string, SHALL become the literal placeholder. Keywords, including
+`duplication-analysis`. Identifiers SHALL become one placeholder,
+except a member name after `.`, `?.` or `->`, with or without type
+arguments, which keeps its text. Each string, character and number
+literal, each run of text in an interpolated string and each format
+in an interpolation SHALL become another. Keywords, including
 predefined types, `true`, `false` and `null`, operators and other
 punctuation SHALL keep their text.
 
@@ -163,13 +177,14 @@ punctuation SHALL keep their text.
 
 #### Scenario: Different members
 
-- **GIVEN** two methods that differ only in reading `.Year` and `.Month`
+- **GIVEN** two methods that differ only in reading `.Year` and `.Month`, or in calling `.Cast<int>()` and `.OfType<int>()`
 - **THEN** their normalized tokens differ
 
 ### Requirement: C# code without tokens
 
 `using` directives, the keyword and name of a namespace declaration,
-preprocessor directives, comments and semicolons SHALL produce no
+preprocessor directives with their conditions, comments and semicolons
+SHALL produce no tokens. Code in a branch of an `#if` SHALL keep its
 tokens.
 
 #### Scenario: Usings and namespaces are not compared
@@ -177,15 +192,27 @@ tokens.
 - **GIVEN** two files that share only a long list of `using` directives and a file-scoped namespace declaration
 - **THEN** no tokens are compared for them and no duplicate is found
 
+#### Scenario: A file inside `#if`
+
+- **GIVEN** a file whose whole code sits between `#if NET8_0` and `#endif`
+- **THEN** its code has the same tokens as without the two directives
+
 ### Requirement: Conditional compilation
 
 Preprocessor directives SHALL NOT be evaluated: the code of every
-branch of an `#if` SHALL be read as if the directives were absent. A
-file that is not valid C# read this way SHALL be unparsable.
+branch of an `#if` SHALL be read as written, and the conditions of
+`#if` and `#elif` SHALL NOT count as decision points. A file that the
+parser cannot read with its directives in place SHALL be unparsable,
+even if it is valid C#.
 
 #### Scenario: A guarded statement
 
 - **WHEN** a method contains `#if DEBUG`, one `if` statement and `#endif`
+- **THEN** its complexity is 2
+
+#### Scenario: Conditions of directives
+
+- **WHEN** a method contains `#if DEBUG && (TRACE || NET8)`, one `if` statement, `#elif X || Y`, a call, `#else`, another call and `#endif`
 - **THEN** its complexity is 2
 
 #### Scenario: Branches that open blocks
