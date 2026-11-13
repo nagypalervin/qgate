@@ -16,10 +16,12 @@ use crate::common::{line_of, named_children, parse_tree, unique_segment};
 use crate::{FileModel, Function, Import, Language, ParseError, Token};
 
 /// Parse TypeScript or TSX source into a [`FileModel`].
+/// `language` is TypeScript or TSX; `lib.rs` sends no other here.
 pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, ParseError> {
-    let grammar = match language {
-        Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
-        Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX,
+    let grammar = if language == Language::Tsx {
+        tree_sitter_typescript::LANGUAGE_TSX
+    } else {
+        tree_sitter_typescript::LANGUAGE_TYPESCRIPT
     };
     let tree = parse_tree(&grammar.into(), source)?;
     let mut walker = Walker::new(source.as_bytes());

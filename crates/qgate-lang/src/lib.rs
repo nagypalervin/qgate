@@ -6,7 +6,7 @@
 //! `docs/adr/0001-rust-and-tree-sitter.md`. This crate does no I/O: callers
 //! read files and pick the [`Language`].
 //!
-//! Supported: TypeScript and TSX. The model holds one [`Function`] per
+//! Supported: TypeScript, TSX and C#. The model holds one [`Function`] per
 //! named function unit with its qualified name, line and cyclomatic
 //! complexity. Anonymous functions count towards their nearest named
 //! ancestor; code outside named functions is not measured. At module level
@@ -35,6 +35,7 @@
 //! ```
 
 mod common;
+mod csharp;
 mod model;
 mod typescript;
 
@@ -49,6 +50,7 @@ pub use model::{FileModel, Function, Import, ParseError, Token};
 pub fn parse(language: Language, source: &str) -> Result<FileModel, ParseError> {
     match language {
         Language::TypeScript | Language::Tsx => typescript::parse(language, source),
+        Language::CSharp => csharp::parse(source),
     }
 }
 
@@ -60,6 +62,18 @@ pub enum Language {
     /// TypeScript with JSX (`.tsx`). It needs its own grammar: in TSX,
     /// `<T>x` is a JSX element, in plain TypeScript it is a type assertion.
     Tsx,
+    /// C# (`.cs`).
+    CSharp,
+}
+
+/// Languages whose code can be compared with each other: unit names can
+/// match, and copies can be found, only within one family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Family {
+    /// TypeScript and TSX (and JavaScript, which qgate reads as TSX).
+    TypeScript,
+    /// C#.
+    CSharp,
 }
 
 impl Language {
@@ -69,7 +83,17 @@ impl Language {
         match ext {
             "ts" | "mts" | "cts" => Some(Self::TypeScript),
             "tsx" => Some(Self::Tsx),
+            "cs" => Some(Self::CSharp),
             _ => None,
+        }
+    }
+
+    /// The family whose code this language's code can be compared with.
+    #[must_use]
+    pub fn family(self) -> Family {
+        match self {
+            Self::TypeScript | Self::Tsx => Family::TypeScript,
+            Self::CSharp => Family::CSharp,
         }
     }
 }
@@ -95,6 +119,24 @@ mod tests {
         for language in [Language::TypeScript, Language::Tsx] {
             assert_eq!(parse(language, ""), Ok(FileModel::default()));
         }
+    }
+
+    #[test]
+    fn recognizes_csharp() {
+        assert_eq!(Language::from_extension("cs"), Some(Language::CSharp));
+        assert_eq!(Language::from_extension("csx"), None);
+    }
+
+    #[test]
+    fn families() {
+        assert_eq!(Language::TypeScript.family(), Family::TypeScript);
+        assert_eq!(Language::Tsx.family(), Family::TypeScript);
+        assert_eq!(Language::CSharp.family(), Family::CSharp);
+    }
+
+    #[test]
+    fn the_csharp_grammar_loads() {
+        assert_eq!(parse(Language::CSharp, ""), Ok(FileModel::default()));
     }
 
     #[test]
