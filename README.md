@@ -828,10 +828,11 @@ Design principles:
 | **M1** | `qgate check`, TypeScript parsing, complexity delta, git revisions, `--fail-on` | done |
 | **M2** | Architecture rules (`qgate.toml`), duplication detection | done |
 | **M3** | Checking while coding: the working tree as head, JSON output, a Claude Code hook, an MCP server, so agents check their own changes before opening a pull request | done |
-| **M4** | CI integration: release binaries, GitHub Action, Azure DevOps Pipelines, pull request comments, SARIF output | in progress |
+| **M4** | CI integration: release binaries, GitHub Action, Azure DevOps Pipelines, pull request comments | done |
+| **Languages** | C# next to TypeScript: complexity and duplication first; architecture rules for `using` need a design of their own | next |
 | **M5** | Change risk from git history: hotspots (code that is both complex and changed often), code changed without its tests | planned |
 | **M6** | Baseline and trends over time, optional AI summary | planned |
-| **Later** | A git pre-commit hook, which needs a check of the staged changes (`--staged`) | not planned yet |
+| **Later** | A git pre-commit hook, which needs a check of the staged changes (`--staged`); SARIF output, once a consumer fits a tool that reports only what got worse | not planned yet |
 
 The hotspot analysis in M5 builds on published work on behavioral code
 analysis, notably Adam Tornhill's *Your Code as a Crime Scene*.
