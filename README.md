@@ -4,8 +4,9 @@
 
 > Status: early. `qgate check` compares TypeScript and [C#](#c) code
 > between two git revisions (or two files) for cyclomatic complexity,
-> newly duplicated code and, in TypeScript with a
-> [`qgate.toml`](#architecture-rules-qgatetoml), forbidden imports. It
+> newly duplicated code and, with a
+> [`qgate.toml`](#architecture-rules-qgatetoml), forbidden imports and
+> C# `using` directives. It
 > reports on pull requests in GitHub Actions and Azure Pipelines; more
 > analyzers follow the [roadmap](#roadmap) below.
 
@@ -109,7 +110,7 @@ qgate reports:
 |---|---|---|---|
 | `complexity/cyclomatic-increase` | an existing function got more complex | +1 to +4 | +5 or more |
 | `complexity/cyclomatic-new` | a new function is already complex (new files count as new) | 11 to 20 | above 20 |
-| `architecture/forbidden-import` | `--base` mode only: a change adds an import that a rule in `qgate.toml` forbids (see below) | - | always |
+| `architecture/forbidden-import` | `--base` mode only: a change adds an import or a C# `using` that a rule in `qgate.toml` forbids (see below) | - | always |
 | `duplication/duplicate-block` | `--base` mode only: a change adds a copy of a block of at least 50 tokens that exists elsewhere in the repository (see below) | always | - |
 | `input/unparsable` | `--base` mode only: a changed file has a syntax error, syntax the parser does not support yet, or is not UTF-8; it is skipped | always | - |
 
@@ -443,8 +444,9 @@ warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 
 
 ### Architecture rules (`qgate.toml`)
 
-Put a `qgate.toml` at the repository root to forbid imports between parts
-of your TypeScript code (C# `using` directives are not checked yet):
+Put a `qgate.toml` at the repository root to forbid dependencies between
+parts of your code: TypeScript imports, and C# `using` directives
+([below](#c-using-directives)). For TypeScript:
 
 ```toml
 [[architecture.forbid]]
@@ -499,6 +501,58 @@ error   src/domain/order.ts:3  imports src/ui/Button ("../ui/Button"), forbidden
   cannot parse yet (`export type * from`, `import("./x").Foo<T>`), which
   are reported as `input/unparsable` instead.
 
+#### C# `using` directives
+
+A rule's `to_namespaces` lists the namespaces a C# file must not use:
+
+```toml
+[[architecture.forbid]]
+name = "domain-is-pure"
+from = ["src/Shop.Domain/**"]
+to_namespaces = ["Shop.Infrastructure", "Microsoft.EntityFrameworkCore"]
+```
+
+A change that adds `using Shop.Infrastructure.Data;` to
+`src/Shop.Domain/Order.cs` then fails with:
+
+```
+error   src/Shop.Domain/Order.cs:2  uses Shop.Infrastructure.Data, forbidden by "domain-is-pure"  [architecture/forbidden-import]
+```
+
+- **`to_namespaces` matches C# usings, `to` matches TypeScript imports;**
+  neither crosses over. A rule needs `to`, `to_namespaces` or both, and
+  `from` is a path pattern in both languages. As for imports, only new
+  usings are reported, and a rename is checked against the old path.
+- **Namespace patterns** are the same globs with `.` between segments.
+  A name without glob characters also matches every namespace below it
+  (`Shop.Infrastructure` matches `Shop.Infrastructure.Data`, not
+  `Shop.InfrastructureTests`), `Shop.Infrastructure.**` also matches
+  `Shop.Infrastructure`, and `**.Data` matches any name whose last
+  segment is `Data`. An empty segment (`Shop..Data`, or a leading or
+  trailing `.`) or a `/` is an error.
+- **Every `using` directive counts:** `using`, `global using`,
+  `using static` and aliases (`using Db = Shop.Infrastructure.Db;`), at
+  the top of the file, inside a namespace or in any `#if` branch. The
+  name counts as written, without `global::`, the `@` of verbatim
+  identifiers and type arguments, so `global using
+  global::Shop.Data;` is the same use as `using Shop.Data;`, and
+  `using L = System.Collections.Generic.List<Shop.Data.Row>;` uses
+  `System.Collections.Generic.List` only. `using var` and `using (...)`
+  statements are not directives and do not count.
+- **A `global using`** applies to the whole project but is reported in
+  the file that has it, such as `GlobalUsings.cs`: that file brought
+  the dependency in, so keep it inside the rule's `from`.
+- **Not checked:**
+  - a fully qualified name in code (`new Shop.Infrastructure.Db()`),
+    which needs no `using`;
+  - usings that MSBuild adds (`ImplicitUsings`, `<Using Include="..."/>`)
+    and references between projects;
+  - a short name inside a namespace block: in `namespace Shop { using
+    Infrastructure; }` the name counts as `Infrastructure`, not
+    `Shop.Infrastructure`, so write full names;
+  - aliases of tuple, array, pointer or built-in types, and names
+    qualified by an extern alias (`Legacy::Shop.Data`).
+
 ### Leaving files out (`[files] exclude`)
 
 To keep files out of every check, list path patterns under `[files]` in
@@ -529,9 +583,9 @@ exclude = ["**/Migrations/**", "vendor"]
 
 `.cs` files get the complexity check in every form and the duplication
 check in `--base` and `--worktree` mode, and so in the Claude Code hook
-and the MCP server, which run the same check. Architecture rules do not
-apply to C# yet: a `using` names a namespace, not a file, so it needs
-rules of its own.
+and the MCP server, which run the same check. Architecture rules check
+its `using` directives against namespace patterns (see
+[C# `using` directives](#c-using-directives)).
 
 - **Units and names.** Methods, constructors, finalizers, operators,
   local functions and property, indexer and event accessors with a body
