@@ -18,7 +18,9 @@
 //! module specifier of every `import` and `export ... from` declaration,
 //! `import x = require(...)`, and `import(...)` or `require(...)` call
 //! with a string literal, as written and with its line. Resolving
-//! specifiers is up to the analyzers. A C# file has no imports yet.
+//! specifiers is up to the analyzers. For C#, it lists the file's
+//! [`Using`]s instead: the namespace or type each `using` directive names,
+//! normalized, with its line.
 //!
 //! Finally, the model holds the file's code as normalized [`Token`]s for
 //! finding copies: identifiers become `$id` and literals `$lit`, while
@@ -47,7 +49,7 @@ mod model;
 mod typescript;
 
 pub use generated::{csharp_generated_header, csharp_generated_name};
-pub use model::{FileModel, Function, Import, ParseError, Token};
+pub use model::{FileModel, Function, Import, ParseError, Token, Using};
 
 /// Parse `source`, written in `language`, into a [`FileModel`].
 ///

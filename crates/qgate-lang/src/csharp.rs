@@ -4,15 +4,16 @@
 //! One walk over the syntax tree finds the function units and names them
 //! by their enclosing types and their own signature (design D2), so an
 //! overload keeps its name when another one is added above it. The same
-//! walk counts decision points (D3) and records the normalized tokens
-//! for finding copies (D4).
+//! walk counts decision points (D3), records the normalized tokens for
+//! finding copies (D4) and lists the `using` directives for architecture
+//! rules (design D2 of `add-csharp-architecture`).
 
 use std::collections::HashSet;
 
 use tree_sitter::Node;
 
 use crate::common::{line_of, parse_tree, unique_segment};
-use crate::{FileModel, Function, ParseError, Token};
+use crate::{FileModel, Function, ParseError, Token, Using};
 
 /// Parse C# source into a [`FileModel`].
 pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
@@ -22,6 +23,7 @@ pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
     Ok(FileModel {
         functions: walker.functions,
         imports: Vec::new(),
+        usings: walker.usings,
         tokens: walker.tokens,
     })
 }
@@ -106,6 +108,8 @@ struct Walker<'s> {
     functions: Vec<Function>,
     /// Normalized tokens in source order.
     tokens: Vec<Token>,
+    /// `using` directives in source order.
+    usings: Vec<Using>,
     /// Whether the walk is inside a subtree that produces no tokens; the
     /// frame of the node that opened it closes it.
     muted: bool,
@@ -123,6 +127,7 @@ impl<'s> Walker<'s> {
             scopes: Vec::new(),
             functions: Vec::new(),
             tokens: Vec::new(),
+            usings: Vec::new(),
             muted: false,
             in_text_run: false,
         }
@@ -194,6 +199,13 @@ impl<'s> Walker<'s> {
         } else if UNIT_KINDS.contains(&kind) && node.child_by_field_name("body").is_some() {
             let name = self.unit_name(node);
             self.open_unit(&name, Self::member_line(node), &mut frame);
+        } else if kind == "using_directive" {
+            if let Some(name) = self.using_target(node) {
+                self.usings.push(Using {
+                    name,
+                    line: line_of(node),
+                });
+            }
         } else if kind == "accessor_declaration" && node.child_by_field_name("body").is_some() {
             if let Some(name) = node.child_by_field_name("name") {
                 self.open_unit(&self.text(name), line_of(name), &mut frame);
@@ -416,6 +428,50 @@ impl<'s> Walker<'s> {
 
     fn text(&self, node: Node<'_>) -> String {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
+    }
+
+    /// The name a `using` directive uses: the named child that is not its
+    /// alias, normalized by [`Self::dotted`].
+    fn using_target(&self, directive: Node<'_>) -> Option<String> {
+        let alias = directive.child_by_field_name("name").map(|a| a.id());
+        let mut cursor = directive.walk();
+        let used = directive
+            .named_children(&mut cursor)
+            .find(|c| Some(c.id()) != alias && !c.is_extra())?;
+        self.dotted(used)
+    }
+
+    /// A name as `.`-separated segments, without `global::`, the `@` of
+    /// verbatim identifiers and type arguments. `None` for anything else:
+    /// tuple, array, pointer and built-in types, or a name qualified by an
+    /// extern alias other than `global`.
+    fn dotted(&self, node: Node<'_>) -> Option<String> {
+        match node.kind() {
+            "identifier" => {
+                let text = self.text(node);
+                Some(text.strip_prefix('@').unwrap_or(&text).to_owned())
+            }
+            "qualified_name" => {
+                let qualifier = self.dotted(node.child_by_field_name("qualifier")?)?;
+                let name = self.dotted(node.child_by_field_name("name")?)?;
+                Some(format!("{qualifier}.{name}"))
+            }
+            "alias_qualified_name" => {
+                let alias = node.child_by_field_name("alias")?;
+                (self.text(alias) == "global")
+                    .then(|| node.child_by_field_name("name"))
+                    .flatten()
+                    .and_then(|name| self.dotted(name))
+            }
+            "generic_name" => {
+                let mut cursor = node.walk();
+                let identifier = node
+                    .named_children(&mut cursor)
+                    .find(|c| c.kind() == "identifier")?;
+                self.dotted(identifier)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -828,6 +884,98 @@ mod tests {
         assert_eq!(
             parse("class A {\n  void F() { x = ; }\n}\n"),
             Err(ParseError::Syntax { line: 2 })
+        );
+    }
+
+    /// Parse a C# fixture and return its `(using target, line)` pairs.
+    fn usings(source: &str) -> Vec<(String, u32)> {
+        parse(source)
+            .expect("fixture parses")
+            .usings
+            .into_iter()
+            .map(|u| (u.name, u.line))
+            .collect()
+    }
+
+    // Requirement: Usings that count, "Every directive form".
+    #[test]
+    fn every_directive_form_is_a_using() {
+        let source = "using Shop.Infrastructure.A;\nglobal using Shop.Infrastructure.B;\n\
+                      using static Shop.Infrastructure.C;\nusing D = Shop.Infrastructure.D;\n\
+                      global using static System.Math;\nusing System;\n";
+        assert_eq!(
+            usings(source),
+            pairs(&[
+                ("Shop.Infrastructure.A", 1),
+                ("Shop.Infrastructure.B", 2),
+                ("Shop.Infrastructure.C", 3),
+                ("Shop.Infrastructure.D", 4),
+                ("System.Math", 5),
+                ("System", 6),
+            ])
+        );
+    }
+
+    // Requirement: Usings that count, "Inside a namespace and an `#if`".
+    #[test]
+    fn usings_in_namespaces_and_directive_branches() {
+        let source = "#if DEBUG\nusing Shop.Infrastructure.Debug;\n#else\nusing Shop.Release;\n#endif\n\
+                      namespace Shop.Domain\n{\n    using Shop.Infrastructure.Data;\n    class A { }\n}\n";
+        assert_eq!(
+            usings(source),
+            pairs(&[
+                ("Shop.Infrastructure.Debug", 2),
+                ("Shop.Release", 4),
+                ("Shop.Infrastructure.Data", 8),
+            ])
+        );
+        // After a file-scoped namespace.
+        assert_eq!(
+            usings("namespace Shop.Domain;\nusing Shop.Infrastructure;\nclass A { }\n"),
+            pairs(&[("Shop.Infrastructure", 2)])
+        );
+    }
+
+    // Requirement: Usings that count, "Using statements".
+    #[test]
+    fn using_statements_are_not_usings() {
+        let source = "class A\n{\n    void M()\n    {\n        using var db = new Shop.Infrastructure.Db();\n\
+                      using (db) { }\n        using (var c = Shop.Infrastructure.Db.Open()) { }\n    }\n}\n";
+        assert_eq!(usings(source), pairs(&[]));
+    }
+
+    // Requirement: Using targets, "Normalized names" and "No target".
+    #[test]
+    fn using_targets_are_normalized() {
+        let source = "using global::Shop.Data;\nusing @class.Foo;\n\
+                      using L = System.Collections.Generic.List<Shop.Data.Row>;\n\
+                      using Shop /* layer */ . Infrastructure\n    .Data;\n\
+                      using G = global::Shop.Data.Map<int, string>.Entry;\nusing global::Shop;\n\
+                      using /* layer */ Shop.Orders;\nusing /* a */ O /* b */ = /* c */ Shop.Orders.Order;\n";
+        assert_eq!(
+            usings(source),
+            pairs(&[
+                ("Shop.Data", 1),
+                ("class.Foo", 2),
+                ("System.Collections.Generic.List", 3),
+                ("Shop.Infrastructure.Data", 4),
+                ("Shop.Data.Map.Entry", 6),
+                ("Shop", 7),
+                ("Shop.Orders", 8),
+                ("Shop.Orders.Order", 9),
+            ])
+        );
+        let source = "using P = (int X, int Y);\nusing unsafe Ptr = int*;\nusing Legacy::Shop.Data;\n\
+                      using N = int;\nusing Arr = string[];\nusing Opt = int?;\n";
+        assert_eq!(usings(source), pairs(&[]));
+    }
+
+    // Requirement: Using targets, "As written inside a namespace".
+    #[test]
+    fn nested_usings_are_taken_as_written() {
+        assert_eq!(
+            usings("namespace Shop\n{\n    using Infrastructure;\n}\n"),
+            pairs(&[("Infrastructure", 3)])
         );
     }
 

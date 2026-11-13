@@ -888,6 +888,7 @@ fn file_change(
             FileModel {
                 functions: Vec::new(),
                 imports,
+                usings: Vec::new(),
                 tokens,
             }
         }
