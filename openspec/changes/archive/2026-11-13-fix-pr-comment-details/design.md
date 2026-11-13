@@ -88,6 +88,38 @@ Decided during task 1.2:
   record, one GitHub rehearsal run with a duplicate (the comment row
   without "also at"), the journal entry and the archive.
 
+## Release 0.3.1 (task 2.1)
+
+- PR #18 merged as f03ae2c. As Ervin agreed, the agent pushed the
+  annotated tag `v0.3.1` ("qgate 0.3.1") after `check-version.sh` and
+  `check-action-version.sh` accepted it on `main`.
+- Release run 43400095097: all nine jobs green.
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six. The Linux arm64 archive holds the binary,
+  `qgate-pr-comment.ps1`, `README.md` and both licenses; its script is
+  byte for byte the one on `main` (it names the Project Collection
+  Build Service), and both Windows zips hold the script. The Linux
+  arm64 binary printed `qgate 0.3.1`.
+- Ervin published the draft on 2026-11-13 (09:33 UTC); `releases/latest`
+  is `v0.3.1` and its files download.
+
+## Rehearsal of a duplicate (task 3.2, 2026-11-13)
+
+- In `nagypalervin/qgate-rehearsal`, the branch `linux/duplicate-0.3.1`
+  holds the README's workflow, cut out of this branch's README
+  unchanged (`uses: nagypalervin/qgate@v0.3.1`), and adds three copies
+  of a date helper: `src/utils/date.ts`, `src/orders/format.ts` and
+  `src/invoices/format.ts`. Pull request #14, closed unmerged.
+- Run 43403022675 succeeded: "installed qgate 0.3.1
+  (x86_64-unknown-linux-musl)", two Warning annotations, and "created
+  the qgate comment (2 findings, 0 at or above error)".
+- The comment, read through the API, has two rows such as
+  `| warning | src/orders/format.ts:4 | duplicates src/invoices/format.ts:2-7 (lines 4-9, 68 tokens) | duplication/duplicate-block |`:
+  the copy the message names is not repeated, and no row has "also
+  at". With all three files new, each finding has one related location,
+  so the case of a further copy listed after "also at" did not come up
+  here; the unit tests and the CLI test cover it.
+
 ## Risks / Trade-offs
 
 - **[The collection identity's form is not observed]** It is taken from

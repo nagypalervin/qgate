@@ -26,10 +26,10 @@ check it against `SHA256SUMS`, unpack it, and put `qgate` on your
 
 The Linux binaries are statically linked and run on any distribution,
 Alpine included (with `curl` installed). Each block below installs only
-when the checksum matches. On Linux, with version 0.3.0 as the example:
+when the checksum matches. On Linux, with version 0.3.1 as the example:
 
 ```sh
-v=0.3.0 t=x86_64-unknown-linux-musl
+v=0.3.1 t=x86_64-unknown-linux-musl
 base=https://github.com/nagypalervin/qgate/releases/download/v$v
 curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
   grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c &&
@@ -40,7 +40,7 @@ curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
 On macOS, the check uses `shasum`:
 
 ```sh
-v=0.3.0 t=aarch64-apple-darwin
+v=0.3.1 t=aarch64-apple-darwin
 base=https://github.com/nagypalervin/qgate/releases/download/v$v
 curl -fL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS" &&
   grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | shasum -a 256 --check &&
@@ -53,7 +53,7 @@ On Windows, in PowerShell, then add the unpacked folder to your `PATH`:
 
 ```powershell
 $ErrorActionPreference = "Stop"
-$v = "0.3.0"; $t = "x86_64-pc-windows-msvc"
+$v = "0.3.1"; $t = "x86_64-pc-windows-msvc"
 $base = "https://github.com/nagypalervin/qgate/releases/download/v$v"
 Invoke-WebRequest "$base/qgate-$v-$t.zip" -OutFile "qgate-$v-$t.zip"
 Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
@@ -511,10 +511,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: nagypalervin/qgate@v0.3.0
+      - uses: nagypalervin/qgate@v0.3.1
 ```
 
-The action installs qgate 0.3.0 for the runner from the release and
+The action installs qgate 0.3.1 for the runner from the release and
 checks it against `SHA256SUMS`. It compares the pull request with its
 base branch (`origin/<base branch>`), so the checkout needs the full
 history (`fetch-depth: 0`). It runs on GitHub-hosted Linux, macOS and
@@ -544,7 +544,7 @@ Windows runners, x64 and arm64.
 | `base` | the pull request's base branch | the revision to compare with, for example `origin/main`; needed outside `pull_request` events |
 
 ```yaml
-      - uses: nagypalervin/qgate@v0.3.0
+      - uses: nagypalervin/qgate@v0.3.1
         with:
           fail-on: warning
 ```
@@ -560,7 +560,7 @@ Windows runners, x64 and arm64.
   annotations, the job summary and the result work as usual.
 - **Pinning.** qgate never moves a release tag. To pin the action's
   code itself, use the commit instead:
-  `nagypalervin/qgate@e29df6e8330bd47f262f56fcbcf04e40e3c3ba06 # v0.3.0`.
+  `nagypalervin/qgate@f03ae2ccbdd8b2926033f8ea7e765056e569f4dd # v0.3.1`.
   The binary still comes from the release, checked against its
   `SHA256SUMS`.
 - **Self-hosted runners** need PowerShell 7.4 or later (`pwsh`), `git`,
@@ -577,7 +577,7 @@ analyze it. On `ubuntu-latest`:
 - name: Install qgate
   working-directory: ${{ runner.temp }}
   run: |
-    v=0.3.0 t=x86_64-unknown-linux-musl
+    v=0.3.1 t=x86_64-unknown-linux-musl
     base=https://github.com/nagypalervin/qgate/releases/download/v$v
     curl -fsSL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS"
     grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c
@@ -635,7 +635,7 @@ On a Microsoft-hosted Linux agent:
       fetchDepth: 0
     - bash: |
         set -euo pipefail
-        v=0.3.0 t=x86_64-unknown-linux-musl
+        v=0.3.1 t=x86_64-unknown-linux-musl
         base=https://github.com/nagypalervin/qgate/releases/download/v$v
         curl -fsSL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS"
         grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c
@@ -675,7 +675,7 @@ git, so the job's agent need not be the one your build runs on.
     - pwsh: |
         $ErrorActionPreference = "Stop"
         $PSNativeCommandUseErrorActionPreference = $true
-        $v = "0.3.0"; $t = "x86_64-pc-windows-msvc"
+        $v = "0.3.1"; $t = "x86_64-pc-windows-msvc"
         $base = "https://github.com/nagypalervin/qgate/releases/download/v$v"
         Invoke-WebRequest "$base/qgate-$v-$t.zip" -OutFile "qgate-$v-$t.zip"
         Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
