@@ -45,8 +45,9 @@ cannot name it by the same form).
   only the digit check): `src/a.ts:1` must not match `lib/src/a.ts:1-6`
   either, since a duplicate's copies can sit in such paths. Whitespace
   or the start is the only boundary accepted, so a path quoted any
-  other way, such as `(src/a.ts:1)`, is listed again: at worst the
-  row repeats a location, as before this change, and never loses one.
+  other way, such as `(src/a.ts:1)`, is listed again, and the row
+  repeats a location as before this change. One case still loses a
+  location: see Risks.
 - **Only Markdown.** JSON keeps every related location, as data.
 
 ### D2. The identity in the Azure hint
@@ -96,3 +97,9 @@ Decided during task 1.2:
 - **[A message that names a location by chance]** A related location
   is dropped if the message happens to contain its `path:line`. → Then
   the location is named in the message anyway; nothing is lost.
+- **[A path with a space]** A message naming `x y/a.ts:1-6` also names
+  `y/a.ts:1` by this rule, so a copy at `y/a.ts` line 1 is left out of
+  the row although the message does not name it (found in the review of
+  PR 1). → Accepted: it needs two files whose paths differ only by a
+  prefix ending in a space, and the JSON report still lists every
+  related location.

@@ -22,3 +22,9 @@ the error does not tell which. It SHALL NOT leave a partial comment.
 - **GIVEN** a pipeline whose job authorization scope is the project collection, and whose Project Collection Build Service may not contribute to pull requests
 - **WHEN** the documented job runs for a pull request with a finding
 - **THEN** the comment step fails, and its log names "Contribute to pull requests" and the Project Collection Build Service
+
+#### Scenario: An identity the script cannot place
+
+- **GIVEN** a permission error whose identity matches neither the project's nor the collection's id, or names no identity
+- **WHEN** the comment step reports it
+- **THEN** its log names "Contribute to pull requests", the project's Build Service and the Project Collection Build Service

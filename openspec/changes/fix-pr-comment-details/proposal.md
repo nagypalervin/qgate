@@ -58,6 +58,14 @@
   **Decided at Gate 1 (2026-11-13):** Ervin approved the proposal with
   the recommendation; the collection case is not rehearsed.
 
+### Changed after Gate 1
+
+- **The Markdown rule is narrower** (task 1.1, design D1): a related
+  location counts as named only at the start of the message or after
+  whitespace, so `src/a.ts:1` stays listed next to `lib/src/a.ts:1-6`.
+  The `report-formats` delta says so and has a scenario for it. Put to
+  Ervin with PR 1; awaiting his approval.
+
 ## Capabilities
 
 ### New Capabilities

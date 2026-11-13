@@ -14,7 +14,7 @@ The Location cell SHALL be `<path>:<line>`, or `<path>` for a finding
 without a line. A finding's related locations SHALL be listed in its
 Finding cell after the message, except one whose `<path>:<line>` the
 message already names: at the start of the message or after
-whitespace, and not followed by a digit.
+whitespace, and not followed by an ASCII digit.
 
 #### Scenario: A message with table and HTML characters
 
@@ -24,7 +24,7 @@ whitespace, and not followed by a digit.
 
 #### Scenario: A duplicate with its copies
 
-- **GIVEN** a duplicate-block finding with two related locations
+- **GIVEN** a finding with two related locations, neither of which its message names
 - **WHEN** the Markdown report is rendered
 - **THEN** the Finding cell holds the message followed by both related locations as `<path>:<line>`
 

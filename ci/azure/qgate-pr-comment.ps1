@@ -77,7 +77,11 @@ function Read-QgateReport {
 }
 
 function Get-PipelineContext {
-    <# The threads URL of this pull request and the token, from the environment. #>
+    <#
+    The threads URL of this pull request and the token, from the environment,
+    with the ids and names of the two Build Service identities for the
+    permission message (the ids may be missing).
+    #>
     $names = 'SYSTEM_COLLECTIONURI', 'SYSTEM_TEAMPROJECT', 'BUILD_REPOSITORY_ID', 'SYSTEM_PULLREQUEST_PULLREQUESTID'
     $values = @{}
     foreach ($name in $names) {
