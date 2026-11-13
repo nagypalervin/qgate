@@ -50,6 +50,23 @@ const ACCESSOR_OWNER_KINDS: &[&str] = &[
     "event_declaration",
 ];
 
+/// Decision points that count once per node, whatever their content
+/// (design D3).
+const DECISION_KINDS: &[&str] = &[
+    "if_statement",
+    "for_statement",
+    "foreach_statement",
+    "while_statement",
+    "do_statement",
+    "catch_clause",
+    "catch_filter_clause",
+    "when_clause",
+    "conditional_expression",
+    "conditional_access_expression",
+    "and_pattern",
+    "or_pattern",
+];
+
 /// What entering a node pushed, so leaving it can pop the same. An
 /// expression-bodied property pushes two segments: its name and `get`.
 #[derive(Default)]
@@ -132,6 +149,10 @@ impl<'s> Walker<'s> {
         } else if kind == "accessor_declaration" && node.child_by_field_name("body").is_some() {
             if let Some(name) = node.child_by_field_name("name") {
                 self.open_unit(&self.text(name), line_of(name), &mut frame);
+            }
+        } else if is_decision_point(node) {
+            if let Some(Some(index)) = self.scopes.last() {
+                self.functions[*index].cyclomatic += 1;
             }
         }
         frame
@@ -272,6 +293,30 @@ impl<'s> Walker<'s> {
     }
 }
 
+/// Whether the node adds one to the enclosing unit's complexity.
+fn is_decision_point(node: Node<'_>) -> bool {
+    let kind = node.kind();
+    if DECISION_KINDS.contains(&kind) {
+        return true;
+    }
+    match kind {
+        "binary_expression" => operator_in(node, &["&&", "||", "??"]),
+        "assignment_expression" => operator_in(node, &["??="]),
+        // Each `case` label of a switch statement; `default` does not
+        // count, as `else` does not.
+        "case" => !node.is_named() && node.parent().is_some_and(|p| p.kind() == "switch_section"),
+        // An arm counts unless its pattern is the discard `_`.
+        "switch_expression_arm" => node.named_child(0).is_some_and(|p| p.kind() != "discard"),
+        _ => false,
+    }
+}
+
+/// Whether the node's `operator` field is one of `operators`.
+fn operator_in(node: Node<'_>, operators: &[&str]) -> bool {
+    node.child_by_field_name("operator")
+        .is_some_and(|op| operators.contains(&op.kind()))
+}
+
 /// `text` without whitespace, except one space between two words:
 /// `Dictionary<string, int>` becomes `Dictionary<string,int>`, and
 /// `scoped Span<int>` stays as it is.
@@ -374,6 +419,79 @@ mod tests {
         assert_eq!(
             names(include_str!("../fixtures/csharp/top_level.cs")),
             pairs(&[("Twice(int)", 10)])
+        );
+    }
+
+    /// Parse a C# fixture and return `(name, cyclomatic)` pairs.
+    fn complexities(source: &str) -> Vec<(String, u32)> {
+        parse(source)
+            .expect("fixture parses")
+            .functions
+            .into_iter()
+            .map(|f| (f.name, f.cyclomatic))
+            .collect()
+    }
+
+    // Requirements: C# decision points, Conditional compilation.
+    #[test]
+    fn decision_points() {
+        assert_eq!(
+            complexities(include_str!("../fixtures/csharp/decision_points.cs")),
+            pairs(&[
+                // two `if`; `else` does not count
+                ("D.If(bool)", 3),
+                ("D.For()", 2),
+                ("D.Foreach(int[])", 2),
+                ("D.While(int)", 2),
+                ("D.Do(int)", 2),
+                // three `case` labels, `default` does not count
+                ("D.Cases(int)", 4),
+                // a `case` and its `when`
+                ("D.Guard(object)", 3),
+                // two arms, the `_` arm does not count
+                ("D.Arms(int)", 3),
+                // two `catch` and a `when` filter; `finally` does not count
+                ("D.Catch()", 4),
+                ("D.Ternary(bool)", 2),
+                ("D.And(bool, bool)", 2),
+                ("D.Or(bool, bool)", 2),
+                ("D.Coalesce(string?)", 2),
+                ("D.CoalesceAssign(string?)", 2),
+                ("D.Access(A?)", 3),
+                ("D.Element(string?)", 2),
+                ("D.AndPattern(int)", 2),
+                ("D.OrPattern(int)", 3),
+                // an optional parameter's value does not count
+                ("D.Optional(int)", 1),
+                // `not` patterns do not count; the `&&` does
+                ("D.NotNull(object?)", 2),
+                // a lambda counts towards its method
+                ("D.Lambda(List<int>)", 2),
+                ("D.Default(int)", 1),
+                ("D.Discard(int)", 1),
+                // `goto` does not count
+                ("D.Goto(int)", 2),
+                ("D.Property.get", 2),
+                // `D.Field` is a field initializer: not measured
+                ("D.LoopsAndSwitch(int[], int)", 5),
+                ("D.F(int)", 4),
+                ("D.Errors(A?)", 5),
+                ("D.Guarded(bool)", 2),
+            ])
+        );
+    }
+
+    // Requirement: C# lambdas count towards their named ancestor.
+    #[test]
+    fn lambdas_and_top_level_code() {
+        let names = complexities(include_str!("../fixtures/csharp/names.cs"));
+        assert!(
+            names.contains(&("Cart.Paid(List<Order>)".to_owned(), 2)),
+            "{names:?}"
+        );
+        assert_eq!(
+            complexities(include_str!("../fixtures/csharp/top_level.cs")),
+            pairs(&[("Twice(int)", 2)])
         );
     }
 
