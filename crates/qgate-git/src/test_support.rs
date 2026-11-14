@@ -105,6 +105,31 @@ impl TestRepo {
         std::fs::write(full, contents).expect("write file");
     }
 
+    /// Stage everything and commit with author and committer date `date`
+    /// (ISO 8601); returns the commit id.
+    pub(crate) fn commit_at(&self, message: &str, date: &str) -> String {
+        self.git(&["add", "-A"]);
+        let mut command = Command::new("git");
+        isolate(&mut command);
+        let out = command
+            .args(["commit", "-q", "--allow-empty", "-m", message])
+            .current_dir(&self.dir)
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_DATE", date)
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git commit failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        self.git(&["rev-parse", "HEAD"])
+    }
+
     /// Stage everything and commit; returns the commit id.
     pub(crate) fn commit(&self, message: &str) -> String {
         self.git(&["add", "-A"]);
