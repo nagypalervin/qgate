@@ -555,6 +555,52 @@ Linux install block, run as written against the published release (with
 the arm64 target and a scratch directory instead of `~/.local/bin`),
 passed its checksum and installed `qgate 0.7.0`.
 
+## Azure Pipelines rehearsal (task 4.2, 2026-11-14)
+
+- **Deviation from D10, decided by Ervin:** D10 asks for edits of a
+  tested C# method and a tested TypeScript function, so the rule would
+  be `tests/unchanged-test`. The rehearsal project's `main` holds no
+  test, and it changes only through pull requests. Rather than merge a
+  setup pull request into it, the rehearsal adds new sources without
+  tests, in a package and a project that test other code, so the rule
+  is `tests/missing-test`. The pipeline's path (comment, build issues,
+  step result) is the same for both rules; `tests/unchanged-test` is
+  covered by the end-to-end tests and the evaluation.
+- **Setup:** in the rehearsal project `qgate-rehearsal`, pipeline 36, a
+  branch `tests-0.7.0` from `main` whose `azure-pipelines.yml` is the
+  line `jobs:` and the README's Linux job at 0.7.0, cut out unchanged
+  (`diff` against the README: identical). The branch adds:
+  - `package.json`, and `src/app/cart/cart.component.spec.ts`, so the
+    package tests other code;
+  - `src/app/orders/order.service.ts`, with `OrderService.total` and
+    `OrderService.isEmpty`, and no spec;
+  - `src/Shop.Domain/Shop.Domain.csproj` and the test project
+    `tests/Shop.Domain.UnitTests/` with `CartTests.cs`;
+  - `src/Shop.Domain/Invoice.cs`, with an auto-property and
+    `Invoice.Total(decimal)`, and no `InvoiceTests.cs`.
+
+  The published 0.7.0 binary gave the same two Warnings on this branch
+  locally. Pull request 1360, abandoned afterwards, unmerged.
+- **Build 1342** on `ubuntu-latest` (image `ubuntu-26.04`, version
+  20261111.196.1), reason `pullRequest`, result `succeeded`:
+  - Install qgate (checksum OK), qgate report, qgate comment and qgate
+    check all succeeded;
+  - `qgate comment`: "created the qgate comment (2 findings, 0 at or
+    above error)";
+  - two warning build issues of code `tests/missing-test`:
+    - `src/Shop.Domain/Invoice.cs` line 7, `Invoice.Total(decimal) has
+      no test: expected InvoiceTests.cs in Shop.Domain.UnitTests`;
+    - `src/app/orders/order.service.ts` line 2, `OrderService.total
+      and 1 more have no test: expected
+      src/app/orders/order.service.spec.ts`.
+  - The job again carried the hosted pool's notice that `ubuntu-latest`
+    moves to Ubuntu 26.
+- **Thread 4563,** active, by "qgate-rehearsal Build Service
+  (<organization>)", read through the REST API: "2 findings, none at
+  or above `error`." and a table with exactly these two rows. The spec,
+  the test project's `CartTests.cs` and the existing `src/grade.ts` do
+  not appear.
+
 ## Risks / Trade-offs
 
 - **[A team's names differ from the conventions]** → a stream of
