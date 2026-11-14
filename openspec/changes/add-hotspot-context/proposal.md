@@ -22,7 +22,7 @@ and is never a finding of its own.
   a hotspot file gets a note at the end of its message:
 
   ```
-  warning src/Cart.cs:12  Cart.Total: cyclomatic complexity 4 -> 6 (+2); hotspot: 31 commits in 6 months, complexity 87  [complexity/cyclomatic-increase]
+  warning src/Cart.cs:12  Cart.Total(): cyclomatic complexity 4 -> 6 (+2); hotspot: 31 commits in 6 months, complexity 87  [complexity/cyclomatic-increase]
   ```
 
   The exception is `input/unparsable`. The JSON report gets a

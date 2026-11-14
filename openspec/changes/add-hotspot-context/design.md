@@ -45,23 +45,54 @@ works with:
 
 ### D1. History in `qgate-git`: commit count per head path
 
-A new `Repository` method returns, for a head revision and a start
-time, the number of non-merge commits that touched each path, keyed by
-the path in the head revision.
+`Repository::churn(head, since)` returns, per path, the number of
+non-merge commits reachable from `head` whose committer time is after
+`since`, and that add, modify, rename or copy the file, counted under
+the name `head` has. `commit_time` and `is_shallow` go with it. (As
+built in PR 1, after its review; the first draft of this section
+described a simpler walk.)
 
-- **Command:** `git log --no-merges --find-renames --name-status
-  --format=commit%x00%ct <head> --since=@<start>`. Each commit's
-  committer time is checked again against `start` in Rust, because
-  `--since` stops early only on well-ordered dates. That makes the
-  window exact even with clock skew.
-- **Renames:** the log walks from new to old. A map from "path at this
-  point in history" to "head path" starts as the identity. An
-  `R<n> old new` line adds `old -> head(new)`. `A`, `M` and `R` lines
-  count one for the mapped head path. A path that is gone at the head
-  maps to nothing and is dropped.
-- **Which paths:** all of them. The CLI filters to ranked files, so the
-  git crate stays ignorant of languages (ADR 0002).
-- **Shallow:** a second method, `is_shallow()`, runs `git rev-parse
+- **Command:**
+  ```
+  git log --topo-order --find-renames --name-status -z
+    --no-ext-diff --no-show-signature
+    --format='commit %H %ct %P' --since=@<since> <head>
+  ```
+  `-z` keeps unusual path names intact. `--no-show-signature` keeps a
+  user's `log.showSignature` from putting text before the headers. The
+  same goes for `commit_time` (`git show -s --no-show-signature
+  --format=%ct`).
+- **Merges are walked but count nothing:** without `-m` they show no
+  files. `--no-merges` would cut the graph the renames travel along.
+- **Renames follow the commit graph:**
+  - with `--topo-order`, children come before parents;
+  - each commit receives from its children a map from older names to
+    head names, counts its `A`, `M`, `R` and `C` lines under the mapped
+    name (once per commit), and passes the map, plus its own renames,
+    to its parents;
+  - a rename made on the same line of history as the edits is followed,
+    also through the merge that brings them in.
+
+  **Known limit:** a rename on *another* branch than the edits is joined
+  only in the merge, which shows no files, so those edits keep the old
+  name. `git log -m` would show it, but it omits the block for a parent
+  whose diff is empty, and a custom format does not say which parent a
+  block belongs to. One `git diff` per merge commit would cost hundreds
+  of processes in a merge-per-pull-request history. The cost of the
+  limit is an undercount for a file renamed while another branch edited
+  it, so at worst a missing note. Accepted; tests pin both cases.
+- **Paths the head does not have** keep their own entries; the CLI ranks
+  only the head's files, so the git crate stays ignorant of languages
+  (ADR 0002).
+- **The window and clock skew:** `--since` stops the walk at commits
+  dated before `since`, and with `--topo-order` it also hides what lies
+  behind them. So a commit in the window that only an older-dated
+  commit leads to is not seen. Walking the whole history instead would
+  cost a full `git log --find-renames` on every check. Accepted for
+  skewed clocks, which are rare; the spec says so. The Rust filter
+  (`time > since`) makes the start of the window exact for every commit
+  git does print.
+- **Shallow:** `is_shallow()` runs `git rev-parse
   --is-shallow-repository`.
 - **Errors:** as other git calls: exit codes, not localized messages.
 - **Alternatives:**
@@ -71,10 +102,13 @@ the path in the head revision.
 ### D2. The window (Gate 1, question 1)
 
 - **Start:** 182 days before the committer date of the head commit
-  (`git log -1 --format=%ct`). With `--worktree`, the head is the
-  snapshot commit, which is dated now. So the window ends at `HEAD`'s
-  committer date, and the snapshot itself never counts. Uncommitted work
-  is one edit, not history.
+  (`commit_time`). A commit counts when its committer date is after the
+  start; the head's own date ends the window.
+- **With `--worktree`,** the head is a snapshot commit dated now, so the
+  CLI walks from `HEAD` itself and dates the window by `HEAD`. The
+  snapshot is never in the walk, whatever its time. (The review of PR 1
+  showed that excluding it by time alone fails when it shares `HEAD`'s
+  second.) Uncommitted work is one edit, not history.
 - **The note says "6 months":** 182 days is 26 weeks, and the note is
   for people. The spec fixes the number of days.
 
@@ -141,9 +175,11 @@ the note is in the message.
 
 - **Evaluation:**
   - **Repositories:** the four of 0.7.0, re-cloned with full history
-    as partial clones (`--filter=blob:none`). These are not shallow,
-    unlike a `--depth` or `--shallow-since` clone, which qgate would
-    rightly refuse to rank.
+    and all blobs. These are not shallow, unlike a `--depth` or
+    `--shallow-since` clone, which qgate would rightly refuse to rank.
+    They are not partial (`--filter=blob:none`) either: rename detection
+    reads blobs, and a partial clone would fetch them over the network
+    during the timed run (review of PR 1).
   - **Run:** the last 30 code commits again, with the 0.7.0 scripts
     extended.
   - **Record:**
@@ -173,6 +209,30 @@ the note is in the message.
 - **Release 0.8.0.**
 - **PR 3** (`change/add-hotspot-context-3`): the README versions, the
   roadmap, the rehearsal, the journal and the archive.
+
+## Review of PR 1
+
+The reviewer found no blocker and reproduced each finding in scratch
+repositories. Fixed:
+- `log.showSignature=true` put signature text before the headers and
+  broke `churn` and `commit_time`; both pass `--no-show-signature`;
+- renames on a parallel branch were lost by a single "newest name" map;
+  the walk now follows the commit graph, merges included, and the case
+  git cannot show cheaply (a rename on another branch than the edits)
+  is a documented, tested limit (D1);
+- "exact window with clock skew" was false: `--since` with
+  `--topo-order` hides history behind an older-dated commit. D1, the
+  spec and the commit record now say so;
+- D1, D2 and task 1.1 now describe what was built, and the window's
+  start is defined (after it, not at it) and tested at the second;
+- the `--worktree` snapshot is excluded by walking from `HEAD`, not by
+  its time, and `churn` lost its `until` argument;
+- only the token after a header drops its newline; paths are kept as
+  they are, and an empty path token is an error;
+- the evaluation uses full clones, so its timing has no network fetch;
+- the proposal's example names `Cart.Total()`;
+- `day()` is arithmetic, merges share a `merge_at` helper, and
+  `parse_log` has tests on synthetic input (copies, merges, errors).
 
 ## Risks / Trade-offs
 

@@ -7,7 +7,7 @@ files first.
 
 ## 1. History and the finding field (PR 1, `change/add-hotspot-context`)
 
-- [x] 1.1 `qgate-git`: failing tests on temporary repositories with set committer dates (`GIT_COMMITTER_DATE`), then the history method of D1 and `is_shallow()`. Cover: a commit inside and one outside the window, a merge commit not counted, a rename followed to the head path, a file deleted before the head dropped, a modification after a rename counted once per commit, a shallow clone (`git clone --depth`) answering `true` and a full one `false`. Verified by `cargo test -p qgate-git`.
+- [x] 1.1 `qgate-git`: failing tests on temporary repositories with set committer dates (`GIT_COMMITTER_DATE`), then the history method of D1 and `is_shallow()`. Cover: a commit inside and one outside the window, a merge commit not counted, a rename followed to the head path, a file deleted before the head kept under its own path for the caller to drop (as built), a modification after a rename counted once per commit; after the review of PR 1 also renames on the merged branch (followed) and on another branch (not followed, design D1), the window's exact start, and `parse_log` on synthetic input, a shallow clone (`git clone --depth`) answering `true` and a full one `false`. Verified by `cargo test -p qgate-git`.
 - [x] 1.2 `qgate-core`: `Hotspot` and `Finding::hotspot` (D4) with docs; `hotspot: None` at every struct literal in the workspace. No output changes: every existing test passes unchanged, verified by `cargo test --workspace`.
 
 ## 2. Hotspot context (PR 2, `change/add-hotspot-context-2`)

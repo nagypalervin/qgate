@@ -109,10 +109,23 @@ impl TestRepo {
     /// (ISO 8601); returns the commit id.
     pub(crate) fn commit_at(&self, message: &str, date: &str) -> String {
         self.git(&["add", "-A"]);
+        self.git_at(&["commit", "-q", "--allow-empty", "-m", message], date);
+        self.git(&["rev-parse", "HEAD"])
+    }
+
+    /// Merge `branch` into the checked-out branch with a merge commit
+    /// dated `date`; returns its id.
+    pub(crate) fn merge_at(&self, branch: &str, date: &str) -> String {
+        self.git_at(&["merge", "-q", "--no-ff", "-m", "merge", branch], date);
+        self.git(&["rev-parse", "HEAD"])
+    }
+
+    /// Run git with author and committer date `date`; panics on failure.
+    fn git_at(&self, args: &[&str], date: &str) {
         let mut command = Command::new("git");
         isolate(&mut command);
         let out = command
-            .args(["commit", "-q", "--allow-empty", "-m", message])
+            .args(args)
             .current_dir(&self.dir)
             .env("GIT_AUTHOR_NAME", "Test")
             .env("GIT_AUTHOR_EMAIL", "test@example.com")
@@ -124,10 +137,9 @@ impl TestRepo {
             .expect("git runs");
         assert!(
             out.status.success(),
-            "git commit failed: {}",
+            "git {args:?} failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-        self.git(&["rev-parse", "HEAD"])
     }
 
     /// Stage everything and commit; returns the commit id.

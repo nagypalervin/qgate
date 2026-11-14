@@ -44,10 +44,12 @@ hotspot context.
 
 ### Requirement: The window
 
-The window SHALL be the 182 days before the committer date of the head
-commit; with `--worktree`, before that of `HEAD`. A commit SHALL be in
-the window when its committer date is within those 182 days. The
-result SHALL NOT depend on the time the check runs.
+The window SHALL start 182 days before the committer date of the head
+commit; with `--worktree`, of `HEAD`, from which the history is then
+read. A commit SHALL be in the window when its committer date is after
+the start. History behind a commit dated before the start is not read,
+so with skewed clocks a commit in the window can be missed. The result
+SHALL NOT depend on the time the check runs.
 
 #### Scenario: The same check later
 
@@ -60,16 +62,28 @@ result SHALL NOT depend on the time the check runs.
 - **GIVEN** a commit that changed `src/Cart.cs` 200 days before the head commit
 - **THEN** it does not count for `src/Cart.cs`
 
+#### Scenario: The edge of the window
+
+- **GIVEN** one commit dated exactly 182 days before the head commit and one a second later, each changing `src/Cart.cs`
+- **THEN** only the second counts
+
 ### Requirement: Churn
 
 A file's churn SHALL be the number of non-merge commits in the window,
-reachable from the head commit, that add, modify or rename it, counted
-under its path in the head revision through renames in the window.
+reachable from the head commit, that add, modify, rename or copy it,
+counted under its path in the head revision through the renames in the
+commit's own history. A rename made on another branch than a commit's
+SHALL NOT be followed for it.
 
 #### Scenario: Merge commits
 
 - **GIVEN** three commits that change `src/Cart.cs`, merged into the head branch by a merge commit
 - **THEN** they count three, and the merge commit does not count
+
+#### Scenario: Renamed on another branch
+
+- **GIVEN** `main` renames `src/Basket.cs` to `src/Cart.cs`, while a branch merged later edits `src/Basket.cs` twice
+- **THEN** those two commits do not count for `src/Cart.cs`
 
 #### Scenario: Renamed in the window
 
