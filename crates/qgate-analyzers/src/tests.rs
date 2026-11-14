@@ -8,9 +8,14 @@
 //!
 //! - **Tests by convention** (design D3): a TypeScript source
 //!   `cart.service.ts` is tested by `cart.service.spec.ts` or
-//!   `cart.service.test.ts` beside it; a C# source `Order.cs` of the
-//!   project `Shop.Domain` by an `OrderTests.cs` or `OrderTest.cs` in a
-//!   test project `Shop.Domain.<X>Tests` (or `<X>Test`).
+//!   `cart.service.test.ts` beside it, and every TypeScript file below a
+//!   `spec`, `test`, `tests`, `__tests__` or `e2e` directory is test
+//!   code; a C# source `Order.cs` of the project `Shop.Domain` is tested
+//!   by an `OrderTests.cs` or `OrderTest.cs` in a test project
+//!   `Shop.Domain.<X>Tests` (or `<X>Test`), the project part compared
+//!   without regard to ASCII case.
+//! - **Feature test projects** (acceptance, integration, functional,
+//!   end-to-end) hold tests, but a missing test is never expected there.
 //! - **Projects that test other code** (design D5): a new file without a
 //!   test is reported only when its TypeScript package or its C# project
 //!   tests something, so a repository without tests stays quiet.

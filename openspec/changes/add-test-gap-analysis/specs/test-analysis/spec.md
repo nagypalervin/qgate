@@ -228,9 +228,9 @@ file's path and the line of its first changed unit in source order.
 
 #### Scenario: Service changed, spec not
 
-- **GIVEN** `src/app/cart.service.spec.ts` exists, and the change edits the bodies of `CartService.total`, `CartService.add` and `CartService.remove` in `src/app/cart.service.ts`, the first on line 12
+- **GIVEN** `src/app/cart.service.spec.ts` exists, and the change edits the bodies of `CartService.total`, `CartService.add` and `CartService.remove` in `src/app/cart.service.ts`, the first on line 4
 - **WHEN** the user runs `qgate check --base main`
-- **THEN** standard output contains `warning src/app/cart.service.ts:12  CartService.total and 2 more changed, but not its test src/app/cart.service.spec.ts  [tests/unchanged-test]`
+- **THEN** standard output contains `warning src/app/cart.service.ts:4  CartService.total and 2 more changed, but not its test src/app/cart.service.spec.ts  [tests/unchanged-test]`
 - **AND** the exit code is 0
 
 #### Scenario: One unit

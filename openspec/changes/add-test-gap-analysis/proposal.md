@@ -84,8 +84,9 @@ as 0.7.0, before hotspots (M5b, 0.8.0).
 - **Deleted tests.** A change that deletes `OrderTests.cs` is not
   reported.
 - **Other test layouts:**
-  - `__tests__` directories;
-  - a separate `test/` tree for TypeScript;
+  - pairing a source with a test in a `__tests__` directory or a
+    separate `test/` tree for TypeScript (files there are test code
+    since the evaluation, but no test of a particular source);
   - Angular templates (`*.component.html`) as changed code;
   - pairing by class name instead of file name in C#;
   - test projects named differently from their source project, such as
@@ -188,6 +189,18 @@ every recommendation. The partner's test naming was not given, so
 pairing stays with the built-in conventions (question 1 (a)). The
 evaluation's stop rule decides whether configurable pairing or the
 `<ProjectReference>` fallback (design D3) is needed.
+
+### Changed after the evaluation (2026-11-14)
+
+Ervin decided three changes from the evaluation (design D3, "Decided
+after the evaluation"); the spec has them:
+- C# project names ignore ASCII case when a test project is matched to
+  its project, so `SSO.Test` tests `Sso`;
+- TypeScript files below a directory named `spec`, `test`, `tests`,
+  `__tests__` or `e2e` are test code, never sources;
+- feature test projects (acceptance, integration, functional,
+  end-to-end) hold tests for `tests/unchanged-test`, but
+  `tests/missing-test` neither expects a test there nor counts them.
 
 ## Capabilities
 

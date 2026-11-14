@@ -236,7 +236,8 @@ Both come from the head list, computed once per run.
     source's own extension (`order.spec.mts` for `order.mts`), or `... have no test: ...` with
     `and <k> more`;
   - for C#, `expected <Stem>Tests.cs in <test project>`, naming the
-    first test project by name.
+    first class test project by name, not a feature test project (D3,
+    "Decided after the evaluation").
 - **Ordering** follows the CLI's existing sort; no new key.
 
 ### D7. `[tests] exclude`
@@ -443,10 +444,53 @@ the diff between the two runs is exactly the intended one:
   class test project, instead of `Sso.IntegrationTest`;
 - nothing new, no miss left, and the other findings and times as before.
 
-**To reproduce:** the scripts are `run.py` (checkout, config, both
-binaries, JSON per repository), `summary.py`, `list.py` and
-`misses.py`, kept with the session; the loop above with these four
-repositories rebuilds every number.
+**Every finding** is listed with its category in
+[`evaluation/findings.md`](evaluation/findings.md), with whether the
+second run still reports it; its totals are the table above.
+
+**Excludes:** D10 planned excludes for migrations and generated
+clients. Only migrations were needed: generated C# files are skipped
+by their name and header already, and no evaluated commit touched a
+generated TypeScript or C# client (a search of the changed paths for
+`generated`, `.g.cs`, `Designer.cs`, `openapi` and `swagger` finds
+three hand-written files).
+
+**Second run:** a release build of the code committed as f4d3281, the
+commit that records it.
+
+**To reproduce:** the scripts are in [`evaluation/`](evaluation/):
+- `run.py` checks out each commit, writes the `qgate.toml` above and
+  runs both binaries, one JSON file per repository;
+- `summary.py`, `list.py` and `misses.py` print the totals, the
+  findings and the miss checks;
+- `classify.py` holds the hand sort by file name and writes
+  `findings.md`.
+
+With the four repositories cloned at the commits above (`git clone
+--depth 150`), `run.py <repo> <out> <qgate> <qgate-0.6.0> '*.ts'` (or
+`'*.cs'`, or both for CleanArchitecture) rebuilds every number.
+
+## Review of PR 2
+
+The reviewer found no blocker; its counts of the evaluation add up.
+Fixed:
+- the README said tests below the test directories pair with their
+  source; they are test code, not a test of a particular source;
+- the proposal now records the three decisions after the evaluation,
+  and its out-of-scope list no longer contradicts the new requirement;
+- the evaluation lists every finding (`evaluation/findings.md`), keeps
+  its scripts in `evaluation/`, names the build of the second run, and
+  explains why only migrations were excluded;
+- the README's "about half" is now "28 of 59", the run it comes from;
+- "project names ignore case" now says which part: the project part of
+  a test project's name, not the `Test` or `Tests` at its end. This was
+  the decision; detecting a test project stays case-sensitive;
+- the scenario "Service changed, spec not" names line 4, as the
+  end-to-end test asserts;
+- end-to-end tests now cover a generated test that counts by its path
+  and a field edit that changes no unit;
+- D6 and the module docs name the class test project, the test
+  directories and feature test projects.
 
 ## Release notes for 0.7.0 (draft, task 2.5)
 

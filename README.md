@@ -477,8 +477,9 @@ warning src/app/orders/order.service.ts:8  OrderService.load and 1 more have no 
     directory or above.
   - A project whose name's last segment ends in `Test` or `Tests` is a
     test project, and all its files are tests. `Shop.Domain.UnitTests`
-    and `SHOP.DOMAIN.Tests` are test projects of `Shop.Domain`: project
-    names ignore case.
+    and `SHOP.DOMAIN.Tests` are test projects of `Shop.Domain`: the
+    project part of the name ignores case (the `Test` or `Tests` at its
+    end does not).
   - `Order.cs` is tested by an `OrderTests.cs` or `OrderTest.cs`
     anywhere in such a test project.
 - **`tests/unchanged-test`:** the file has a test, its code changed,
@@ -513,8 +514,9 @@ warning src/app/orders/order.service.ts:8  OrderService.load and 1 more have no 
   - An invalid pattern fails with exit code `2`, naming
     `tests.exclude`.
 - **Not covered:**
-  - TypeScript tests in another directory tree, except below the test
-    directories above;
+  - pairing a TypeScript source with a test in another directory, such
+    as a separate `test/` tree: files there are test code, but no test
+    of a particular source;
   - test projects named differently from their project, such as
     eShop's `Ordering.UnitTests` for `Ordering.Domain`;
   - pairing by class name instead of file name;
@@ -523,8 +525,8 @@ warning src/app/orders/order.service.ts:8  OrderService.load and 1 more have no 
   - whether the changed test actually tests the changed code.
 
 On the last 30 code commits of `bitwarden/clients`, `bitwarden/server`,
-`jasontaylordev/CleanArchitecture` and `dotnet/eShop`, about half of
-the findings pointed at code whose test should have changed or should
+`jasontaylordev/CleanArchitecture` and `dotnet/eShop`, 28 of 59
+findings pointed at code whose test should have changed or should
 exist. Most of the rest were refactors, composition roots and models
 that need no test of their own. Those are what `[tests] exclude` is
 for.
