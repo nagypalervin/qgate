@@ -332,6 +332,26 @@ fn listing_the_tools() {
 
 // Requirement: What the tool checks
 
+// The tests analyzer runs through the tool too (task 2.4 of
+// `add-test-gap-analysis`).
+#[test]
+fn code_changed_without_its_test() {
+    let repo = committed(&[
+        ("package.json", "{}\n"),
+        ("src/a.ts", &function("f", 1)),
+        ("src/a.spec.ts", "describe(\"f\", () => {});\n"),
+    ]);
+    repo.write("src/a.ts", function("f", 2));
+    let result = call(&repo, &json!({}));
+    let rules: Vec<&str> = report(&result)["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .filter_map(|f| f["rule"].as_str())
+        .collect();
+    assert!(rules.contains(&"tests/unchanged-test"), "{result}");
+}
+
 #[test]
 fn uncommitted_work() {
     let repo = committed_and_uncommitted();

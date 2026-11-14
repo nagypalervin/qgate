@@ -136,6 +136,12 @@ and `MISSING_TEST_RULE`.
 - **Why not an `Analyzer`:** a finding depends on other files of the
   change (the test) and on the head tree (whether a test or a test
   project exists). Duplication made the same choice.
+- **As built (PR 2):** `analyze(changes, head_paths, changed_paths,
+  exclude)`, four arguments instead of a `TestInput` struct; the two
+  path lists are iterators of `&str`, so the CLI passes git's strings
+  without copying. The module is named after the analyzer, `tests`, so
+  its unit tests live in `tests::tests`; clippy's `module_inception` is
+  allowed there, with the reason in a comment.
 - **Why raw changed paths:** test files count regardless of
   `[files] exclude` and of generation (Gate 1, question 6). The
   analyzed changes alone would miss an excluded spec.
@@ -168,6 +174,22 @@ and `MISSING_TEST_RULE`.
   merges, and the spec changes with it.
 - **Paths compare byte for byte, case-sensitively,** as git stores
   them. `OrderTests.cs` does not pair with `ordertests.cs`.
+
+**Decided after the evaluation (2026-11-14, Ervin).** Three patterns
+of the evaluation below changed the conventions before the release:
+- **C# project names ignore ASCII case** when a test project is matched
+  to its project: `SSO.Test` tests `Sso`, as MSBuild and NuGet treat
+  names. Test file names stay exact.
+- **TypeScript test code by directory:** a file with a directory named
+  `spec`, `test`, `tests`, `__tests__` or `e2e` in its path is a test,
+  so helpers there (`spec/sm-test-utils.ts`, `e2e/cart-helpers.ts`)
+  need no test. Names such as `*.spec-util.ts` are left to `[tests]
+  exclude`.
+- **Feature test projects** (`AcceptanceTests`, `IntegrationTest(s)`,
+  `FunctionalTests`, `EndToEndTests`, `E2ETests`, each with or without
+  the `s`, any case) still hold tests for `tests/unchanged-test`, but
+  `tests/missing-test` neither expects a test there nor counts them for
+  its scope: they test features, not classes.
 
 ### D4. Which changed units, which file is "new"
 
@@ -214,7 +236,8 @@ Both come from the head list, computed once per run.
     source's own extension (`order.spec.mts` for `order.mts`), or `... have no test: ...` with
     `and <k> more`;
   - for C#, `expected <Stem>Tests.cs in <test project>`, naming the
-    first test project by name.
+    first class test project by name, not a feature test project (D3,
+    "Decided after the evaluation").
 - **Ordering** follows the CLI's existing sort; no new key.
 
 ### D7. `[tests] exclude`
@@ -232,6 +255,11 @@ Both come from the head list, computed once per run.
 - **Head list:** `check_revisions` reads the head file list once and
   passes it to both duplication and test analysis. Today
   `duplication()` reads it itself.
+- **As built (PR 2):** `duplication()` takes the list as an eighth
+  argument, one over clippy's limit; `too_many_arguments` is allowed on
+  it with a comment rather than bundling the revision check's state into
+  a struct used only there. The `[tests] exclude` patterns are checked
+  with the other configuration, before any file is analyzed.
 - **When it runs:** test analysis runs when `analyzed` is non-empty,
   as duplication does. Its findings join the others before the sort.
 - **Other entry points:** `--worktree`, the Claude Code hook and the
@@ -300,6 +328,189 @@ The reviewer found no blocker. Fixed:
 - D3 and D6 disagreed on `.mts` sources; every TypeScript extension now
   works alike (spec "TypeScript tests", scenario "An ES module source");
 - task 2.3 now lists the scenario "Only a TypeScript type annotation".
+
+## Evaluation (task 2.6, 2026-11-14)
+
+**Repositories** (shallow clones, depth 150; nothing of theirs was built
+or run):
+- `bitwarden/clients` at 4d61897 (2026-11-13): Angular and Jest,
+  colocated `*.spec.ts`;
+- `bitwarden/server` at 341acc9 (2026-11-13): `src/Core` with
+  `test/Core.Test`, and `bitwarden_license/` alike;
+- `jasontaylordev/CleanArchitecture` at e1ab4cc (2026-11-09): .NET with
+  `*.UnitTests`, `*.FunctionalTests` and `Web.AcceptanceTests`, and an
+  Angular client;
+- `dotnet/eShop` at 913acea (2026-10-15), the known mismatch.
+
+**Binary:** `cargo build --release` of this branch at 0d5d499 (version
+still 0.6.0, aarch64 Linux), against the published 0.6.0 binary.
+
+**Run:** the last 30 non-merge commits that touch `.ts` (clients),
+`.cs` (server, eShop) or both (CleanArchitecture; only 27 have their
+parent in the shallow history). Each commit is checked out, an
+untracked `qgate.toml` with `[files] exclude = ["**/Migrations/**"]` is
+written, and both binaries run `check --base <commit>^ --worktree
+--format json --fail-on never`.
+
+**Nothing else changed:** in all 117 commits every finding that is not
+`tests/` equals 0.6.0's, and no run failed.
+
+**Time per commit:**
+
+| | this branch, mean (max) | 0.6.0, mean (max) |
+|---|---|---|
+| clients | 3.76 s (4.07) | 4.06 s (4.56) |
+| server | 4.06 s (4.53) | 4.20 s (4.51) |
+| CleanArchitecture | 0.04 s (0.07) | 0.05 s (0.07) |
+| eShop | 0.14 s (0.19) | 0.15 s (0.18) |
+
+Duplication over the whole head tree dominates the large repositories;
+the tests analysis adds no measurable time.
+
+**67 findings, sorted by hand** from each commit's diff:
+
+| | findings | a test should have changed or exist | needs no test | test code taken for a source | miss |
+|---|---|---|---|---|---|
+| clients | 41 | 12 | 26 | 3 | 0 |
+| server | 5 | 2 | 2 | 0 | 1 |
+| CleanArchitecture | 19 | 13 | 6 | 0 | 0 |
+| eShop | 2 | 1 | 0 | 1 | 0 |
+
+- **`tests/unchanged-test`, 30:**
+  - **13 should have changed:** new behaviour such as todo-list colours
+    (CleanArchitecture), a new login-page condition in an interceptor,
+    eShop's client moved to API version 2, trial length and new browser
+    paths (clients).
+  - **16 needed no test change:** composition roots rewired (`MainBackground`
+    and `ServiceContainer` constructors in clients, 7 findings), renamed
+    i18n keys (3), `readonly` and signal refactors (2), collection
+    expressions replacing `new object[] { ... }` (2), a moved formatter, a
+    newly wired service.
+  - **1 miss:** `bitwarden_license/src/Sso/Controllers/AccountController.cs`.
+    The commit changed `bitwarden_license/test/SSO.Test/Controllers/AccountControllerTest.cs`,
+    but the project is `Sso` and the test project `SSO.Test`, so the
+    case-sensitive name comparison of D3 pairs only `Sso.IntegrationTest`.
+- **`tests/missing-test`, 37:**
+  - **15 should have a test:** new utilities and services
+    (`readSmSecretRequest`, `PopupRevealedCipherService`), new Angular
+    components and services in CleanArchitecture's client, a new job.
+  - **18 need no test of their own:**
+    - 10 response models whose constructor maps JSON (clients), several
+      exercised by command specs;
+    - 2 Angular provider functions (`provideSecretsManager`, `providePam`);
+    - 2 in server: a result type, and `NoopCookieManager`, whose
+      expected test project is `Sso.IntegrationTest`;
+    - 4 CleanArchitecture web infrastructure files whose expected test
+      project is `Web.AcceptanceTests`.
+
+    Five of these 18 name an acceptance or integration test project,
+    which tests features, not classes.
+  - **4 test code taken for sources:** `spec/sm-test-utils.ts`,
+    `spec/sm-access-test-utils.ts`, `leased-cipher.state.spec-util.ts`
+    (clients) and `e2e/cart-helpers.ts` (eShop, next to Playwright
+    specs).
+  - **No miss:** `git grep` of each new unit's name in the head tree's
+    tests finds only indirect uses (models in command specs, helpers in
+    the specs that use them).
+
+**Stop rule:** misses are 1 of 5 findings in server (20 %) and none
+elsewhere, under a third everywhere, so the release is not stopped.
+
+**Edited existing files without a test** (question 3, not reported),
+approximated by file names:
+
+| | edited existing sources | with a test by name | without |
+|---|---|---|---|
+| clients | 164 | 82 | 82 |
+| server | 114 | 80 | 34 |
+| CleanArchitecture | 104 | 11 | 93 |
+| eShop | 115 | 11 | 104 |
+
+Reporting them would have added 313 findings to the 67, which supports
+leaving them out. In server, 80 edited files had a test and only 2
+were reported: its commits usually change the tests with the code.
+
+**eShop, the known mismatch:** its test projects (`Ordering.UnitTests`
+for `Ordering.Domain` and `Ordering.API`) pair with no project, so its
+only findings come from `ClientApp.UnitTests` and an e2e helper. As
+expected, the conventions do not cover this layout.
+
+**After the three decisions** (D3, "Decided after the evaluation"), the
+same commits with a build that has them: 59 findings instead of 67, and
+the diff between the two runs is exactly the intended one:
+- gone: the `Sso` miss, the three helpers in `spec/` and `e2e/`, and the
+  four findings that expected a test in `Web.AcceptanceTests`;
+- changed: `NoopCookieManager` now expects its test in `SSO.Test`, the
+  class test project, instead of `Sso.IntegrationTest`;
+- nothing new, no miss left, and the other findings and times as before.
+
+**Every finding** is listed with its category in
+[`evaluation/findings.md`](evaluation/findings.md), with whether the
+second run still reports it; its totals are the table above.
+
+**Excludes:** D10 planned excludes for migrations and generated
+clients. Only migrations were needed: generated C# files are skipped
+by their name and header already, and no evaluated commit touched a
+generated TypeScript or C# client (a search of the changed paths for
+`generated`, `.g.cs`, `Designer.cs`, `openapi` and `swagger` finds
+three hand-written files).
+
+**Second run:** a release build of the code committed as f4d3281, the
+commit that records it.
+
+**To reproduce:** the scripts are in [`evaluation/`](evaluation/):
+- `run.py` checks out each commit, writes the `qgate.toml` above and
+  runs both binaries, one JSON file per repository;
+- `summary.py`, `list.py` and `misses.py` print the totals, the
+  findings and the miss checks;
+- `classify.py` holds the hand sort by file name and writes
+  `findings.md`.
+
+With the four repositories cloned at the commits above (`git clone
+--depth 150`), `run.py <repo> <out> <qgate> <qgate-0.6.0> '*.ts'` (or
+`'*.cs'`, or both for CleanArchitecture) rebuilds every number.
+
+## Review of PR 2
+
+The reviewer found no blocker; its counts of the evaluation add up.
+Fixed:
+- the README said tests below the test directories pair with their
+  source; they are test code, not a test of a particular source;
+- the proposal now records the three decisions after the evaluation,
+  and its out-of-scope list no longer contradicts the new requirement;
+- the evaluation lists every finding (`evaluation/findings.md`), keeps
+  its scripts in `evaluation/`, names the build of the second run, and
+  explains why only migrations were excluded;
+- the README's "about half" is now "28 of 59", the run it comes from;
+- "project names ignore case" now says which part: the project part of
+  a test project's name, not the `Test` or `Tests` at its end. This was
+  the decision; detecting a test project stays case-sensitive;
+- the scenario "Service changed, spec not" names line 4, as the
+  end-to-end test asserts;
+- end-to-end tests now cover a generated test that counts by its path
+  and a field edit that changes no unit;
+- D6 and the module docs name the class test project, the test
+  directories and feature test projects.
+
+## Release notes for 0.7.0 (draft, task 2.5)
+
+To go above GitHub's generated list when the release is published:
+
+```markdown
+qgate now reports code that changed without its tests (M5a), in
+`--base` and `--worktree` mode, the Claude Code hook and the MCP server:
+
+- `tests/unchanged-test`: a source file's code changed, but none of its
+  tests did (Angular-style `*.spec.ts` beside the file; C# `*Tests.cs`
+  in a `<Project>.<X>Tests` project);
+- `tests/missing-test`: a new file without a test, in a package or
+  project that tests other code.
+
+Both are Warnings. **If you run with `--fail-on warning`, a pull request
+can now fail on them.** List source paths that need no test under
+`[tests] exclude` in `qgate.toml`, or turn the check off with
+`exclude = ["**"]`. See "Tests changed with the code" in the README.
+```
 
 ## Risks / Trade-offs
 

@@ -4,7 +4,8 @@
 
 > Status: early. `qgate check` compares TypeScript and [C#](#c) code
 > between two git revisions (or two files) for cyclomatic complexity,
-> newly duplicated code and, with a
+> newly duplicated code, [code changed without its
+> tests](#tests-changed-with-the-code) and, with a
 > [`qgate.toml`](#architecture-rules-qgatetoml), forbidden imports and
 > C# `using` directives. It
 > reports on pull requests in GitHub Actions and Azure Pipelines; more
@@ -442,6 +443,94 @@ warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 
 - It is a Warning, so it fails a run only with `--fail-on warning`. The
   two-file form does not check duplication.
 
+### Tests changed with the code
+
+In `--base` and `--worktree` mode, and so in the Claude Code hook and
+the MCP server, qgate pairs each changed source file with its tests by
+naming convention, and reports code that changed while its tests did
+not:
+
+```
+warning src/app/cart.service.ts:4  CartService.total and 2 more changed, but not its test src/app/cart.service.spec.ts  [tests/unchanged-test]
+warning src/app/orders/order.service.ts:8  OrderService.load and 1 more have no test: expected src/app/orders/order.service.spec.ts  [tests/missing-test]
+```
+
+- **What counts as changed:** a function unit that is new, or whose
+  code changed.
+  - Whitespace, comments, semicolons and TypeScript types are ignored.
+  - Imports, fields and types outside functions are not code of a
+    unit, and a removed function changes nothing. So a file that only
+    reorders its imports needs no test change.
+  - A TypeScript method's decorators, and the call around a bound
+    function (`export const GET = withAuth(...)`), belong to its unit;
+    in C#, types and attributes count.
+- **TypeScript tests, Angular style:**
+  - `cart.service.ts` is tested by `cart.service.spec.ts` or
+    `cart.service.test.ts` in the same directory, with any of the
+    extensions `.ts`, `.mts`, `.cts` and `.tsx`.
+  - Spec and test files are tests, never sources. So is every
+    TypeScript file below a directory named `spec`, `test`, `tests`,
+    `__tests__` or `e2e`, so test helpers there need no test of their
+    own.
+- **C# tests, in test projects:**
+  - A `.cs` file belongs to the project of the nearest `.csproj` in its
+    directory or above.
+  - A project whose name's last segment ends in `Test` or `Tests` is a
+    test project, and all its files are tests. `Shop.Domain.UnitTests`
+    and `SHOP.DOMAIN.Tests` are test projects of `Shop.Domain`: the
+    project part of the name ignores case (the `Test` or `Tests` at its
+    end does not).
+  - `Order.cs` is tested by an `OrderTests.cs` or `OrderTest.cs`
+    anywhere in such a test project.
+- **`tests/unchanged-test`:** the file has a test, its code changed,
+  and the change adds, edits or renames none of its tests.
+- **`tests/missing-test`:** a new file, or one that gets its first
+  function, has no test, and its project tests other code:
+  - for TypeScript, the nearest directory with a `package.json`, or the
+    repository root, has a test somewhere below it;
+  - for C#, the project has a test project for classes.
+
+  An existing file without a test is not reported.
+- **Feature test projects:** acceptance, integration, functional and
+  end-to-end test projects (`Web.AcceptanceTests`, `Api.IntegrationTest`)
+  hold tests for `tests/unchanged-test`. `tests/missing-test` neither
+  expects a test in them nor counts them for its scope.
+- **Both are Warnings,** one per file, at its first changed function. A
+  refactor can rightly leave its tests alone, so they fail a run only
+  with `--fail-on warning`.
+- **Test files count by their path,** even when `[files] exclude` names
+  them. The two-file form does not check tests.
+- **`[tests] exclude`** in `qgate.toml` lists source paths that need no
+  test. They are still analyzed otherwise:
+
+  ```toml
+  [tests]
+  exclude = ["src/environments/**", "**/Program.cs", "**/*.spec-util.ts"]
+  ```
+
+  - `exclude = ["**"]` turns the check off.
+  - The patterns are those of
+    [architecture rules](#architecture-rules-qgatetoml).
+  - An invalid pattern fails with exit code `2`, naming
+    `tests.exclude`.
+- **Not covered:**
+  - pairing a TypeScript source with a test in another directory, such
+    as a separate `test/` tree: files there are test code, but no test
+    of a particular source;
+  - test projects named differently from their project, such as
+    eShop's `Ordering.UnitTests` for `Ordering.Domain`;
+  - pairing by class name instead of file name;
+  - Angular templates;
+  - deleted tests and coverage;
+  - whether the changed test actually tests the changed code.
+
+On the last 30 code commits of `bitwarden/clients`, `bitwarden/server`,
+`jasontaylordev/CleanArchitecture` and `dotnet/eShop`, 28 of 59
+findings pointed at code whose test should have changed or should
+exist. Most of the rest were refactors, composition roots and models
+that need no test of their own. Those are what `[tests] exclude` is
+for.
+
 ### Architecture rules (`qgate.toml`)
 
 Put a `qgate.toml` at the repository root to forbid dependencies between
@@ -584,9 +673,10 @@ exclude = ["**/Migrations/**", "vendor"]
 
 ### C#
 
-`.cs` files get the complexity check in every form and the duplication
-check in `--base` and `--worktree` mode, and so in the Claude Code hook
-and the MCP server, which run the same check. Architecture rules check
+`.cs` files get the complexity check in every form, and the duplication
+and [tests](#tests-changed-with-the-code) checks in `--base` and
+`--worktree` mode, and so in the Claude Code hook and the MCP server,
+which run the same check. Architecture rules check
 its `using` directives against namespace patterns (see
 [C# `using` directives](#c-using-directives)).
 
@@ -950,8 +1040,8 @@ git diff base..head ─► parser (tree-sitter) ─► analyzers ─► findings
                                               └ tests           └ MCP server
 ```
 
-The `tests` analyzer (M5) and SARIF output (Later) are planned; the rest
-works today.
+Coverage in the `tests` analyzer (M5) and SARIF output (Later) are
+planned; the rest works today.
 
 Design principles:
 

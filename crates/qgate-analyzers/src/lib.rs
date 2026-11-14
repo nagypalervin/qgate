@@ -12,15 +12,18 @@
 //!   a forbid rule.
 //! - [`duplication`]: blocks a change newly duplicates. A repository-level
 //!   analysis with its own index rather than an [`Analyzer`].
+//! - [`tests`]: source files whose code changed while their tests did
+//!   not, and new files without a test. Repository-level too.
 //!
 //! Shared with the CLI:
 //!
 //! - [`patterns`]: path patterns, for architecture rules and the
-//!   `[files] exclude` setting, and namespace patterns for C# rules.
+//!   `[files] exclude` and `[tests] exclude` settings, and namespace
+//!   patterns for C# rules.
 //!
 //! Planned:
 //!
-//! - `tests`: changed code without changed tests, coverage drop (M5)
+//! - coverage drop, in `tests` (M5)
 //!
 //! ```
 //! use std::path::PathBuf;
@@ -42,6 +45,7 @@ pub mod architecture;
 pub mod complexity;
 pub mod duplication;
 pub mod patterns;
+pub mod tests;
 
 use std::path::PathBuf;
 
