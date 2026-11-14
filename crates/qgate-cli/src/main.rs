@@ -33,7 +33,7 @@ use qgate_analyzers::patterns::PathPatterns;
 use qgate_analyzers::{Analyzer, FileChange};
 use qgate_config::Config;
 use qgate_core::{Finding, Location, Severity};
-use qgate_git::{BlobId, BlobReader, ChangedFile, Changes, GitError, Repository};
+use qgate_git::{BlobId, BlobReader, ChangedFile, Changes, GitError, Repository, TreeFile};
 use qgate_lang::{Family, FileModel, Language, ParseError, Token};
 use qgate_report::{
     ReportSummary, render_azure, render_github, render_json, render_markdown, render_text,
@@ -600,6 +600,12 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
     let config = load_config(&repo, base, &head)?;
     let architecture = architecture_analyzer(&config)?;
     let selection = FileSelection::new(&config)?;
+    let tests_exclude = PathPatterns::new(&config.tests.exclude)
+        .map_err(|e| format!("{CONFIG_FILE}: tests.exclude: {e}"))?;
+    // Every path the change added, edited or renamed, before the
+    // selection: a test counts as changed even when it is excluded
+    // (design D2 of `add-test-gap-analysis`).
+    let edited: Vec<String> = files.iter().map(|file| file.path.clone()).collect();
     let mut analyzers: Vec<&dyn Analyzer> = vec![&ComplexityAnalyzer];
     if !architecture.is_empty() {
         analyzers.push(&architecture);
@@ -656,16 +662,28 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
         }
     }
     if !analyzed.is_empty() {
+        // Read once, for duplication and tests (design D8 of
+        // `add-test-gap-analysis`).
+        let tree = repo
+            .files_at(&head.revision)
+            .map_err(|e| git_message(&e, base, &head))?;
         left.extend(deleted.into_iter().map(|file| (file.path, file.id)));
         findings.extend(duplication(
             &repo,
             base,
             &head,
+            &tree,
             &analyzed,
             &left,
             &changed_paths,
             &selection,
         )?);
+        findings.extend(qgate_analyzers::tests::analyze(
+            &analyzed,
+            tree.iter().map(|file| file.path.as_str()),
+            edited.iter().map(String::as_str),
+            &tests_exclude,
+        ));
     }
     sort(&mut findings);
     Ok(findings)
@@ -679,10 +697,14 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
 /// skipped silently. Each language family has its own index, so code is
 /// compared only with code of its own family (design D6 of
 /// `add-csharp-analysis`), and generated C# files take no part.
+// One more than clippy's limit: the revision check's state, passed
+// through rather than bundled into a struct used only here.
+#[allow(clippy::too_many_arguments)]
 fn duplication(
     repo: &Repository,
     base: &str,
     head: &Head,
+    tree: &[TreeFile],
     changes: &[FileChange],
     left: &[(String, BlobId)],
     changed_paths: &HashSet<String>,
@@ -744,9 +766,6 @@ fn duplication(
         );
         indexes.push((family, DuplicationIndex::new(&sources)));
     }
-    let tree = repo
-        .files_at(&head.revision)
-        .map_err(|e| git_message(&e, base, head))?;
     for file in tree {
         if changed_paths.contains(&file.path) {
             continue;

@@ -238,6 +238,11 @@ Both come from the head list, computed once per run.
 - **Head list:** `check_revisions` reads the head file list once and
   passes it to both duplication and test analysis. Today
   `duplication()` reads it itself.
+- **As built (PR 2):** `duplication()` takes the list as an eighth
+  argument, one over clippy's limit; `too_many_arguments` is allowed on
+  it with a comment rather than bundling the revision check's state into
+  a struct used only there. The `[tests] exclude` patterns are checked
+  with the other configuration, before any file is analyzed.
 - **When it runs:** test analysis runs when `analyzed` is non-empty,
   as duplication does. Its findings join the others before the sort.
 - **Other entry points:** `--worktree`, the Claude Code hook and the
