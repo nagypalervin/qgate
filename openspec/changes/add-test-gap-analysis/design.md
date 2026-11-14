@@ -448,6 +448,26 @@ binaries, JSON per repository), `summary.py`, `list.py` and
 `misses.py`, kept with the session; the loop above with these four
 repositories rebuilds every number.
 
+## Release notes for 0.7.0 (draft, task 2.5)
+
+To go above GitHub's generated list when the release is published:
+
+```markdown
+qgate now reports code that changed without its tests (M5a), in
+`--base` and `--worktree` mode, the Claude Code hook and the MCP server:
+
+- `tests/unchanged-test`: a source file's code changed, but none of its
+  tests did (Angular-style `*.spec.ts` beside the file; C# `*Tests.cs`
+  in a `<Project>.<X>Tests` project);
+- `tests/missing-test`: a new file without a test, in a package or
+  project that tests other code.
+
+Both are Warnings. **If you run with `--fail-on warning`, a pull request
+can now fail on them.** List source paths that need no test under
+`[tests] exclude` in `qgate.toml`, or turn the check off with
+`exclude = ["**"]`. See "Tests changed with the code" in the README.
+```
+
 ## Risks / Trade-offs
 
 - **[A team's names differ from the conventions]** → a stream of
