@@ -429,7 +429,7 @@ fn new_csharp_classes() {
     assert_eq!(
         test_lines(&out),
         [
-            "warning src/Domain/Invoice.cs:5  Invoice.Ship() has no test: expected InvoiceTests.cs in Domain.IntegrationTests  [tests/missing-test]"
+            "warning src/Domain/Invoice.cs:5  Invoice.Ship() has no test: expected InvoiceTests.cs in Domain.UnitTests  [tests/missing-test]"
         ],
         "{out}"
     );
@@ -543,4 +543,94 @@ fn the_tests_table() {
         ],
     );
     assert_eq!(test_lines(&out), Vec::<&str>::new(), "{out}");
+}
+
+// "TypeScript test code": "Test helpers", "A directory whose name only
+// contains test"
+#[test]
+fn test_helpers_by_directory() {
+    let base = angular();
+    let helper = function("helper", 1);
+    let (out, _, _) = run(
+        &refs(&base),
+        &[
+            ("src/app/spec/test-utils.ts", &helper),
+            ("e2e/cart-helpers.ts", &helper),
+        ],
+    );
+    assert_eq!(test_lines(&out), Vec::<&str>::new(), "{out}");
+    let (out, _, _) = run(&refs(&base), &[("src/testing/format.ts", &helper)]);
+    assert_eq!(test_lines(&out).len(), 1, "{out}");
+    assert!(out.contains("[tests/missing-test]"), "{out}");
+}
+
+// "C# tests": "Names that differ in case"
+#[test]
+fn project_names_that_differ_in_case() {
+    let base = [
+        ("src/Sso/Sso.csproj", CSPROJ.to_owned()),
+        (
+            "src/Sso/AccountController.cs",
+            cs_class("AccountController", 1),
+        ),
+        ("test/SSO.Test/SSO.Test.csproj", CSPROJ.to_owned()),
+        (
+            "test/SSO.Test/AccountControllerTest.cs",
+            cs_class("AccountControllerTest", 1),
+        ),
+    ];
+    let (edited, test) = (
+        cs_class("AccountController", 2),
+        cs_class("AccountControllerTest", 2),
+    );
+    let (out, _, _) = run(
+        &refs(&base),
+        &[
+            ("src/Sso/AccountController.cs", &edited),
+            ("test/SSO.Test/AccountControllerTest.cs", &test),
+        ],
+    );
+    assert_eq!(test_lines(&out), Vec::<&str>::new(), "{out}");
+    let (out, _, _) = run(&refs(&base), &[("src/Sso/AccountController.cs", &edited)]);
+    assert_eq!(
+        test_lines(&out),
+        [
+            "warning src/Sso/AccountController.cs:5  AccountController.Ship() changed, but not its test test/SSO.Test/AccountControllerTest.cs  [tests/unchanged-test]"
+        ],
+        "{out}"
+    );
+}
+
+// "Feature test projects", "Only an acceptance test project"
+#[test]
+fn feature_test_projects() {
+    let mut base = solution();
+    base.push((
+        "tests/Web.AcceptanceTests/Web.AcceptanceTests.csproj",
+        CSPROJ.to_owned(),
+    ));
+    let (handler, orders, todo) = (
+        cs_class("Handler", 1),
+        cs_class("Orders", 1),
+        cs_class("TodoItems", 2),
+    );
+    // Only an acceptance test project: no missing test expected.
+    let (out, _, _) = run(
+        &refs(&base),
+        &[("src/Web/Infrastructure/Handler.cs", &handler)],
+    );
+    assert_eq!(test_lines(&out), Vec::<&str>::new(), "{out}");
+    // The expected project is a class test project.
+    let (out, _, _) = run(&refs(&base), &[("src/Application/Orders.cs", &orders)]);
+    assert!(
+        out.contains("expected OrdersTests.cs in Application.UnitTests  [tests/missing-test]"),
+        "{out}"
+    );
+    // Functional tests still count: the first unchanged test by path is
+    // the functional one.
+    let (out, _, _) = run(&refs(&base), &[("src/Application/TodoItems.cs", &todo)]);
+    assert!(
+        out.contains("but not its test tests/Application.FunctionalTests/TodoItemsTests.cs, and 1 more  [tests/unchanged-test]"),
+        "{out}"
+    );
 }

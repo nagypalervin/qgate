@@ -138,6 +138,13 @@ fn changed_units(change: &FileChange) -> Vec<&Function> {
 /// The TypeScript extensions a source or a test can have.
 const TS_EXTENSIONS: [&str; 4] = ["ts", "mts", "cts", "tsx"];
 
+/// Directories whose TypeScript files are test code, helpers included.
+const TEST_DIRS: [&str; 5] = ["spec", "test", "tests", "__tests__", "e2e"];
+
+/// The last name segments of feature test projects, lowercase, without
+/// the final `test` or `tests`.
+const FEATURE_TESTS: [&str; 5] = ["acceptance", "integration", "functional", "endtoend", "e2e"];
+
 /// What the head revision's paths say about tests: which files are tests,
 /// which tests a source has, and whether its project tests other code.
 /// Built once per run from every path of the head revision.
@@ -152,8 +159,9 @@ pub(crate) struct Conventions<'a> {
     tested_dirs: HashSet<&'a str>,
     /// The project of each directory that holds a `.csproj`, by name.
     projects: HashMap<&'a str, &'a str>,
-    /// The test projects of each project, by name, sorted.
-    test_projects: HashMap<&'a str, Vec<&'a str>>,
+    /// The test projects of each project, by the project's name in
+    /// lowercase (names ignore ASCII case), sorted.
+    test_projects: HashMap<String, Vec<&'a str>>,
     /// The paths of the files in each test project, by project and file
     /// name.
     test_files: HashMap<(&'a str, &'a str), Vec<&'a str>>,
@@ -190,7 +198,7 @@ impl<'a> Conventions<'a> {
             let (dir, name) = split_path(path);
             if name == "package.json" {
                 packages.insert(dir);
-            } else if is_ts_test(name) {
+            } else if is_ts_test(dir, name) {
                 tested_dirs.extend(ancestors(dir));
             } else if let Some(project) = name.strip_suffix(".csproj") {
                 // Two project files in one directory: the first by name.
@@ -200,10 +208,13 @@ impl<'a> Conventions<'a> {
                     .or_insert(project);
             }
         }
-        let mut test_projects: HashMap<&str, Vec<&str>> = HashMap::new();
+        let mut test_projects: HashMap<String, Vec<&str>> = HashMap::new();
         for &name in projects.values() {
             if let Some((parent, _)) = name.rsplit_once('.').filter(|_| is_test_project(name)) {
-                test_projects.entry(parent).or_default().push(name);
+                test_projects
+                    .entry(parent.to_ascii_lowercase())
+                    .or_default()
+                    .push(name);
             }
         }
         for names in test_projects.values_mut() {
@@ -240,7 +251,7 @@ impl<'a> Conventions<'a> {
     pub(crate) fn role(&self, path: &str) -> Role<'a> {
         let (dir, name) = split_path(path);
         if let Some((stem, ext)) = ts_name(name) {
-            if is_ts_test(name) {
+            if is_ts_test(dir, name) {
                 return Role::Test;
             }
             return self.typescript_source(dir, stem, ext);
@@ -290,7 +301,7 @@ impl<'a> Conventions<'a> {
     fn csharp_source(&self, project: &str, stem: &str) -> Role<'a> {
         let test_projects = self
             .test_projects
-            .get(project)
+            .get(&project.to_ascii_lowercase())
             .map_or(&[][..], Vec::as_slice);
         let names = [format!("{stem}Tests.cs"), format!("{stem}Test.cs")];
         let mut tests: Vec<&'a str> = test_projects
@@ -305,8 +316,11 @@ impl<'a> Conventions<'a> {
             .collect();
         tests.sort_unstable();
         tests.dedup();
+        // Feature test projects hold tests, but a missing one is expected
+        // only in a class test project.
         let expected = test_projects
-            .first()
+            .iter()
+            .find(|name| !is_feature_test_project(name))
             .map(|first| format!("{stem}Tests.cs in {first}"));
         Role::Source { tests, expected }
     }
@@ -344,10 +358,13 @@ fn ts_name(name: &str) -> Option<(&str, &str)> {
         .filter(|(_, ext)| TS_EXTENSIONS.contains(ext))
 }
 
-/// Whether a file name is a TypeScript test: `.spec` or `.test` before a
-/// TypeScript extension.
-fn is_ts_test(name: &str) -> bool {
-    ts_name(name).is_some_and(|(stem, _)| matches!(extension(stem), Some("spec" | "test")))
+/// Whether a TypeScript file in `dir` is a test: `.spec` or `.test`
+/// before its extension, or a test directory in its path.
+fn is_ts_test(dir: &str, name: &str) -> bool {
+    ts_name(name).is_some_and(|(stem, _)| {
+        matches!(extension(stem), Some("spec" | "test"))
+            || dir.split('/').any(|segment| TEST_DIRS.contains(&segment))
+    })
 }
 
 /// The part of a file name after its last `.`, compared as written:
@@ -361,6 +378,16 @@ fn extension(name: &str) -> Option<&str> {
 fn is_test_project(name: &str) -> bool {
     let last = name.rsplit('.').next().unwrap_or(name);
     last.ends_with("Test") || last.ends_with("Tests")
+}
+
+/// Whether a test project tests features rather than classes: its last
+/// name segment, ignoring ASCII case, is one of [`FEATURE_TESTS`]
+/// followed by `test` or `tests`.
+fn is_feature_test_project(name: &str) -> bool {
+    let last = name.rsplit('.').next().unwrap_or(name).to_ascii_lowercase();
+    let last = last.strip_suffix('s').unwrap_or(&last);
+    last.strip_suffix("test")
+        .is_some_and(|kind| FEATURE_TESTS.contains(&kind))
 }
 
 // The analyzer is called `tests`, and test modules here are called
@@ -543,7 +570,9 @@ mod tests {
                     "tests/Application.FunctionalTests/Commands/TodoItemsTests.cs",
                     "tests/Application.UnitTests/TodoItemsTests.cs",
                 ],
-                Some("TodoItemsTests.cs in Application.FunctionalTests")
+                // The functional tests count, but a missing test is
+                // expected in the class test project.
+                Some("TodoItemsTests.cs in Application.UnitTests")
             )
         );
     }
@@ -605,6 +634,89 @@ mod tests {
                 &["tests/A.Tests/ThingTests.cs"],
                 Some("ThingTests.cs in A.Tests")
             )
+        );
+    }
+
+    // "TypeScript test code" (decided after the evaluation, design D3)
+    #[test]
+    fn test_code_by_directory() {
+        let head = conventions(&["package.json", "src/a.spec.ts"]);
+        for path in [
+            "src/app/spec/test-utils.ts",
+            "e2e/cart-helpers.ts",
+            "test/setup.ts",
+            "packages/x/tests/fixtures/data.ts",
+            "src/__tests__/helper.tsx",
+        ] {
+            assert_eq!(head.role(path), Role::Test, "{path}");
+        }
+        for path in ["src/testing/format.ts", "src/specs/x.ts", "e2e.ts"] {
+            assert!(matches!(head.role(path), Role::Source { .. }), "{path}");
+        }
+        // A test directory alone makes its package one that tests code.
+        let head = conventions(&["package.json", "e2e/cart.ts", "src/b.ts"]);
+        assert_eq!(head.role("src/b.ts"), source(&[], Some("src/b.spec.ts")));
+    }
+
+    // "Names that differ in case"
+    #[test]
+    fn project_names_ignore_case() {
+        let head = conventions(&[
+            "src/Sso/Sso.csproj",
+            "src/Sso/AccountController.cs",
+            "test/SSO.Test/SSO.Test.csproj",
+            "test/SSO.Test/AccountControllerTest.cs",
+            "test/SSO.Test/accountcontrollertests.cs",
+        ]);
+        assert_eq!(
+            head.role("src/Sso/AccountController.cs"),
+            source(
+                &["test/SSO.Test/AccountControllerTest.cs"],
+                Some("AccountControllerTests.cs in SSO.Test")
+            )
+        );
+    }
+
+    // "Feature test projects"
+    #[test]
+    fn feature_test_projects() {
+        for name in [
+            "Web.AcceptanceTests",
+            "Sso.IntegrationTest",
+            "Api.IntegrationTests",
+            "Application.FunctionalTests",
+            "Shop.EndToEndTests",
+            "Shop.E2ETests",
+            "Shop.e2etest",
+        ] {
+            assert!(is_feature_test_project(name), "{name}");
+        }
+        for name in [
+            "Shop.UnitTests",
+            "Shop.Tests",
+            "Core.Test",
+            "Shop.ArchitectureTests",
+        ] {
+            assert!(!is_feature_test_project(name), "{name}");
+        }
+        let head = conventions(&[
+            "src/Web/Web.csproj",
+            "src/Web/Handler.cs",
+            "tests/Web.AcceptanceTests/Web.AcceptanceTests.csproj",
+            "tests/Web.AcceptanceTests/HandlerTests.cs",
+            "src/Application/Application.csproj",
+            "src/Application/Orders.cs",
+            "tests/Application.FunctionalTests/Application.FunctionalTests.csproj",
+            "tests/Application.UnitTests/Application.UnitTests.csproj",
+        ]);
+        // Still a test for `tests/unchanged-test`, but no expectation.
+        assert_eq!(
+            head.role("src/Web/Handler.cs"),
+            source(&["tests/Web.AcceptanceTests/HandlerTests.cs"], None)
+        );
+        assert_eq!(
+            head.role("src/Application/Orders.cs"),
+            source(&[], Some("OrdersTests.cs in Application.UnitTests"))
         );
     }
 
@@ -838,7 +950,7 @@ mod tests {
         assert_eq!(run(&service, &[path, spec], &[path, spec]), []);
     }
 
-    // "New C# class", naming the first test project by name
+    // "New C# class", naming the first class test project by name
     #[test]
     fn new_csharp_class() {
         let path = "src/Domain/Invoice.cs";
@@ -848,6 +960,7 @@ mod tests {
             path,
             "tests/Domain.UnitTests/Domain.UnitTests.csproj",
             "tests/Domain.IntegrationTests/Domain.IntegrationTests.csproj",
+            "tests/Domain.ArchitectureTests/Domain.ArchitectureTests.csproj",
         ];
         assert_eq!(
             run(&invoice, &head, &[path]),
@@ -855,7 +968,7 @@ mod tests {
                 MISSING_TEST_RULE,
                 path,
                 7,
-                "Invoice.Total() has no test: expected InvoiceTests.cs in Domain.IntegrationTests",
+                "Invoice.Total() has no test: expected InvoiceTests.cs in Domain.ArchitectureTests",
             )]
         );
     }

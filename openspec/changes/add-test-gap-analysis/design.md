@@ -175,6 +175,22 @@ and `MISSING_TEST_RULE`.
 - **Paths compare byte for byte, case-sensitively,** as git stores
   them. `OrderTests.cs` does not pair with `ordertests.cs`.
 
+**Decided after the evaluation (2026-11-14, Ervin).** Three patterns
+of the evaluation below changed the conventions before the release:
+- **C# project names ignore ASCII case** when a test project is matched
+  to its project: `SSO.Test` tests `Sso`, as MSBuild and NuGet treat
+  names. Test file names stay exact.
+- **TypeScript test code by directory:** a file with a directory named
+  `spec`, `test`, `tests`, `__tests__` or `e2e` in its path is a test,
+  so helpers there (`spec/sm-test-utils.ts`, `e2e/cart-helpers.ts`)
+  need no test. Names such as `*.spec-util.ts` are left to `[tests]
+  exclude`.
+- **Feature test projects** (`AcceptanceTests`, `IntegrationTest(s)`,
+  `FunctionalTests`, `EndToEndTests`, `E2ETests`, each with or without
+  the `s`, any case) still hold tests for `tests/unchanged-test`, but
+  `tests/missing-test` neither expects a test there nor counts them for
+  its scope: they test features, not classes.
+
 ### D4. Which changed units, which file is "new"
 
 - **Changed units:** match the head version's units against the base
@@ -311,6 +327,126 @@ The reviewer found no blocker. Fixed:
 - D3 and D6 disagreed on `.mts` sources; every TypeScript extension now
   works alike (spec "TypeScript tests", scenario "An ES module source");
 - task 2.3 now lists the scenario "Only a TypeScript type annotation".
+
+## Evaluation (task 2.6, 2026-11-14)
+
+**Repositories** (shallow clones, depth 150; nothing of theirs was built
+or run):
+- `bitwarden/clients` at 4d61897 (2026-11-13): Angular and Jest,
+  colocated `*.spec.ts`;
+- `bitwarden/server` at 341acc9 (2026-11-13): `src/Core` with
+  `test/Core.Test`, and `bitwarden_license/` alike;
+- `jasontaylordev/CleanArchitecture` at e1ab4cc (2026-11-09): .NET with
+  `*.UnitTests`, `*.FunctionalTests` and `Web.AcceptanceTests`, and an
+  Angular client;
+- `dotnet/eShop` at 913acea (2026-10-15), the known mismatch.
+
+**Binary:** `cargo build --release` of this branch at 0d5d499 (version
+still 0.6.0, aarch64 Linux), against the published 0.6.0 binary.
+
+**Run:** the last 30 non-merge commits that touch `.ts` (clients),
+`.cs` (server, eShop) or both (CleanArchitecture; only 27 have their
+parent in the shallow history). Each commit is checked out, an
+untracked `qgate.toml` with `[files] exclude = ["**/Migrations/**"]` is
+written, and both binaries run `check --base <commit>^ --worktree
+--format json --fail-on never`.
+
+**Nothing else changed:** in all 117 commits every finding that is not
+`tests/` equals 0.6.0's, and no run failed.
+
+**Time per commit:**
+
+| | this branch, mean (max) | 0.6.0, mean (max) |
+|---|---|---|
+| clients | 3.76 s (4.07) | 4.06 s (4.56) |
+| server | 4.06 s (4.53) | 4.20 s (4.51) |
+| CleanArchitecture | 0.04 s (0.07) | 0.05 s (0.07) |
+| eShop | 0.14 s (0.19) | 0.15 s (0.18) |
+
+Duplication over the whole head tree dominates the large repositories;
+the tests analysis adds no measurable time.
+
+**67 findings, sorted by hand** from each commit's diff:
+
+| | findings | a test should have changed or exist | needs no test | test code taken for a source | miss |
+|---|---|---|---|---|---|
+| clients | 41 | 12 | 26 | 3 | 0 |
+| server | 5 | 2 | 2 | 0 | 1 |
+| CleanArchitecture | 19 | 13 | 6 | 0 | 0 |
+| eShop | 2 | 1 | 0 | 1 | 0 |
+
+- **`tests/unchanged-test`, 30:**
+  - **13 should have changed:** new behaviour such as todo-list colours
+    (CleanArchitecture), a new login-page condition in an interceptor,
+    eShop's client moved to API version 2, trial length and new browser
+    paths (clients).
+  - **16 needed no test change:** composition roots rewired (`MainBackground`
+    and `ServiceContainer` constructors in clients, 7 findings), renamed
+    i18n keys (3), `readonly` and signal refactors (2), collection
+    expressions replacing `new object[] { ... }` (2), a moved formatter, a
+    newly wired service.
+  - **1 miss:** `bitwarden_license/src/Sso/Controllers/AccountController.cs`.
+    The commit changed `bitwarden_license/test/SSO.Test/Controllers/AccountControllerTest.cs`,
+    but the project is `Sso` and the test project `SSO.Test`, so the
+    case-sensitive name comparison of D3 pairs only `Sso.IntegrationTest`.
+- **`tests/missing-test`, 37:**
+  - **15 should have a test:** new utilities and services
+    (`readSmSecretRequest`, `PopupRevealedCipherService`), new Angular
+    components and services in CleanArchitecture's client, a new job.
+  - **18 need no test of their own:**
+    - 10 response models whose constructor maps JSON (clients), several
+      exercised by command specs;
+    - 2 Angular provider functions (`provideSecretsManager`, `providePam`);
+    - 2 in server: a result type, and `NoopCookieManager`, whose
+      expected test project is `Sso.IntegrationTest`;
+    - 4 CleanArchitecture web infrastructure files whose expected test
+      project is `Web.AcceptanceTests`.
+
+    Five of these 18 name an acceptance or integration test project,
+    which tests features, not classes.
+  - **4 test code taken for sources:** `spec/sm-test-utils.ts`,
+    `spec/sm-access-test-utils.ts`, `leased-cipher.state.spec-util.ts`
+    (clients) and `e2e/cart-helpers.ts` (eShop, next to Playwright
+    specs).
+  - **No miss:** `git grep` of each new unit's name in the head tree's
+    tests finds only indirect uses (models in command specs, helpers in
+    the specs that use them).
+
+**Stop rule:** misses are 1 of 5 findings in server (20 %) and none
+elsewhere, under a third everywhere, so the release is not stopped.
+
+**Edited existing files without a test** (question 3, not reported),
+approximated by file names:
+
+| | edited existing sources | with a test by name | without |
+|---|---|---|---|
+| clients | 164 | 82 | 82 |
+| server | 114 | 80 | 34 |
+| CleanArchitecture | 104 | 11 | 93 |
+| eShop | 115 | 11 | 104 |
+
+Reporting them would have added 313 findings to the 67, which supports
+leaving them out. In server, 80 edited files had a test and only 2
+were reported: its commits usually change the tests with the code.
+
+**eShop, the known mismatch:** its test projects (`Ordering.UnitTests`
+for `Ordering.Domain` and `Ordering.API`) pair with no project, so its
+only findings come from `ClientApp.UnitTests` and an e2e helper. As
+expected, the conventions do not cover this layout.
+
+**After the three decisions** (D3, "Decided after the evaluation"), the
+same commits with a build that has them: 59 findings instead of 67, and
+the diff between the two runs is exactly the intended one:
+- gone: the `Sso` miss, the three helpers in `spec/` and `e2e/`, and the
+  four findings that expected a test in `Web.AcceptanceTests`;
+- changed: `NoopCookieManager` now expects its test in `SSO.Test`, the
+  class test project, instead of `Sso.IntegrationTest`;
+- nothing new, no miss left, and the other findings and times as before.
+
+**To reproduce:** the scripts are `run.py` (checkout, config, both
+binaries, JSON per repository), `summary.py`, `list.py` and
+`misses.py`, kept with the session; the loop above with these four
+repositories rebuilds every number.
 
 ## Risks / Trade-offs
 

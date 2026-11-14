@@ -109,6 +109,24 @@ such `<e>`, that exist in the head revision.
 - **GIVEN** `src/app/cart.service.ts` has no test beside it, and `test/cart.service.spec.ts` exists
 - **THEN** `src/app/cart.service.ts` has no test
 
+### Requirement: TypeScript test code
+
+A TypeScript file SHALL also be a test, and never a source file, when a
+directory in its path is named `spec`, `test`, `tests`, `__tests__` or
+`e2e`, so test helpers there need no test of their own.
+
+#### Scenario: Test helpers
+
+- **GIVEN** the change adds `src/app/spec/test-utils.ts` and `e2e/cart-helpers.ts`, each with a function, in a package that has specs
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** no `tests/` finding is reported
+
+#### Scenario: A directory whose name only contains test
+
+- **GIVEN** the change adds `src/testing/format.ts` with a function, in a package that has specs
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** a `tests/missing-test` finding is reported for it
+
 ### Requirement: C# projects
 
 A C# file SHALL belong to the project of the nearest `.csproj` file in
@@ -138,7 +156,8 @@ file that belongs to no project SHALL have no tests.
 ### Requirement: C# tests
 
 The test projects of a project `P` SHALL be the test projects named
-`P.<X>`, where `<X>` is one segment. The tests of a source file
+`P.<X>`, where `<X>` is one segment, comparing `P` without regard to
+ASCII case. The tests of a source file
 `<Stem>.cs` of project `P` SHALL be the files named `<Stem>Tests.cs` or
 `<Stem>Test.cs`, in any directory of a test project of `P`, that exist
 in the head revision.
@@ -157,6 +176,11 @@ in the head revision.
 
 - **GIVEN** `Application.UnitTests` and `Application.FunctionalTests` each contain a `TodoItemsTests.cs`
 - **THEN** both are tests of `TodoItems.cs` in the project `Application`
+
+#### Scenario: Names that differ in case
+
+- **GIVEN** `src/Sso/Sso.csproj`, `test/SSO.Test/SSO.Test.csproj` and `test/SSO.Test/AccountControllerTest.cs`
+- **THEN** `AccountControllerTest.cs` is a test of `src/Sso/AccountController.cs`
 
 #### Scenario: A test project of another project
 
@@ -258,8 +282,8 @@ line of its first unit.
 
 #### Scenario: New C# class
 
-- **GIVEN** the project `Domain` has the test projects `Domain.IntegrationTests` and `Domain.UnitTests`, and the change adds `src/Domain/Invoice.cs` with one method `Invoice.Total()` and no `InvoiceTests.cs`
-- **THEN** a `tests/missing-test` finding reports `Invoice.Total() has no test: expected InvoiceTests.cs in Domain.IntegrationTests`, naming the first test project by name
+- **GIVEN** the project `Domain` has the test projects `Domain.ArchitectureTests`, `Domain.IntegrationTests` and `Domain.UnitTests`, and the change adds `src/Domain/Invoice.cs` with one method `Invoice.Total()` and no `InvoiceTests.cs`
+- **THEN** a `tests/missing-test` finding reports `Invoice.Total() has no test: expected InvoiceTests.cs in Domain.ArchitectureTests`, naming the first class test project by name
 
 #### Scenario: A new file with its spec
 
@@ -282,7 +306,7 @@ line of its first unit.
 ### Requirement: Projects that test other code
 
 For `tests/missing-test`, a C# file's project SHALL have a test when it
-has a test project. A TypeScript file's project SHALL have a test when
+has a class test project (see "Feature test projects"). A TypeScript file's project SHALL have a test when
 the nearest directory at or above the file that contains a
 `package.json`, or the repository root if none does, contains a test
 file at any depth in the head revision.
@@ -290,6 +314,12 @@ file at any depth in the head revision.
 #### Scenario: C# project without a test project
 
 - **GIVEN** the project `Web` has no test project, and the change adds `src/Web/Endpoints/Orders.cs` with a method
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** no `tests/` finding is reported
+
+#### Scenario: Only an acceptance test project
+
+- **GIVEN** the project `Web` has only the test project `Web.AcceptanceTests`, and the change adds `src/Web/Infrastructure/Handler.cs` with a method
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** no `tests/` finding is reported
 
@@ -304,3 +334,24 @@ file at any depth in the head revision.
 - **GIVEN** `apps/web/package.json` and `libs/util/package.json`, specs only below `apps/web`, and the change adds a new file with a function and no spec in each
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** a `tests/missing-test` finding is reported for the file below `apps/web` only
+
+### Requirement: Feature test projects
+
+A test project whose last name segment, without regard to ASCII case,
+is `AcceptanceTest`, `IntegrationTest`, `FunctionalTest`,
+`EndToEndTest` or `E2ETest`, each with or without a final `s`, SHALL
+be a feature test project: its files count as tests of a source for
+`tests/unchanged-test`, but `tests/missing-test` SHALL neither expect a
+test there nor count it as a test of the project. Other test projects
+are class test projects.
+
+#### Scenario: Functional tests still count
+
+- **GIVEN** `Application.FunctionalTests` contains `TodoItemsTests.cs`, and the change edits `src/Application/TodoItems.cs` without touching it
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** a `tests/unchanged-test` finding names `TodoItemsTests.cs` in `Application.FunctionalTests`
+
+#### Scenario: The expected project is a class test project
+
+- **GIVEN** the project `Application` has `Application.FunctionalTests` and `Application.UnitTests`, and the change adds `src/Application/Orders.cs` with a method
+- **THEN** the `tests/missing-test` message expects `OrdersTests.cs in Application.UnitTests`
