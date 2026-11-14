@@ -9,6 +9,7 @@
 //! decision point follows the `complexity` rule of `ESLint`.
 
 use std::collections::HashSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use tree_sitter::Node;
 
@@ -110,6 +111,7 @@ struct Frame {
     scope: bool,
     bound: bool,
     muted: bool,
+    not_code: bool,
 }
 
 /// A call, `new` or `await` bound to a name at module level or directly in
@@ -147,6 +149,8 @@ struct Walker<'s> {
     scopes: Vec<Scope>,
     /// Units in source order (by start position).
     functions: Vec<Function>,
+    /// The fingerprint of each unit in `functions` so far.
+    hashers: Vec<DefaultHasher>,
     /// Qualified names already given to a unit.
     taken: HashSet<String>,
     /// Bound calls being walked, innermost last.
@@ -161,6 +165,9 @@ struct Walker<'s> {
     /// Whether the last token was a text part of a literal, so the next
     /// one continues the same literal.
     in_text_run: bool,
+    /// Whether the walk is inside TypeScript-only code, which is no part
+    /// of a fingerprint; the frame of the node that opened it closes it.
+    not_code: bool,
 }
 
 impl<'s> Walker<'s> {
@@ -170,12 +177,14 @@ impl<'s> Walker<'s> {
             segments: Vec::new(),
             scopes: Vec::new(),
             functions: Vec::new(),
+            hashers: Vec::new(),
             taken: HashSet::new(),
             bound: Vec::new(),
             imports: Vec::new(),
             tokens: Vec::new(),
             muted: false,
             in_text_run: false,
+            not_code: false,
         }
     }
 
@@ -218,6 +227,7 @@ impl<'s> Walker<'s> {
         let mut frame = Frame::default();
         self.record_import(node);
         self.record_token(node, parent, &mut frame);
+        self.record_code(node, parent, &mut frame);
 
         // A value passed through a bound call takes the binding's name.
         if FUNCTION_KINDS.contains(&kind) || CONTAINER_KINDS.contains(&kind) {
@@ -243,13 +253,9 @@ impl<'s> Walker<'s> {
                 let segment = self.unique_segment(&name);
                 self.segments.push(segment);
                 let qualified = self.segments.join(".");
-                self.taken.insert(qualified.clone());
-                self.functions.push(Function {
-                    name: qualified,
-                    line,
-                    cyclomatic: 1,
-                });
-                self.scopes.push(Scope::Unit(self.functions.len() - 1));
+                let unit = self.open_unit(qualified, line);
+                self.record_decorators(node, unit);
+                self.scopes.push(Scope::Unit(unit));
                 frame.segment = true;
                 frame.scope = true;
             } else if !self.collecting() {
@@ -304,14 +310,7 @@ impl<'s> Walker<'s> {
         let unit = passes.then(|| {
             let mut parts = self.segments.clone();
             parts.push(segment.clone());
-            let qualified = parts.join(".");
-            self.taken.insert(qualified.clone());
-            self.functions.push(Function {
-                name: qualified,
-                line,
-                cyclomatic: 1,
-            });
-            self.functions.len() - 1
+            self.open_unit(parts.join("."), line)
         });
         self.bound.push(Bound {
             top: pass_through_top(node).id(),
@@ -319,6 +318,19 @@ impl<'s> Walker<'s> {
             unit,
         });
         true
+    }
+
+    /// Add the unit `qualified` and return its index.
+    fn open_unit(&mut self, qualified: String, line: u32) -> usize {
+        self.taken.insert(qualified.clone());
+        self.functions.push(Function {
+            name: qualified,
+            line,
+            cyclomatic: 1,
+            fingerprint: 0,
+        });
+        self.hashers.push(DefaultHasher::new());
+        self.functions.len() - 1
     }
 
     /// `name`, or `name#2`, `name#3`, ... if the qualified name it would
@@ -340,6 +352,9 @@ impl<'s> Walker<'s> {
         }
         if frame.muted {
             self.muted = false;
+        }
+        if frame.not_code {
+            self.not_code = false;
         }
     }
 
@@ -441,8 +456,94 @@ impl<'s> Walker<'s> {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
     }
 
-    fn finish(self) -> (Vec<Function>, Vec<Import>, Vec<Token>) {
+    fn finish(mut self) -> (Vec<Function>, Vec<Import>, Vec<Token>) {
+        for (function, hasher) in self.functions.iter_mut().zip(&self.hashers) {
+            function.fingerprint = hasher.finish();
+        }
         (self.functions, self.imports, self.tokens)
+    }
+
+    /// Add a leaf to the fingerprint of the unit it belongs to (design D1
+    /// of `add-test-gap-analysis`). The TypeScript-only parts that produce
+    /// no tokens are left out, as are type-level subtrees, which the walk
+    /// does not enter; literals are code here, with their content.
+    fn record_code(&mut self, node: Node<'_>, parent: Option<Node<'_>>, frame: &mut Frame) {
+        if self.not_code {
+            return;
+        }
+        if produces_no_tokens(node, parent) {
+            self.not_code = true;
+            frame.not_code = true;
+            return;
+        }
+        // The code of a bound call around the functions that pass through
+        // it (`withAuth`, its options) is code of their unit.
+        let unit = match self.scopes.last() {
+            Some(Scope::Unit(unit)) => *unit,
+            None | Some(Scope::ClassBody) => match self.bound.last().and_then(|b| b.unit) {
+                Some(unit) => unit,
+                None => return,
+            },
+            Some(Scope::Opaque) => return,
+        };
+        if node.child_count() == 0 {
+            self.hash_leaf(node, unit);
+        }
+    }
+
+    /// Add the decorators of a method (`@HostListener('click')`), which
+    /// the grammar puts before it in the class body, to its fingerprint.
+    fn record_decorators(&mut self, method: Node<'_>, unit: usize) {
+        let mut decorators = Vec::new();
+        let mut previous = method.prev_sibling();
+        while let Some(node) = previous.filter(|n| matches!(n.kind(), "decorator" | "comment")) {
+            if node.kind() == "decorator" {
+                decorators.push(node);
+            }
+            previous = node.prev_sibling();
+        }
+        for decorator in decorators.into_iter().rev() {
+            let mut pending = vec![decorator];
+            let mut parents: Vec<Option<Node<'_>>> = vec![None];
+            while let (Some(node), Some(parent)) = (pending.pop(), parents.pop()) {
+                if TYPE_KINDS.contains(&node.kind()) || produces_no_tokens(node, parent) {
+                    continue;
+                }
+                if node.child_count() == 0 {
+                    self.hash_leaf(node, unit);
+                    continue;
+                }
+                let mut cursor = node.walk();
+                let children: Vec<Node<'_>> = node.children(&mut cursor).collect();
+                // Reversed, so the stack pops them in source order.
+                for child in children.into_iter().rev() {
+                    pending.push(child);
+                    parents.push(Some(node));
+                }
+            }
+        }
+    }
+
+    /// Add one leaf to the fingerprint of `unit`, unless it is layout: a
+    /// comment, a semicolon or an empty node. JSX text counts by its
+    /// words, since JSX collapses the whitespace between them.
+    fn hash_leaf(&mut self, node: Node<'_>, unit: usize) {
+        let code = &self.source[node.byte_range()];
+        let kind = node.kind();
+        if code.is_empty() || SKIPPED_LEAF_KINDS.contains(&kind) || kind == "html_comment" {
+            return;
+        }
+        let hasher = &mut self.hashers[unit];
+        if kind == "jsx_text" {
+            for word in code
+                .split(u8::is_ascii_whitespace)
+                .filter(|w| !w.is_empty())
+            {
+                word.hash(hasher);
+            }
+        } else {
+            code.hash(hasher);
+        }
     }
 
     /// Record the normalized token `node` is, if any (design D1 of
@@ -827,6 +928,73 @@ mod tests {
                 ("default", 121, 2),
             ])
         );
+    }
+
+    /// The names of the units whose fingerprint differs between `before`
+    /// and `after`, in source order; both must have the same units.
+    fn changed_units(language: Language, before: &str, after: &str) -> Vec<String> {
+        let fingerprints = |source: &str| -> Vec<(String, u64)> {
+            parse(language, source)
+                .expect("fixture parses")
+                .functions
+                .into_iter()
+                .map(|f| (f.name, f.fingerprint))
+                .collect()
+        };
+        let (before, after) = (fingerprints(before), fingerprints(after));
+        let names = |units: &[(String, u64)]| units.iter().map(|u| u.0.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&before), names(&after), "the same units");
+        before
+            .into_iter()
+            .zip(after)
+            .filter(|(b, a)| b.1 != a.1)
+            .map(|(b, _)| b.0)
+            .collect()
+    }
+
+    // Design D1 of `add-test-gap-analysis`: layout, comments, semicolons
+    // and types are not changes; literals, names and nested anonymous
+    // functions are; a nested named unit's change is its own.
+    #[test]
+    fn fingerprints_tell_changed_code() {
+        assert_eq!(
+            changed_units(
+                Language::TypeScript,
+                include_str!("../fixtures/typescript/fingerprints/before.ts"),
+                include_str!("../fixtures/typescript/fingerprints/after.ts"),
+            ),
+            [
+                "literal",
+                "text",
+                "template",
+                "renamed",
+                "GET",
+                "POST",
+                "Cart.refresh",
+                "Cart.total",
+                "Cart.outer.inner",
+                "Cart.onClick",
+            ]
+        );
+    }
+
+    #[test]
+    fn tsx_fingerprints() {
+        let before = "function Card() { return <p className=\"a\">Hello {name}</p>; }\n";
+        let same = "function Card() {\n  return <p className=\"a\">Hello {name}</p>;\n}\n";
+        let text = "function Card() { return <p className=\"a\">Bye {name}</p>; }\n";
+        // JSX collapses the whitespace in its text, so a reflow is layout.
+        let reflowed =
+            "function Card() {\n  return <p className=\"a\">\n    Hello {name}\n  </p>;\n}\n";
+        assert_eq!(
+            changed_units(Language::Tsx, before, reflowed),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            changed_units(Language::Tsx, before, same),
+            Vec::<String>::new()
+        );
+        assert_eq!(changed_units(Language::Tsx, before, text), ["Card"]);
     }
 
     /// Shorthand for a TypeScript fixture's `(name, line, cyclomatic)`.

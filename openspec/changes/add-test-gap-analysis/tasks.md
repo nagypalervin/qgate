@@ -7,8 +7,8 @@ written to files first.
 
 ## 1. Unit fingerprints (PR 1, `change/add-test-gap-analysis`)
 
-- [ ] 1.1 `qgate-lang`, TypeScript and TSX: failing adapter tests for `Function::fingerprint` (D1), then the field and its computation in the existing walk. Same fingerprint for other layout and for added comments; the same for a changed type annotation (TypeScript types are not code, decided during PR 1, design D1); a different one for a changed literal and a changed name; a nested named unit's change leaves its parent alone; a nested arrow function's change changes its parent. Verified by `cargo test -p qgate-lang`.
-- [ ] 1.2 `qgate-lang`, C#: the same cases for C#, plus a local function (its own unit), a lambda in a LINQ query (part of its method) and code in an `#if` branch. Then the computation. Verified by `cargo test -p qgate-lang`. No output of `qgate check` changes: the existing end-to-end tests pass unchanged.
+- [x] 1.1 `qgate-lang`, TypeScript and TSX: failing adapter tests for `Function::fingerprint` (D1), then the field and its computation in the existing walk. Same fingerprint for other layout and for added comments; the same for a changed type annotation (TypeScript types are not code, decided during PR 1, design D1); a different one for a changed literal and a changed name; a nested named unit's change leaves its parent alone; a nested arrow function's change changes its parent. Verified by `cargo test -p qgate-lang`.
+- [x] 1.2 `qgate-lang`, C#: the same cases for C#, plus a local function (its own unit), a lambda in a LINQ query (part of its method) and code in an `#if` branch. Then the computation. Verified by `cargo test -p qgate-lang`. No output of `qgate check` changes: the existing end-to-end tests pass unchanged.
 
 ## 2. Test analysis (PR 2, `change/add-test-gap-analysis-2`)
 

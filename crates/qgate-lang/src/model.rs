@@ -79,6 +79,12 @@ pub struct Function {
     pub line: u32,
     /// Cyclomatic complexity: 1 plus the number of decision points.
     pub cyclomatic: u32,
+    /// A hash of the unit's own code, to tell whether it changed between
+    /// two versions (design D1 of `add-test-gap-analysis`). Whitespace,
+    /// comments, semicolons and TypeScript types are left out, and so is
+    /// the code of nested named units, which have their own. Compare it
+    /// only with fingerprints from the same qgate build.
+    pub fingerprint: u64,
 }
 
 /// Why a source file could not be turned into a [`FileModel`].

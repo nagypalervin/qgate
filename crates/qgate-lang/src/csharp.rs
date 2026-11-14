@@ -9,6 +9,7 @@
 //! rules (design D2 of `add-csharp-architecture`).
 
 use std::collections::HashSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use tree_sitter::Node;
 
@@ -20,6 +21,9 @@ pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
     let tree = parse_tree(&tree_sitter_c_sharp::LANGUAGE.into(), source)?;
     let mut walker = Walker::new(source.as_bytes());
     walker.walk(tree.root_node());
+    for (function, hasher) in walker.functions.iter_mut().zip(&walker.hashers) {
+        function.fingerprint = hasher.finish();
+    }
     Ok(FileModel {
         functions: walker.functions,
         imports: Vec::new(),
@@ -106,6 +110,8 @@ struct Walker<'s> {
     scopes: Vec<Option<usize>>,
     /// Units in source order.
     functions: Vec<Function>,
+    /// The fingerprint of each unit in `functions` so far.
+    hashers: Vec<DefaultHasher>,
     /// Normalized tokens in source order.
     tokens: Vec<Token>,
     /// `using` directives in source order.
@@ -126,6 +132,7 @@ impl<'s> Walker<'s> {
             taken: HashSet::new(),
             scopes: Vec::new(),
             functions: Vec::new(),
+            hashers: Vec::new(),
             tokens: Vec::new(),
             usings: Vec::new(),
             muted: false,
@@ -169,6 +176,7 @@ impl<'s> Walker<'s> {
         let parent = ancestors.last().copied();
         let mut frame = Frame::default();
         self.record_token(node, ancestors, &mut frame);
+        self.record_code(node, ancestors);
         if TYPE_KINDS.contains(&kind) {
             // A generic type keeps its type parameters: `Result<T>` and
             // `Result` can share a file.
@@ -230,10 +238,31 @@ impl<'s> Walker<'s> {
             name: qualified,
             line,
             cyclomatic: 1,
+            fingerprint: 0,
         });
+        self.hashers.push(DefaultHasher::new());
         self.scopes.push(Some(self.functions.len() - 1));
         frame.segments += 1;
         frame.scopes += 1;
+    }
+
+    /// Add a leaf to the fingerprint of the unit it belongs to (design D1
+    /// of `add-test-gap-analysis`): all code but comments, semicolons and
+    /// `#region` lines, which only label code; types, attributes and the
+    /// directives of conditional compilation count.
+    fn record_code(&mut self, node: Node<'_>, ancestors: &[Node<'_>]) {
+        let Some(Some(unit)) = self.scopes.last() else {
+            return;
+        };
+        let code = &self.source[node.byte_range()];
+        let region = |n: &Node<'_>| matches!(n.kind(), "preproc_region" | "preproc_endregion");
+        if node.child_count() == 0
+            && !code.is_empty()
+            && !matches!(node.kind(), "comment" | ";")
+            && !ancestors.iter().any(region)
+        {
+            code.hash(&mut self.hashers[*unit]);
+        }
     }
 
     fn leave(&mut self, frame: &Frame) {
@@ -669,6 +698,45 @@ mod tests {
         assert_eq!(
             names(include_str!("../fixtures/csharp/top_level.cs")),
             pairs(&[("Twice(int)", 10)])
+        );
+    }
+
+    // Design D1 of `add-test-gap-analysis`: layout, comments and
+    // `#region` lines are not changes; literals, names, types, lambdas,
+    // code in a directive branch and a directive's condition are; a local function's change is its own, and a field
+    // initializer belongs to no unit.
+    #[test]
+    fn fingerprints_tell_changed_code() {
+        let fingerprints = |source: &str| -> Vec<(String, u64)> {
+            parse(source)
+                .expect("fixture parses")
+                .functions
+                .into_iter()
+                .map(|f| (f.name, f.fingerprint))
+                .collect()
+        };
+        let before = fingerprints(include_str!("../fixtures/csharp/fingerprints/Before.cs"));
+        let after = fingerprints(include_str!("../fixtures/csharp/fingerprints/After.cs"));
+        let names = |units: &[(String, u64)]| units.iter().map(|u| u.0.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&before), names(&after), "the same units");
+        let changed: Vec<String> = before
+            .into_iter()
+            .zip(after)
+            .filter(|(b, a)| b.1 != a.1)
+            .map(|(b, _)| b.0)
+            .collect();
+        assert_eq!(
+            changed,
+            [
+                "Cart.Literal()",
+                "Cart.Text()",
+                "Cart.Typed(int)",
+                "Cart.Renamed(int)",
+                "Cart.Outer().Inner()",
+                "Cart.Query(int[])",
+                "Cart.Guarded()",
+                "Cart.Directive()",
+            ]
         );
     }
 

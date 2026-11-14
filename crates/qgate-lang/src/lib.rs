@@ -7,12 +7,13 @@
 //! read files and pick the [`Language`].
 //!
 //! Supported: TypeScript, TSX and C#. The model holds one [`Function`] per
-//! named function unit with its qualified name, line and cyclomatic
-//! complexity. Anonymous functions count towards their nearest named
-//! ancestor; code outside named functions is not measured. At module level
-//! and in class field initializers a call does not hide the binding: in
-//! `export const GET = withAuth(async () => {...})` the functions passed
-//! through the call form one unit named `GET`.
+//! named function unit with its qualified name, line, cyclomatic
+//! complexity and a fingerprint of its code, which tells whether the unit
+//! changed between two versions. Anonymous functions count towards their
+//! nearest named ancestor; code outside named functions is not measured.
+//! At module level and in class field initializers a call does not hide
+//! the binding: in `export const GET = withAuth(async () => {...})` the
+//! functions passed through the call form one unit named `GET`.
 //!
 //! For TypeScript, the model also lists the file's [`Import`]s: the
 //! module specifier of every `import` and `export ... from` declaration,
