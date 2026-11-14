@@ -512,6 +512,49 @@ can now fail on them.** List source paths that need no test under
 `exclude = ["**"]`. See "Tests changed with the code" in the README.
 ```
 
+## Release 0.7.0 (task 3.1)
+
+- PR #29 merged as 19e4f32. Ervin confirmed the merge, the CI run of
+  `main` (43596891273) passed on every platform, and then the agent
+  pushed the annotated tag `v0.7.0` ("qgate 0.7.0") after
+  `check-version.sh` and `check-action-version.sh` accepted it.
+- Release run 43597322934: all nine jobs green.
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six. The Linux arm64 archive holds the binary,
+  `qgate-pr-comment.ps1` (byte for byte the one on `main`), `README.md`
+  and both licenses. Its binary (11,277,376 bytes) printed `qgate
+  0.7.0`. In a throwaway repository with `package.json`,
+  `src/app/cart.service.ts` and its spec, an uncommitted edit of
+  `CartService.total` gave `warning src/app/cart.service.ts:2
+  CartService.total changed, but not its test
+  src/app/cart.service.spec.ts  [tests/unchanged-test]`, exit code 0.
+- Archive sizes in bytes against 0.6.0; the change is the fingerprints
+  and the tests analyzer:
+
+  | Archive | 0.6.0 | 0.7.0 |
+  |---|---|---|
+  | `x86_64-unknown-linux-musl.tar.gz` | 2,149,926 | 2,182,364 |
+  | `aarch64-unknown-linux-musl.tar.gz` | 1,954,472 | 1,982,046 |
+  | `aarch64-apple-darwin.tar.gz` | 1,953,299 | 1,981,135 |
+  | `x86_64-apple-darwin.tar.gz` | 1,983,095 | 2,013,757 |
+  | `x86_64-pc-windows-msvc.zip` | 1,939,601 | 1,969,096 |
+  | `aarch64-pc-windows-msvc.zip` | 1,836,382 | 1,861,251 |
+
+- Ervin published the draft on 2026-11-14 (13:27 UTC) with GitHub's
+  generated list of pull requests; the drafted notes above are not on
+  the release page. `releases/latest` is `v0.7.0`.
+
+## README at 0.7.0 (task 4.1)
+
+Every install block, both `uses:` lines and the pinned commit
+(`19e4f32f1e669d64c17df5551915f9c4b16eb35d`, `v0.7.0^{commit}`) name
+0.7.0. `grep` finds one `0.6.0`, on purpose: the roadmap's "Languages"
+row dates the C# architecture rules. The M5 row now reads "code changed
+without its tests (0.7.0), hotspots (...)", status "in progress". The
+Linux install block, run as written against the published release (with
+the arm64 target and a scratch directory instead of `~/.local/bin`),
+passed its checksum and installed `qgate 0.7.0`.
+
 ## Risks / Trade-offs
 
 - **[A team's names differ from the conventions]** → a stream of
