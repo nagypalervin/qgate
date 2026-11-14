@@ -29,6 +29,8 @@ pub struct Config {
     pub architecture: Architecture,
     /// The `[files]` table.
     pub files: Files,
+    /// The `[tests]` table.
+    pub tests: Tests,
 }
 
 /// The `[files]` table: which files revision mode leaves out (design D1
@@ -38,6 +40,17 @@ pub struct Config {
 pub struct Files {
     /// Path patterns of files to leave out, as written. Their syntax is
     /// checked where they are interpreted; an empty list excludes nothing.
+    pub exclude: Vec<String>,
+}
+
+/// The `[tests]` table: which source files need no test (design D7 of
+/// `add-test-gap-analysis`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Tests {
+    /// Path patterns of source files that need no test, as written.
+    /// Their syntax is checked where they are interpreted; an empty list
+    /// exempts nothing.
     pub exclude: Vec<String>,
 }
 
@@ -382,6 +395,37 @@ to = ["@prisma/client"]
         let unknown = error("[files]\ninclude = [\"src\"]\n");
         assert!(unknown.contains("include"), "{unknown}");
         let wrong_type = error("[files]\nexclude = \"src\"\n");
+        assert!(wrong_type.starts_with("line 2"), "{wrong_type}");
+    }
+
+    // configuration: "The tests table" (design D7 of `add-test-gap-analysis`)
+    #[test]
+    fn tests_exclude() {
+        let config = parse(b"[tests]\nexclude = [\"src/environments/**\", \"**/Program.cs\"]\n")
+            .expect("valid");
+        assert_eq!(
+            config.tests.exclude,
+            ["src/environments/**", "**/Program.cs"]
+        );
+        assert_eq!(
+            parse(b"[tests]\nexclude = []\n")
+                .expect("valid")
+                .tests
+                .exclude,
+            Vec::<String>::new()
+        );
+        assert_eq!(parse(b"[tests]\n").expect("valid"), Config::default());
+        assert_eq!(
+            parse(VALID.as_bytes()).expect("valid").tests,
+            Tests::default()
+        );
+    }
+
+    #[test]
+    fn tests_table_errors() {
+        let unknown = error("[tests]\nexlude = [\"src/environments/**\"]\n");
+        assert!(unknown.contains("exlude"), "{unknown}");
+        let wrong_type = error("[tests]\nexclude = \"src\"\n");
         assert!(wrong_type.starts_with("line 2"), "{wrong_type}");
     }
 
