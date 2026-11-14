@@ -296,7 +296,8 @@ The release notes of 0.7.0 name the two new rule ids and say that
   - **Stop rule:** misses above a third of a repository's findings stop
     the release until Ervin decides (D3 fallback, configurable pairing,
     or accept).
-- **Azure rehearsal, task 4.2:**
+- **Azure rehearsal, task 4.2** (as run: `tests/missing-test`, see
+  "Azure Pipelines rehearsal" below):
   - **Setup:** the README's Linux job at 0.7.0 in
     `teamcollabeu/qgate-rehearsal`, on a pull request that edits a C#
     method whose `*Tests.cs` exists and a TypeScript function whose
@@ -541,8 +542,10 @@ can now fail on them.** List source paths that need no test under
   | `aarch64-pc-windows-msvc.zip` | 1,836,382 | 1,861,251 |
 
 - Ervin published the draft on 2026-11-14 (13:27 UTC) with GitHub's
-  generated list of pull requests; the drafted notes above are not on
-  the release page. `releases/latest` is `v0.7.0`.
+  generated list of pull requests only. The review of PR 3 noticed that
+  the drafted notes, the mitigation for `--fail-on warning` users
+  (D9), were missing; at Ervin's request the agent put them above the
+  generated list with `gh release edit`. `releases/latest` is `v0.7.0`.
 
 ## README at 0.7.0 (task 4.1)
 
@@ -600,6 +603,16 @@ passed its checksum and installed `qgate 0.7.0`.
   or above `error`." and a table with exactly these two rows. The spec,
   the test project's `CartTests.cs` and the existing `src/grade.ts` do
   not appear.
+
+## Review of PR 3
+
+The reviewer found no blocker and every checkable fact matching. Fixed:
+- the release notes reached the release page (see "Release 0.7.0");
+- tasks 4.1 and 4.2, and D10, now say what was built: one `0.6.0`
+  kept on purpose, and the rehearsal's `tests/missing-test`;
+- the roadmap's M5 row says hotspots are still planned;
+- the journal entry no longer credits the PR 1 review with reading the
+  evaluation, which came after it.
 
 ## Risks / Trade-offs
 

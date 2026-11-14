@@ -25,8 +25,8 @@ written to files first.
 
 ## 4. README, roadmap and rehearsal (PR 3, `change/add-test-gap-analysis-3`)
 
-- [x] 4.1 Every README install block, `uses:` and the pinned commit at 0.7.0; `grep` finds no `0.6.0`. The M5 roadmap row records "code changed without its tests (0.7.0)" and keeps hotspots planned.
-- [x] 4.2 Azure rehearsal (D10): the README's Linux job at 0.7.0 in `teamcollabeu/qgate-rehearsal`, on a pull request that edits a tested C# method and a tested TypeScript function without their tests. Read the comment thread and the build issues through the REST API and record them in `design.md`: two Warning rows, two warning issues, a passing step. Abandon the pull request afterwards.
+- [x] 4.1 Every README install block, `uses:` and the pinned commit at 0.7.0; `grep` finds no `0.6.0` but the roadmap's "Languages" row, which dates the C# rules (as built in PR 3). The M5 roadmap row records "code changed without its tests (0.7.0)" and keeps hotspots planned.
+- [x] 4.2 Azure rehearsal (D10): the README's Linux job at 0.7.0 in `teamcollabeu/qgate-rehearsal`, on a pull request that edits a tested C# method and a tested TypeScript function without their tests. As built: new sources without tests, so `tests/missing-test`, by Ervin's decision (design.md, "Azure Pipelines rehearsal"). Read the comment thread and the build issues through the REST API and record them in `design.md`: two Warning rows, two warning issues, a passing step. Abandon the pull request afterwards.
 
 ## Workflow follow-up
 
