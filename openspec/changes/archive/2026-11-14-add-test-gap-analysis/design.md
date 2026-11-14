@@ -296,7 +296,8 @@ The release notes of 0.7.0 name the two new rule ids and say that
   - **Stop rule:** misses above a third of a repository's findings stop
     the release until Ervin decides (D3 fallback, configurable pairing,
     or accept).
-- **Azure rehearsal, task 4.2:**
+- **Azure rehearsal, task 4.2** (as run: `tests/missing-test`, see
+  "Azure Pipelines rehearsal" below):
   - **Setup:** the README's Linux job at 0.7.0 in
     `teamcollabeu/qgate-rehearsal`, on a pull request that edits a C#
     method whose `*Tests.cs` exists and a TypeScript function whose
@@ -511,6 +512,107 @@ can now fail on them.** List source paths that need no test under
 `[tests] exclude` in `qgate.toml`, or turn the check off with
 `exclude = ["**"]`. See "Tests changed with the code" in the README.
 ```
+
+## Release 0.7.0 (task 3.1)
+
+- PR #29 merged as 19e4f32. Ervin confirmed the merge, the CI run of
+  `main` (43596891273) passed on every platform, and then the agent
+  pushed the annotated tag `v0.7.0` ("qgate 0.7.0") after
+  `check-version.sh` and `check-action-version.sh` accepted it.
+- Release run 43597322934: all nine jobs green.
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six. The Linux arm64 archive holds the binary,
+  `qgate-pr-comment.ps1` (byte for byte the one on `main`), `README.md`
+  and both licenses. Its binary (11,277,376 bytes) printed `qgate
+  0.7.0`. In a throwaway repository with `package.json`,
+  `src/app/cart.service.ts` and its spec, an uncommitted edit of
+  `CartService.total` gave `warning src/app/cart.service.ts:2
+  CartService.total changed, but not its test
+  src/app/cart.service.spec.ts  [tests/unchanged-test]`, exit code 0.
+- Archive sizes in bytes against 0.6.0; the change is the fingerprints
+  and the tests analyzer:
+
+  | Archive | 0.6.0 | 0.7.0 |
+  |---|---|---|
+  | `x86_64-unknown-linux-musl.tar.gz` | 2,149,926 | 2,182,364 |
+  | `aarch64-unknown-linux-musl.tar.gz` | 1,954,472 | 1,982,046 |
+  | `aarch64-apple-darwin.tar.gz` | 1,953,299 | 1,981,135 |
+  | `x86_64-apple-darwin.tar.gz` | 1,983,095 | 2,013,757 |
+  | `x86_64-pc-windows-msvc.zip` | 1,939,601 | 1,969,096 |
+  | `aarch64-pc-windows-msvc.zip` | 1,836,382 | 1,861,251 |
+
+- Ervin published the draft on 2026-11-14 (13:27 UTC) with GitHub's
+  generated list of pull requests only. The review of PR 3 noticed that
+  the drafted notes, the mitigation for `--fail-on warning` users
+  (D9), were missing; at Ervin's request the agent put them above the
+  generated list with `gh release edit`. `releases/latest` is `v0.7.0`.
+
+## README at 0.7.0 (task 4.1)
+
+Every install block, both `uses:` lines and the pinned commit
+(`19e4f32f1e669d64c17df5551915f9c4b16eb35d`, `v0.7.0^{commit}`) name
+0.7.0. `grep` finds one `0.6.0`, on purpose: the roadmap's "Languages"
+row dates the C# architecture rules. The M5 row now reads "code changed
+without its tests (0.7.0), hotspots (...)", status "in progress". The
+Linux install block, run as written against the published release (with
+the arm64 target and a scratch directory instead of `~/.local/bin`),
+passed its checksum and installed `qgate 0.7.0`.
+
+## Azure Pipelines rehearsal (task 4.2, 2026-11-14)
+
+- **Deviation from D10, decided by Ervin:** D10 asks for edits of a
+  tested C# method and a tested TypeScript function, so the rule would
+  be `tests/unchanged-test`. The rehearsal project's `main` holds no
+  test, and it changes only through pull requests. Rather than merge a
+  setup pull request into it, the rehearsal adds new sources without
+  tests, in a package and a project that test other code, so the rule
+  is `tests/missing-test`. The pipeline's path (comment, build issues,
+  step result) is the same for both rules; `tests/unchanged-test` is
+  covered by the end-to-end tests and the evaluation.
+- **Setup:** in the rehearsal project `qgate-rehearsal`, pipeline 36, a
+  branch `tests-0.7.0` from `main` whose `azure-pipelines.yml` is the
+  line `jobs:` and the README's Linux job at 0.7.0, cut out unchanged
+  (`diff` against the README: identical). The branch adds:
+  - `package.json`, and `src/app/cart/cart.component.spec.ts`, so the
+    package tests other code;
+  - `src/app/orders/order.service.ts`, with `OrderService.total` and
+    `OrderService.isEmpty`, and no spec;
+  - `src/Shop.Domain/Shop.Domain.csproj` and the test project
+    `tests/Shop.Domain.UnitTests/` with `CartTests.cs`;
+  - `src/Shop.Domain/Invoice.cs`, with an auto-property and
+    `Invoice.Total(decimal)`, and no `InvoiceTests.cs`.
+
+  The published 0.7.0 binary gave the same two Warnings on this branch
+  locally. Pull request 1360, abandoned afterwards, unmerged.
+- **Build 1342** on `ubuntu-latest` (image `ubuntu-26.04`, version
+  20261111.196.1), reason `pullRequest`, result `succeeded`:
+  - Install qgate (checksum OK), qgate report, qgate comment and qgate
+    check all succeeded;
+  - `qgate comment`: "created the qgate comment (2 findings, 0 at or
+    above error)";
+  - two warning build issues of code `tests/missing-test`:
+    - `src/Shop.Domain/Invoice.cs` line 7, `Invoice.Total(decimal) has
+      no test: expected InvoiceTests.cs in Shop.Domain.UnitTests`;
+    - `src/app/orders/order.service.ts` line 2, `OrderService.total
+      and 1 more have no test: expected
+      src/app/orders/order.service.spec.ts`.
+  - The job again carried the hosted pool's notice that `ubuntu-latest`
+    moves to Ubuntu 26.
+- **Thread 4563,** active, by "qgate-rehearsal Build Service
+  (<organization>)", read through the REST API: "2 findings, none at
+  or above `error`." and a table with exactly these two rows. The spec,
+  the test project's `CartTests.cs` and the existing `src/grade.ts` do
+  not appear.
+
+## Review of PR 3
+
+The reviewer found no blocker and every checkable fact matching. Fixed:
+- the release notes reached the release page (see "Release 0.7.0");
+- tasks 4.1 and 4.2, and D10, now say what was built: one `0.6.0`
+  kept on purpose, and the rehearsal's `tests/missing-test`;
+- the roadmap's M5 row says hotspots are still planned;
+- the journal entry no longer credits the PR 1 review with reading the
+  evaluation, which came after it.
 
 ## Risks / Trade-offs
 
