@@ -127,6 +127,18 @@ fn fractional_metric_values_are_accepted() {
     assert_valid(&report);
 }
 
+// report-formats: "Finding fields" (design D4 of `add-hotspot-context`)
+#[test]
+fn a_hotspot_is_accepted_and_checked() {
+    let mut report = full_report();
+    report["findings"][0]["hotspot"] = json!({"commits": 31, "complexity": 87});
+    assert_valid(&report);
+    assert_rejected(|r| r["findings"][0]["hotspot"] = json!({"commits": "31", "complexity": 87}));
+    assert_rejected(|r| r["findings"][0]["hotspot"] = json!({"commits": 31}));
+    assert_rejected(|r| r["findings"][0]["hotspot"] = json!({"commits": -1, "complexity": 87}));
+    assert_rejected(|r| r["findings"][0]["hotspot"] = Value::Null);
+}
+
 #[test]
 fn unknown_keys_are_accepted() {
     let mut report = full_report();
