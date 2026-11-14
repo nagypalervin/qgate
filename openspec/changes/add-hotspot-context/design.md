@@ -109,7 +109,9 @@ churn and complexity, and returns the hotspot set.
 
 `pub hotspot: Option<Hotspot>`, with `Hotspot { commits: u32,
 complexity: u32 }`. Every struct literal gets `hotspot: None`, a
-mechanical edit in PR 1 that changes no output. The JSON renderer
+mechanical edit in PR 1 that changes no output. (As built: 16 literals,
+not "about 30": the earlier count included return types such as `->
+Finding {`.) The JSON renderer
 writes the key when set; the other renderers need nothing, because
 the note is in the message.
 

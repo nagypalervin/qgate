@@ -85,6 +85,7 @@ fn increase(change: &FileChange, after: &Function, before: u32) -> Option<Findin
             after: Some(f64::from(after.cyclomatic)),
         }),
         related: Vec::new(),
+        hotspot: None,
     })
 }
 
@@ -108,6 +109,7 @@ fn new_function(change: &FileChange, after: &Function) -> Option<Finding> {
             after: Some(f64::from(after.cyclomatic)),
         }),
         related: Vec::new(),
+        hotspot: None,
     })
 }
 
@@ -172,6 +174,7 @@ mod tests {
                 after: Some(f64::from(after)),
             }),
             related: Vec::new(),
+            hotspot: None,
         }
     }
 
@@ -190,6 +193,7 @@ mod tests {
                 after: Some(f64::from(after)),
             }),
             related: Vec::new(),
+            hotspot: None,
         }
     }
 

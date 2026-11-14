@@ -338,6 +338,7 @@ impl DuplicationIndex {
                     },
                     metric: None,
                     related,
+                    hotspot: None,
                 });
             }
             start = end + 1;

@@ -120,6 +120,7 @@ fn finding(
         },
         metric: None,
         related: Vec::new(),
+        hotspot: None,
     })
 }
 
@@ -801,6 +802,7 @@ mod tests {
             },
             metric: None,
             related: Vec::new(),
+            hotspot: None,
         }
     }
 

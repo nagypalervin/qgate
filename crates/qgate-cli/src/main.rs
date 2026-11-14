@@ -854,6 +854,7 @@ fn file_change(
         },
         metric: None,
         related: Vec::new(),
+        hotspot: None,
     };
 
     let after_bytes = repo.read_blob(&file.after).map_err(|e| e.to_string())?;
