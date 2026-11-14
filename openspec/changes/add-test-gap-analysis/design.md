@@ -136,6 +136,12 @@ and `MISSING_TEST_RULE`.
 - **Why not an `Analyzer`:** a finding depends on other files of the
   change (the test) and on the head tree (whether a test or a test
   project exists). Duplication made the same choice.
+- **As built (PR 2):** `analyze(changes, head_paths, changed_paths,
+  exclude)`, four arguments instead of a `TestInput` struct; the two
+  path lists are iterators of `&str`, so the CLI passes git's strings
+  without copying. The module is named after the analyzer, `tests`, so
+  its unit tests live in `tests::tests`; clippy's `module_inception` is
+  allowed there, with the reason in a comment.
 - **Why raw changed paths:** test files count regardless of
   `[files] exclude` and of generation (Gate 1, question 6). The
   analyzed changes alone would miss an excluded spec.
