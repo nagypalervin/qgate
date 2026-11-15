@@ -324,6 +324,29 @@ full clone (`<repo> <out> <qgate> <qgate-0.7.0> '*.cs'`, or `'*.ts'`,
 or both), then `summary_hs.py` and `classify_hs.py <first run>
 <second run>`.
 
+## Release notes for 0.8.0 (draft, task 2.4)
+
+To go above GitHub's generated list when the release is published:
+
+```markdown
+qgate now adds hotspot context from git history (M5b): in `--base` and
+`--worktree` mode, the Claude Code hook and the MCP server, a finding in
+a file that is both complex and changed often ends with
+`; hotspot: <n> commits in 6 months, complexity <c>`.
+
+- Context only: no severity, `--fail-on` result or exit code changes,
+  and there is no list of hotspots.
+- The JSON report gets an optional `hotspot` key on such findings,
+  `{"commits": <n>, "complexity": <c>}`; within `schema_version` 1,
+  consumers that ignore unknown keys need no change.
+- History must be complete: in a shallow clone `qgate check` says
+  `qgate: the history is shallow; hotspots not computed` on standard
+  error and adds no note. CI jobs need `fetch-depth: 0` / `fetchDepth: 0`,
+  as the README's already have.
+
+See "Hotspots" in the README.
+```
+
 ## Review of PR 1
 
 The reviewer found no blocker and reproduced each finding in scratch
