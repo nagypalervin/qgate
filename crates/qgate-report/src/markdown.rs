@@ -152,6 +152,7 @@ mod tests {
             location,
             metric: None,
             related: Vec::new(),
+            hotspot: None,
         }
     }
 

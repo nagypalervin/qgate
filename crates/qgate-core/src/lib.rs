@@ -88,6 +88,20 @@ pub struct Finding {
     /// the rule defines (for a duplicate block: the existing copies).
     /// Empty for most rules.
     pub related: Vec<Location>,
+    /// Set when the finding's file is a hotspot: complex and changed
+    /// often (design D4 of `add-hotspot-context`). Context only; it never
+    /// changes the severity.
+    pub hotspot: Option<Hotspot>,
+}
+
+/// Why a finding's file is a hotspot: how often it changed and how
+/// complex it is, as the revision check measured them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hotspot {
+    /// Non-merge commits that changed the file in the window.
+    pub commits: u32,
+    /// The sum of the cyclomatic complexity of the file's units.
+    pub complexity: u32,
 }
 
 #[cfg(test)]

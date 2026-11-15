@@ -238,6 +238,7 @@ mod tests {
             },
             metric: None,
             related: Vec::new(),
+            hotspot: None,
         };
         assert_eq!(
             render_text(&[f]),
@@ -266,6 +267,7 @@ mod tests {
             location,
             metric,
             related: Vec::new(),
+            hotspot: None,
         }
     }
 

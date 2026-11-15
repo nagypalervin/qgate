@@ -464,6 +464,7 @@ mod tests {
             },
             metric: None,
             related: Vec::new(),
+            hotspot: None,
         }
     }
 

@@ -17,6 +17,10 @@
 //! - [`Repository::files_at`] lists every regular file of a revision, and
 //!   [`Repository::blob_reader`] reads many blobs through one
 //!   `git cat-file --batch` process, for analyses that need a whole tree.
+//! - [`Repository::churn`] counts, per head path, the non-merge commits of
+//!   a time window that changed a file, following renames, for hotspot
+//!   context; [`Repository::commit_time`] and [`Repository::is_shallow`]
+//!   tell the window and whether the history is complete.
 //! - [`Repository::worktree_snapshot`] turns the working tree, uncommitted
 //!   and untracked files included, into a commit that no ref points to, so
 //!   every method above can check it like a revision. It leaves the index,
@@ -41,6 +45,7 @@
 //! # Ok::<(), qgate_git::GitError>(())
 //! ```
 
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fmt;
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
@@ -651,6 +656,91 @@ impl Repository {
         }
     }
 
+    /// The committer time of the commit `revision` names, in seconds since
+    /// the epoch.
+    ///
+    /// # Errors
+    ///
+    /// [`GitError::UnknownRevision`] if `revision` does not name a commit,
+    /// or another [`GitError`] if git fails.
+    pub fn commit_time(&self, revision: &str) -> Result<i64, GitError> {
+        let commit = self.resolve(revision)?;
+        let args = ["show", "-s", "--no-show-signature", "--format=%ct", &commit];
+        let out = self.git(&args)?;
+        if !out.status.success() {
+            return Err(command_error(&args, &out));
+        }
+        let text = stdout_of(&out);
+        text.parse().map_err(|_| GitError::UnexpectedOutput {
+            args: args.iter().map(|&a| a.to_owned()).collect(),
+            detail: text,
+        })
+    }
+
+    /// For each path, the number of non-merge commits reachable from
+    /// `head` whose committer time is after `since` (seconds since the
+    /// epoch), and that add, modify or rename the file (design D1 of
+    /// `add-hotspot-context`).
+    ///
+    /// A commit counts under the name the file has in `head`: renames are
+    /// followed along the commit graph, so a file renamed on one branch
+    /// keeps the commits another branch made under its old name. Paths
+    /// `head` no longer has keep their own entries; callers pick theirs.
+    /// The walk stops at commits dated before `since`, so a commit in the
+    /// window that only an older-dated commit leads to is not seen.
+    ///
+    /// # Errors
+    ///
+    /// [`GitError::UnknownRevision`] if `head` does not name a commit, or
+    /// another [`GitError`] if git fails.
+    pub fn churn(&self, head: &str, since: i64) -> Result<BTreeMap<String, u32>, GitError> {
+        let commit = self.resolve(head)?;
+        let since_arg = format!("--since=@{since}");
+        // Merge commits are walked, for the graph, but show no files.
+        let args = [
+            "log",
+            "--topo-order",
+            "--find-renames",
+            "--name-status",
+            "-z",
+            "--no-ext-diff",
+            "--no-show-signature",
+            "--format=commit %H %ct %P",
+            &since_arg,
+            &commit,
+        ];
+        let out = self.git(&args)?;
+        if !out.status.success() {
+            return Err(command_error(&args, &out));
+        }
+        parse_log(&out.stdout, since).map_err(|detail| GitError::UnexpectedOutput {
+            args: args.iter().map(|&a| a.to_owned()).collect(),
+            detail,
+        })
+    }
+
+    /// Whether the repository is a shallow clone, whose history is cut
+    /// off.
+    ///
+    /// # Errors
+    ///
+    /// A [`GitError`] if git fails.
+    pub fn is_shallow(&self) -> Result<bool, GitError> {
+        let args = ["rev-parse", "--is-shallow-repository"];
+        let out = self.git(&args)?;
+        if !out.status.success() {
+            return Err(command_error(&args, &out));
+        }
+        match stdout_of(&out).as_str() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            other => Err(GitError::UnexpectedOutput {
+                args: args.iter().map(|&a| a.to_owned()).collect(),
+                detail: other.to_owned(),
+            }),
+        }
+    }
+
     /// The raw contents of a blob.
     ///
     /// # Errors
@@ -730,6 +820,119 @@ pub struct Changes {
     pub changed: Vec<ChangedFile>,
     /// Regular files that are gone, with their base contents.
     pub deleted: Vec<TreeFile>,
+}
+
+/// One commit of the walk in [`parse_log`].
+#[derive(Default)]
+struct Walked {
+    /// Its parents' ids.
+    parents: Vec<String>,
+    /// Names in this commit that `head` knows by another name.
+    names: HashMap<String, String>,
+    /// The same for its parents: `names` plus this commit's renames.
+    older: HashMap<String, String>,
+    /// The head names it counts for; `None` outside the window.
+    counted: Option<HashSet<String>>,
+}
+
+/// Count commits per path from `git log --topo-order --name-status -z
+/// --format='commit %H %ct %P'` output, children before parents.
+///
+/// A commit is a token `commit <id> <time> <parents>`, followed by status
+/// tokens and their paths: one path, or two for a rename or copy
+/// (`R<score>`, `C<score>`); merges have none. The token after a header
+/// starts with a newline, which is dropped; paths are taken as they are.
+/// Each commit passes the head names it knows to its parents, adding its
+/// own renames, so older names count under the name `head` has.
+fn parse_log(raw: &[u8], since: i64) -> Result<BTreeMap<String, u32>, String> {
+    let mut counts: BTreeMap<String, u32> = BTreeMap::new();
+    // Names for commits not walked yet, from the children walked so far.
+    let mut waiting: HashMap<String, HashMap<String, String>> = HashMap::new();
+    let mut current: Option<Walked> = None;
+    let mut finish = |walked: Walked, waiting: &mut HashMap<String, HashMap<String, String>>| {
+        for path in walked.counted.into_iter().flatten() {
+            *counts.entry(path).or_default() += 1;
+        }
+        for parent in walked.parents {
+            let names = waiting.entry(parent).or_default();
+            for (old, new) in &walked.older {
+                names.entry(old.clone()).or_insert_with(|| new.clone());
+            }
+        }
+    };
+    let mut tokens = raw
+        .split(|&b| b == 0)
+        .map(|t| String::from_utf8_lossy(t).into_owned());
+    let mut after_header = false;
+    while let Some(mut token) = tokens.next() {
+        if after_header {
+            token = token.trim_start_matches('\n').to_owned();
+            after_header = false;
+        }
+        if token.is_empty() {
+            continue;
+        }
+        if let Some(header) = token.strip_prefix("commit ") {
+            if let Some(walked) = current.take() {
+                finish(walked, &mut waiting);
+            }
+            let mut fields = header.split(' ');
+            let (Some(id), Some(time)) = (fields.next(), fields.next()) else {
+                return Err(format!("not a commit header: {token}"));
+            };
+            let time: i64 = time
+                .parse()
+                .map_err(|_| format!("not a commit time: {token}"))?;
+            let names = waiting.remove(id).unwrap_or_default();
+            current = Some(Walked {
+                parents: fields
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+                older: names.clone(),
+                names,
+                counted: (time > since).then(HashSet::new),
+            });
+            after_header = true;
+            continue;
+        }
+        let walked = current
+            .as_mut()
+            .ok_or_else(|| format!("a file before the first commit: {token}"))?;
+        let mut path = || {
+            tokens
+                .next()
+                .filter(|p| !p.is_empty())
+                .ok_or_else(|| format!("no path after {token}"))
+        };
+        let head_name =
+            |walked: &Walked, name: String| walked.names.get(&name).cloned().unwrap_or(name);
+        let counted = match token.chars().next() {
+            Some('R') => {
+                let (old, new) = (path()?, path()?);
+                let new = head_name(walked, new);
+                walked.older.insert(old, new.clone());
+                Some(new)
+            }
+            Some('C') => {
+                let (_, new) = (path()?, path()?);
+                Some(head_name(walked, new))
+            }
+            Some('A' | 'M') => Some(head_name(walked, path()?)),
+            Some('D' | 'T' | 'U' | 'X' | 'B') => {
+                path()?;
+                None
+            }
+            _ => return Err(format!("unknown status: {token}")),
+        };
+        if let (Some(set), Some(name)) = (walked.counted.as_mut(), counted) {
+            set.insert(name);
+        }
+    }
+    if let Some(walked) = current {
+        finish(walked, &mut waiting);
+    }
+    Ok(counts)
 }
 
 /// Parse `git diff --raw -z` output into the changed and the deleted
@@ -878,6 +1081,268 @@ mod test_support;
 mod tests {
     use super::*;
     use crate::test_support::{TestRepo, canonical, scratch_dir};
+
+    /// Seconds since the epoch of midnight UTC on `date` (`YYYY-MM-DD`),
+    /// by the days-from-civil algorithm.
+    fn day(date: &str) -> i64 {
+        let parts: Vec<i64> = date
+            .split('-')
+            .map(|p| p.parse().expect("a number"))
+            .collect();
+        let (y, m, d) = (parts[0], parts[1], parts[2]);
+        let y = if m <= 2 { y - 1 } else { y };
+        let era = y.div_euclid(400);
+        let yoe = y - era * 400;
+        let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        (era * 146_097 + doe - 719_468) * 86_400
+    }
+
+    fn counts(pairs: &[(&str, u32)]) -> BTreeMap<String, u32> {
+        pairs.iter().map(|&(p, n)| (p.to_owned(), n)).collect()
+    }
+
+    fn at(date: &str) -> String {
+        format!("{date}T00:00:00Z")
+    }
+
+    #[test]
+    fn day_matches_git() {
+        let repo = TestRepo::new();
+        let id = repo.commit_at("x", &at("2026-02-02"));
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        assert_eq!(found.commit_time(&id), Ok(day("2026-02-02")));
+    }
+
+    // hotspot-analysis: "The window", "Churn" (design D1 of
+    // `add-hotspot-context`)
+    #[test]
+    fn churn_in_a_window() {
+        let repo = TestRepo::new();
+        repo.write("src/old.ts", "1");
+        repo.write("src/cart.ts", "1");
+        repo.commit_at("before the window", &at("2025-06-01"));
+        repo.write("src/edge.ts", "1");
+        // Exactly at the start: not after it, so out.
+        repo.commit_at("at the start", "2025-12-01T00:00:00Z");
+        repo.write("src/edge.ts", "2");
+        repo.commit_at("one second later", "2025-12-01T00:00:01Z");
+        repo.write("src/cart.ts", "2");
+        repo.commit_at("inside", &at("2026-01-10"));
+        repo.write("src/cart.ts", "3");
+        repo.write("src/gone.ts", "1");
+        repo.commit_at("inside, two files", &at("2026-02-01"));
+        repo.git(&["rm", "-q", "src/gone.ts"]);
+        repo.write("src/cart.ts", "4");
+        repo.commit_at("the head", &at("2026-02-02"));
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let churn = found.churn("HEAD", day("2025-12-01")).expect("history");
+        // `src/gone.ts` keeps its own path, which a caller does not rank.
+        assert_eq!(
+            churn,
+            counts(&[("src/cart.ts", 3), ("src/edge.ts", 1), ("src/gone.ts", 1)])
+        );
+    }
+
+    #[test]
+    fn merge_commits_do_not_count() {
+        let repo = TestRepo::new();
+        repo.write("src/cart.ts", "1");
+        repo.commit_at("base", &at("2026-01-01"));
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        for (i, date) in ["2026-01-02", "2026-01-03", "2026-01-04"]
+            .iter()
+            .enumerate()
+        {
+            repo.write("src/cart.ts", format!("{}", i + 2));
+            repo.commit_at("feature", &at(date));
+        }
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("README.md", "x");
+        repo.commit_at("main moves", &at("2026-01-05"));
+        repo.merge_at("feature", &at("2026-01-06"));
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let churn = found.churn("HEAD", day("2025-12-01")).expect("history");
+        assert_eq!(churn, counts(&[("README.md", 1), ("src/cart.ts", 4)]));
+    }
+
+    const BODY: &str = "line one\nline two\nline three\nline four\nline five\n";
+
+    #[test]
+    fn renames_are_followed_to_the_head_path() {
+        let repo = TestRepo::new();
+        repo.write("src/basket.ts", BODY);
+        repo.commit_at("add", &at("2026-01-01"));
+        repo.write("src/basket.ts", format!("{BODY}line six\n"));
+        repo.commit_at("edit", &at("2026-01-02"));
+        repo.git(&["mv", "src/basket.ts", "src/cart.ts"]);
+        repo.commit_at("rename", &at("2026-01-03"));
+        repo.write("src/cart.ts", format!("{BODY}line six\nline seven\n"));
+        repo.commit_at("edit again", &at("2026-01-04"));
+        // A new file under the old name is another file.
+        repo.write("src/basket.ts", "new\n");
+        repo.commit_at("a new basket", &at("2026-01-05"));
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let churn = found.churn("HEAD", day("2025-12-01")).expect("history");
+        assert_eq!(churn, counts(&[("src/basket.ts", 1), ("src/cart.ts", 4)]));
+    }
+
+    // A rename on the branch of the edits is followed through the merge
+    // that brings them in.
+    #[test]
+    fn renames_on_the_merged_branch() {
+        let repo = TestRepo::new();
+        repo.write("src/basket.ts", BODY);
+        repo.commit_at("add", &at("2026-01-01"));
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        repo.write("src/basket.ts", format!("line zero\n{BODY}"));
+        repo.commit_at("feature edit", &at("2026-01-02"));
+        repo.git(&["mv", "src/basket.ts", "src/cart.ts"]);
+        repo.commit_at("feature rename", &at("2026-01-03"));
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("README.md", "x");
+        repo.commit_at("main moves", &at("2026-01-04"));
+        repo.merge_at("feature", &at("2026-01-05"));
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let churn = found.churn("HEAD", day("2025-12-01")).expect("history");
+        assert_eq!(churn, counts(&[("README.md", 1), ("src/cart.ts", 3)]));
+    }
+
+    // A rename on another branch than the edits is joined only by the
+    // merge, which shows no files, so the edits keep the old name (a
+    // known limit, design D1 of `add-hotspot-context`; review of PR 1).
+    #[test]
+    fn renames_on_another_branch_are_not_followed() {
+        let repo = TestRepo::new();
+        repo.write("src/basket.ts", BODY);
+        repo.commit_at("add", &at("2026-01-01"));
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        repo.write("src/basket.ts", format!("line zero\n{BODY}"));
+        repo.commit_at("feature edit", &at("2026-01-02"));
+        repo.git(&["checkout", "-q", "main"]);
+        repo.git(&["mv", "src/basket.ts", "src/cart.ts"]);
+        repo.commit_at("rename", &at("2026-01-03"));
+        repo.git(&["checkout", "-q", "feature"]);
+        repo.write("src/basket.ts", format!("line zero\n{BODY}line six\n"));
+        repo.commit_at("feature edit again", &at("2026-01-04"));
+        repo.git(&["checkout", "-q", "main"]);
+        repo.merge_at("feature", &at("2026-01-05"));
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let churn = found.churn("HEAD", day("2025-12-01")).expect("history");
+        assert_eq!(churn, counts(&[("src/basket.ts", 2), ("src/cart.ts", 2)]));
+    }
+
+    #[test]
+    fn paths_with_spaces_and_non_ascii_names() {
+        let repo = TestRepo::new();
+        repo.write("src/a b.ts", "1");
+        repo.write("src/\u{e9}t\u{e9}.ts", "1");
+        repo.commit_at("add", &at("2026-01-01"));
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        let churn = found.churn("HEAD", day("2025-12-01")).expect("history");
+        assert_eq!(
+            churn,
+            counts(&[("src/a b.ts", 1), ("src/\u{e9}t\u{e9}.ts", 1)])
+        );
+    }
+
+    #[test]
+    fn churn_of_an_unknown_revision() {
+        let repo = TestRepo::new();
+        repo.commit("first");
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        assert_eq!(
+            found.churn("no-such-head", 0),
+            Err(GitError::UnknownRevision {
+                revision: "no-such-head".to_owned()
+            })
+        );
+    }
+
+    /// `git log` output as `parse_log` reads it: NUL-separated tokens.
+    fn log(tokens: &[&str]) -> Vec<u8> {
+        let mut raw = Vec::new();
+        for token in tokens {
+            raw.extend_from_slice(token.as_bytes());
+            raw.push(0);
+        }
+        raw
+    }
+
+    #[test]
+    fn parse_log_copies_merges_and_names() {
+        let raw = log(&[
+            "commit c3 30 c2",
+            "\nC75",
+            "src/a.ts",
+            "src/copy.ts",
+            "M",
+            "\nstarts with a newline.ts",
+            "commit c2 20 c1 x1",
+            "commit c1 10",
+            "\nA",
+            "M",
+        ]);
+        assert_eq!(
+            parse_log(&raw, 0),
+            Ok(counts(&[
+                ("\nstarts with a newline.ts", 1),
+                ("M", 1),
+                ("src/copy.ts", 1),
+            ]))
+        );
+        // Outside the window: counted for nothing.
+        assert_eq!(parse_log(&raw, 30), Ok(BTreeMap::new()));
+    }
+
+    #[test]
+    fn parse_log_errors() {
+        for (tokens, error) in [
+            (&["commit c1 10", "\nQ", "a.ts"][..], "unknown status: Q"),
+            (&["commit c1 10", "\nM"][..], "no path after M"),
+            (&["commit c1 ten"][..], "not a commit time: commit c1 ten"),
+            (&["commit c1"][..], "not a commit header: commit c1"),
+            (&["M", "a.ts"][..], "a file before the first commit: M"),
+        ] {
+            assert_eq!(
+                parse_log(&log(tokens), 0),
+                Err(error.to_owned()),
+                "{tokens:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shallow_and_full_clones() {
+        let repo = TestRepo::new();
+        for (i, date) in ["2026-01-01", "2026-01-02", "2026-01-03"]
+            .iter()
+            .enumerate()
+        {
+            repo.write("a.ts", format!("{i}"));
+            repo.commit_at("c", &format!("{date}T00:00:00Z"));
+        }
+        let found = Repository::discover(&repo.dir).expect("a repository");
+        assert_eq!(found.is_shallow(), Ok(false));
+        let clone = scratch_dir("shallow");
+        let url = format!("file://{}", repo.dir.display());
+        let mut command = Command::new("git");
+        crate::test_support::isolate(&mut command);
+        let out = command
+            .args(["clone", "-q", "--depth", "1", &url, "."])
+            .current_dir(&clone)
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let shallow = Repository::discover(&clone).expect("a repository");
+        let answer = shallow.is_shallow();
+        let _ = std::fs::remove_dir_all(&clone);
+        assert_eq!(answer, Ok(true));
+    }
 
     #[test]
     fn discover_at_the_root() {

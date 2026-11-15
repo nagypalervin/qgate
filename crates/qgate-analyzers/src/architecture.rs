@@ -192,6 +192,7 @@ impl Analyzer for ArchitectureAnalyzer {
                 },
                 metric: None,
                 related: Vec::new(),
+                hotspot: None,
             })
             .collect()
     }
