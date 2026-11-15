@@ -286,3 +286,35 @@ fn the_working_tree() {
     // The 7 commits of history; the uncommitted edit is no commit.
     assert!(out.contains(NOTE), "{out}");
 }
+
+// "Ranked files": tests are not ranked (decided after the evaluation).
+#[test]
+fn tests_are_not_ranked() {
+    let repo = Repo::new();
+    repo.write("src/a.ts", function("a", 0));
+    for rev in 0..9 {
+        if rev < 6 {
+            repo.write("src/cart.ts", cart(rev, 4));
+        }
+        repo.write(
+            "src/cart.spec.ts",
+            format!("// {rev}\n{}", function("specs", 20)),
+        );
+        repo.commit_at("cart and spec", &date(rev + 1));
+    }
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write(
+        "src/cart.spec.ts",
+        format!("// 99\n{}", function("specs", 22)),
+    );
+    let (out, _, _) = raise_total(&repo, &[]);
+    // A busier, more complex spec would push the cart out of a 3-file
+    // ranking; tests are not ranked, and the spec's own finding has no
+    // note.
+    assert!(out.contains(NOTE), "{out}");
+    let spec = out
+        .lines()
+        .find(|l| l.contains("src/cart.spec.ts"))
+        .expect("a finding for the spec");
+    assert!(!spec.contains("hotspot"), "{out}");
+}

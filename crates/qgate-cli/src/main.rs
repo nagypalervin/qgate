@@ -766,9 +766,9 @@ fn hotspot_context(
 /// skipped silently. Each language family has its own index, so code is
 /// compared only with code of its own family (design D6 of
 /// `add-csharp-analysis`), and generated C# files take no part. Also
-/// returns the complexity of each file it compares, changed or not, for
-/// hotspot ranking, so the tree is parsed once (design D5 of
-/// `add-hotspot-context`).
+/// returns the complexity of each source file it compares, changed or
+/// not and tests left out, for hotspot ranking, so the tree is parsed
+/// once (design D5 of `add-hotspot-context`).
 // One more than clippy's limit: the revision check's state, passed
 // through rather than bundled into a struct used only here.
 #[allow(clippy::too_many_arguments)]
@@ -876,6 +876,16 @@ fn duplication(
         .iter()
         .flat_map(|(_, index)| index.findings())
         .collect();
+    // Tests are not ranked (decided after the evaluation of
+    // `add-hotspot-context`): their churn would push sources out.
+    let tests: HashSet<String> = qgate_analyzers::tests::tests_among(
+        tree.iter().map(|file| file.path.as_str()),
+        complexity.keys().map(String::as_str),
+    )
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    complexity.retain(|path, _| !tests.contains(path));
     Ok((findings, complexity))
 }
 

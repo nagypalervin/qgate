@@ -104,14 +104,21 @@ NOT be ranked.
 ### Requirement: Ranked files
 
 The ranked files SHALL be the files of the head revision whose language
-is supported, that `[files] exclude` does not name and that are not
-generated C#, each language family ranked on its own: TypeScript with
-TypeScript, C# with C#.
+is supported, that `[files] exclude` does not name, that are not
+generated C# and that are not tests by the conventions of
+`test-analysis`, each language family ranked on its own: TypeScript
+with TypeScript, C# with C#. A test's findings get no hotspot context.
 
 #### Scenario: Excluded migrations
 
 - **GIVEN** `[files]` has `exclude = ["**/Migrations/**"]`, and migrations changed in every commit
 - **THEN** no migration is ranked, and they push no other file out of the top
+
+#### Scenario: Tests are not ranked
+
+- **GIVEN** `src/cart.spec.ts` changed in more commits than `src/cart.ts` and is more complex, and the change makes both more complex
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** the finding for `src/cart.ts` has hotspot context and the one for `src/cart.spec.ts` has none
 
 #### Scenario: Families apart
 

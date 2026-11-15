@@ -139,6 +139,15 @@ churn and complexity, and returns the hotspot set.
   except `input/unparsable`. It is a separate step at the end of the
   check, so no analyzer knows about history.
 
+**Tests are not ranked (decided after the evaluation, 2026-11-15,
+Ervin).** In `bitwarden/server`, 20 of 48 notes fell on test or test
+support code, mostly duplication in large test files from one wide
+commit. Files that are tests by the conventions of `test-analysis` now
+leave the ranking: their findings get no note, and their churn cannot
+push sources out. `qgate_analyzers::tests::tests_among` exposes the
+conventions; `duplication()` drops tests from the complexity map it
+returns.
+
 ### D4. `Finding::hotspot` in `qgate-core` (Gate 1, question 7)
 
 `pub hotspot: Option<Hotspot>`, with `Hotspot { commits: u32,
@@ -219,6 +228,101 @@ the note is in the message.
 - **Release 0.8.0.**
 - **PR 3** (`change/add-hotspot-context-3`): the README versions, the
   roadmap, the rehearsal, the journal and the archive.
+
+## Evaluation (task 2.5, 2026-11-15)
+
+**Repositories,** full clones (all history and blobs, not shallow,
+nothing of theirs built or run):
+
+| | commits | head |
+|---|---|---|
+| `jasontaylordev/CleanArchitecture` | 984 | 2026-11-09 |
+| `dotnet/eShop` | 349 | 2026-10-15 |
+| `bitwarden/server` | 8,167 | 2026-11-13 |
+| `bitwarden/clients` | 23,835 | 2026-11-13 |
+
+**Binaries:** release builds of this branch (9b17616 for the first
+run; the second run's build of the code in the commit that records it)
+against the published 0.7.0.
+
+**Run:** the last 30 non-merge commits touching `.cs` (server, eShop),
+`.ts` (clients) or both (CleanArchitecture). Each is checked out with an
+untracked `qgate.toml` that excludes `**/Migrations/**`, and both
+binaries run `check --base <commit>^ --worktree --format json`. The
+`git log` qgate runs is timed on its own.
+
+**Nothing else changed:** in all 120 commits, every finding equals
+0.7.0's once the note and the `hotspot` key are removed. No run failed,
+and nothing reported a shallow history.
+
+**Time per commit,** this branch against 0.7.0, mean (max):
+
+| | this branch | 0.7.0 | its `git log` |
+|---|---|---|---|
+| CleanArchitecture | 0.06 s (0.11) | 0.06 s (0.09) | 0.00 s |
+| eShop | 0.17 s (0.23) | 0.18 s (0.26) | 0.00 s |
+| server | 4.77 s (5.83) | 5.20 s (6.13) | 0.08 s (0.10) |
+| clients | 4.93 s (5.76) | 5.05 s (5.72) | 0.14 s (0.17) |
+
+The history read costs at most 0.17 s, about 3% of a large check;
+duplication over the whole tree dominates both versions.
+
+**First run (tests ranked):**
+
+| | findings | with a note | in files | in test or test support code |
+|---|---|---|---|---|
+| server | 187 | 48 (26%) | 22 | 20 |
+| clients | 177 | 28 (16%) | 20 | 3 |
+
+CleanArchitecture and eShop got no note. That is right: in their
+windows no file changed in more than one (CleanArchitecture) or two
+(eShop) commits, so the 5-commit minimum is never met. Twenty of the
+server's 48 notes were in tests, mostly duplication in large test files
+from one 132-file commit. That led to the decision under D3: tests are
+not ranked.
+
+**Second run (tests not ranked),** the result to ship, every finding in
+[`evaluation/findings.md`](evaluation/findings.md):
+
+| | with a note | central code | composition root | small file | support code |
+|---|---|---|---|---|---|
+| server | 30 in 14 files | 23 | 0 | 5 | 2 |
+| clients | 26 in 18 files | 16 | 7 | 2 | 1 |
+
+- **The diff between the runs is exactly the intended one:**
+  - 18 notes on test code are gone in server and 2 in clients;
+  - nothing new: every note of the second run was in the first.
+- **Central code** (complexity of 50 or more): each of these 39 notes
+  is in a service, controller, repository or large component that a
+  reviewer would call fragile:
+  - server: `CipherService.cs` (216), `OrganizationService.cs` (245),
+    `CiphersController.cs` (325), `AccountController.cs` (145);
+  - clients: `collect-autofill-content.service.ts` (387),
+    `cipher.service.ts` (322), `vault.component.ts` (235).
+- **Composition roots:** `main.background.ts` (90 commits, complexity
+  102) and `service-container.ts` (64 commits, complexity 24) change in
+  nearly every feature, because every feature wires a service there.
+  They are hotspots by any measure, and Tornhill's too. Their notes sit
+  on `tests/unchanged-test` and complexity findings for that wiring.
+  Accepted; `[tests] exclude` already quiets the tests part.
+- **Small files** (complexity 21 to 42): busy Angular components and
+  C# commands that rank in the top quarter because most files of their
+  family are simpler. Plausible, not wrong.
+- **Support code:** two C# seeders and a Storybook helper, outside every
+  test convention. Few enough to accept.
+
+**Option 2, severity raising,** would have turned 24 (server) and 25
+(clients) Warnings into Errors in 60 commits. That supports annotation
+only.
+
+**Thresholds** stay as specified: nothing in the sort calls for another
+value, and the stop rule (a slow `git log`, or thresholds that look
+wrong) is not met.
+
+**To reproduce:** [`evaluation/run_hs.py`](evaluation/run_hs.py) on each
+full clone (`<repo> <out> <qgate> <qgate-0.7.0> '*.cs'`, or `'*.ts'`,
+or both), then `summary_hs.py` and `classify_hs.py <first run>
+<second run>`.
 
 ## Review of PR 1
 
