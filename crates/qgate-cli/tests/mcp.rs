@@ -332,6 +332,29 @@ fn listing_the_tools() {
 
 // Requirement: What the tool checks
 
+// Hotspot context reaches the tool's report (task 2.3 of
+// `add-hotspot-context`).
+#[test]
+fn a_finding_in_a_hotspot() {
+    let repo = committed(&[("src/a.ts", &function("a", 0))]);
+    for day in 1..=6 {
+        repo.write("src/cart.ts", format!("// {day}\n{}", function("total", 4)));
+        repo.commit_at("cart", &format!("2026-01-{day:02}T00:00:00Z"));
+    }
+    repo.write("src/cart.ts", format!("// 7\n{}", function("total", 6)));
+    let result = call(&repo, &json!({}));
+    let finding = &report(&result)["findings"][0];
+    assert_eq!(
+        finding["rule"], "complexity/cyclomatic-increase",
+        "{result}"
+    );
+    assert_eq!(
+        finding["hotspot"],
+        json!({"commits": 6, "complexity": 7}),
+        "{result}"
+    );
+}
+
 // The tests analyzer runs through the tool too (task 2.4 of
 // `add-test-gap-analysis`).
 #[test]

@@ -108,6 +108,38 @@ impl Repo {
         self.git(&["commit", "-q", "--allow-empty", "-m", message]);
     }
 
+    /// Stage everything and commit with author and committer date `date`
+    /// (ISO 8601).
+    pub fn commit_at(&self, message: &str, date: &str) {
+        self.git(&["add", "-A"]);
+        self.git_at(&["commit", "-q", "--allow-empty", "-m", message], date);
+    }
+
+    /// Merge `branch` with a merge commit dated `date`.
+    pub fn merge_at(&self, branch: &str, date: &str) {
+        self.git_at(&["merge", "-q", "--no-ff", "-m", "merge", branch], date);
+    }
+
+    /// Run git with author and committer date `date`; panics on failure.
+    pub fn git_at(&self, args: &[&str], date: &str) {
+        let out = isolate(&mut Command::new("git"))
+            .args(args)
+            .current_dir(&self.dir)
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_DATE", date)
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
     /// Run qgate in the repository root.
     pub fn qgate(&self, args: &[&str]) -> Output {
         qgate_in(&self.dir, args)

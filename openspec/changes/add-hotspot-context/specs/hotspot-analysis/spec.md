@@ -158,7 +158,7 @@ Markdown, Azure Pipelines and GitHub Actions annotations, and JSON.
 
 - **GIVEN** the change of "A complexity increase in a hotspot"
 - **WHEN** the user runs `qgate check --base main --format markdown`
-- **THEN** the finding's cell reads `Cart.Total(): cyclomatic complexity 4 -> 6 (+2); hotspot: 31 commits in 6 months, complexity 87`
+- **THEN** the finding's cell reads `Cart.Total(): cyclomatic complexity 4 -\> 6 (+2); hotspot: 31 commits in 6 months, complexity 87`, with `>` escaped as for every cell
 
 #### Scenario: Azure Pipelines
 

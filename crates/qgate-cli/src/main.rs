@@ -17,7 +17,7 @@
 mod hook;
 mod mcp;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead as _, ErrorKind, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -29,6 +29,7 @@ use clap::{Arg, ArgAction, ArgMatches, Command, ValueEnum, value_parser};
 use qgate_analyzers::architecture::{ArchitectureAnalyzer, ForbidRule};
 use qgate_analyzers::complexity::ComplexityAnalyzer;
 use qgate_analyzers::duplication::{ChangedSource, DuplicationIndex};
+use qgate_analyzers::hotspots::{self, RankedFile, WINDOW_DAYS};
 use qgate_analyzers::patterns::PathPatterns;
 use qgate_analyzers::{Analyzer, FileChange};
 use qgate_config::Config;
@@ -356,7 +357,13 @@ fn main() -> ExitCode {
                 };
                 std::env::current_dir()
                     .map_err(|e| format!("cannot read the current directory: {e}"))
-                    .and_then(|cwd| check_revisions(&cwd, base, head))
+                    .and_then(|cwd| revision_check(&cwd, base, head))
+                    .map(|checked| {
+                        if checked.shallow {
+                            eprintln!("qgate: the history is shallow; hotspots not computed");
+                        }
+                        checked.findings
+                    })
             }
             None => check(args),
         };
@@ -573,6 +580,19 @@ struct Head {
 /// Run `qgate check --base <base>` with `--head <rev>` or `--worktree` in
 /// the repository that contains `dir`, and return the sorted findings.
 fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Finding>, String> {
+    revision_check(dir, base, head).map(|checked| checked.findings)
+}
+
+/// What a revision check found, and whether the history was too shallow
+/// for hotspot context, which only `qgate check` reports (design D5 of
+/// `add-hotspot-context`); the hook and the MCP server leave it out.
+struct Checked {
+    findings: Vec<Finding>,
+    shallow: bool,
+}
+
+/// [`check_revisions`], with the shallow-history flag.
+fn revision_check(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Checked, String> {
     let repo = Repository::discover(dir).map_err(|e| e.to_string())?;
     let head = match head {
         HeadArg::Revision(revision) => Head {
@@ -661,6 +681,7 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
             }
         }
     }
+    let mut shallow = false;
     if !analyzed.is_empty() {
         // Read once, for duplication and tests (design D8 of
         // `add-test-gap-analysis`).
@@ -668,7 +689,7 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
             .files_at(&head.revision)
             .map_err(|e| git_message(&e, base, &head))?;
         left.extend(deleted.into_iter().map(|file| (file.path, file.id)));
-        findings.extend(duplication(
+        let (copies, complexity) = duplication(
             &repo,
             base,
             &head,
@@ -677,16 +698,64 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
             &left,
             &changed_paths,
             &selection,
-        )?);
+        )?;
+        findings.extend(copies);
         findings.extend(qgate_analyzers::tests::analyze(
             &analyzed,
             tree.iter().map(|file| file.path.as_str()),
             edited.iter().map(String::as_str),
             &tests_exclude,
         ));
+        shallow = !hotspot_context(&repo, (base, &head), &selection, &complexity, &mut findings)?;
     }
     sort(&mut findings);
-    Ok(findings)
+    Ok(Checked { findings, shallow })
+}
+
+/// Add hotspot context to the findings (design D2, D3 and D5 of
+/// `add-hotspot-context`): rank each language family's files, the keys
+/// of `complexity`, by the commits of the window and by complexity, and
+/// annotate the findings in hotspots. Returns `false`, and changes
+/// nothing, when the history is shallow. With `--worktree` the history is
+/// read from `HEAD`, so the snapshot is never in it. The base and head
+/// name the revisions in git errors.
+fn hotspot_context(
+    repo: &Repository,
+    (base, head): (&str, &Head),
+    selection: &FileSelection,
+    complexity: &HashMap<String, u32>,
+    findings: &mut [Finding],
+) -> Result<bool, String> {
+    let git = |e: GitError| git_message(&e, base, head);
+    if repo.is_shallow().map_err(git)? {
+        return Ok(false);
+    }
+    let walk_from = if head.worktree {
+        "HEAD"
+    } else {
+        head.revision.as_str()
+    };
+    let start = repo.commit_time(walk_from).map_err(git)? - WINDOW_DAYS * 86_400;
+    let churn = repo.churn(walk_from, start).map_err(git)?;
+    let mut families: HashMap<Family, Vec<RankedFile<'_>>> = HashMap::new();
+    for (path, &sum) in complexity {
+        if let Some(language) = selection.language_of(path) {
+            families
+                .entry(language.family())
+                .or_default()
+                .push(RankedFile {
+                    path,
+                    churn: churn.get(path).copied().unwrap_or(0),
+                    complexity: sum,
+                });
+        }
+    }
+    let mut spots = HashMap::new();
+    for files in families.values() {
+        spots.extend(hotspots::hotspots(files));
+    }
+    hotspots::annotate(findings, &spots);
+    Ok(true)
 }
 
 /// The `duplication/duplicate-block` findings: the analyzed changed files
@@ -696,7 +765,10 @@ fn check_revisions(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Vec<Find
 /// takes no part; an unchanged one that cannot be read or parsed is
 /// skipped silently. Each language family has its own index, so code is
 /// compared only with code of its own family (design D6 of
-/// `add-csharp-analysis`), and generated C# files take no part.
+/// `add-csharp-analysis`), and generated C# files take no part. Also
+/// returns the complexity of each file it compares, changed or not, for
+/// hotspot ranking, so the tree is parsed once (design D5 of
+/// `add-hotspot-context`).
 // One more than clippy's limit: the revision check's state, passed
 // through rather than bundled into a struct used only here.
 #[allow(clippy::too_many_arguments)]
@@ -709,7 +781,7 @@ fn duplication(
     left: &[(String, BlobId)],
     changed_paths: &HashSet<String>,
     selection: &FileSelection,
-) -> Result<Vec<Finding>, String> {
+) -> Result<(Vec<Finding>, HashMap<String, u32>), String> {
     let mut reader = repo
         .blob_reader()
         .map_err(|e| git_message(&e, base, head))?;
@@ -766,6 +838,15 @@ fn duplication(
         );
         indexes.push((family, DuplicationIndex::new(&sources)));
     }
+    // The changed files rank with their analyzed head models.
+    let mut complexity: HashMap<String, u32> = changes
+        .iter()
+        .zip(&paths)
+        .map(|(change, path)| {
+            let sum = change.after.functions.iter().map(|f| f.cyclomatic).sum();
+            (path.clone(), sum)
+        })
+        .collect();
     for file in tree {
         if changed_paths.contains(&file.path) {
             continue;
@@ -784,12 +865,18 @@ fn duplication(
         }
         if let Ok(model) = parse_blob(language, bytes)? {
             index.add(&file.path, &model.tokens);
+            // Kept for hotspot ranking, so the tree is parsed once.
+            complexity.insert(
+                file.path.clone(),
+                model.functions.iter().map(|f| f.cyclomatic).sum(),
+            );
         }
     }
-    Ok(indexes
+    let findings = indexes
         .iter()
         .flat_map(|(_, index)| index.findings())
-        .collect())
+        .collect();
+    Ok((findings, complexity))
 }
 
 /// One blob through the batch reader: `None` if git cannot give it as a

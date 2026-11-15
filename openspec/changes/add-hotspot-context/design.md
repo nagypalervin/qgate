@@ -170,6 +170,16 @@ the note is in the message.
   complexity sum, a `HashMap<String, u32>` per family, so the models
   are parsed once.
 - **Two-file form:** untouched.
+- **As built (PR 2):**
+  - `check_revisions` keeps its signature for the hook and the MCP
+    server and wraps `revision_check`, which also returns the shallow
+    flag that only `qgate check` prints;
+  - `duplication()` returns the complexity of every file it compares,
+    changed (from the analyzed head model) or not, so `hotspot_context`
+    gets one map and the revision check stays under clippy's length
+    limit without an `#[allow]`;
+  - in Markdown the note is escaped like the rest of the cell (`->`
+    becomes `-\>`); the spec's Markdown scenario now shows that.
 
 ### D6. Evaluation and rehearsal (Gate 1, questions 8 and 9)
 
