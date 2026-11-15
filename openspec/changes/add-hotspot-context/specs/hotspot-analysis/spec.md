@@ -93,8 +93,8 @@ SHALL NOT be followed for it.
 ### Requirement: Complexity of a file
 
 A file's complexity SHALL be the sum of the cyclomatic complexity of its
-function units in the head revision. A file that cannot be parsed SHALL
-NOT be ranked.
+function units in the head revision. A file that cannot be parsed, and
+a changed file reported as `input/unparsable`, SHALL NOT be ranked.
 
 #### Scenario: Two methods
 
@@ -175,10 +175,10 @@ Markdown, Azure Pipelines and GitHub Actions annotations, and JSON.
 
 ### Requirement: Shallow history
 
-When the repository is shallow, the system SHALL add no hotspot
-context, and `qgate check` SHALL print `qgate: the history is shallow;
-hotspots not computed` to standard error once; the hook and the MCP
-server print nothing more. Standard output, the findings and the exit
+When the repository is shallow and the check has a changed file to
+analyze, the system SHALL add no hotspot context, and `qgate check`
+SHALL print `qgate: the history is shallow; hotspots not computed` to
+standard error once; the hook and the MCP server print nothing more. Standard output, the findings and the exit
 code SHALL be as without hotspot analysis.
 
 #### Scenario: A shallow clone in CI

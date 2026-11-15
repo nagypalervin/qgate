@@ -123,11 +123,20 @@ mod tests {
     // hotspot-analysis: "Hotspot files", "Changed often and complex"
     #[test]
     fn changed_often_and_complex() {
-        let names = names(38);
+        let names = names(34);
+        // 40 files; the cart has the second highest churn and the fifth
+        // highest complexity, as in the spec's scenario.
         let files = family(
-            38,
+            34,
             &names,
-            &[file("src/Busy.cs", 40, 30), file("src/Cart.cs", 31, 87)],
+            &[
+                file("src/Busy.cs", 40, 30),
+                file("src/Cart.cs", 31, 87),
+                file("src/X1.cs", 1, 90),
+                file("src/X2.cs", 1, 91),
+                file("src/X3.cs", 1, 92),
+                file("src/X4.cs", 1, 93),
+            ],
         );
         let found = hotspots(&files);
         assert_eq!(paths(&found), ["src/Busy.cs", "src/Cart.cs"]);
@@ -144,8 +153,8 @@ mod tests {
     #[test]
     fn one_condition_is_not_enough() {
         let names = names(36);
-        // 38 files: the busiest one is simpler than all but one other,
-        // and the most complex one changed in only 4 commits.
+        // 38 files: the busiest one is the simplest, and the most complex
+        // one changed in only 4 commits.
         let mut files: Vec<RankedFile<'_>> = names[..25]
             .iter()
             .map(|p| file(p, 1, 2))
@@ -167,6 +176,39 @@ mod tests {
             &[file("src/A.ts", 9, 40), file("src/B.ts", 9, 40)],
         );
         assert_eq!(paths(&hotspots(&files)), ["src/A.ts", "src/B.ts"]);
+    }
+
+    // "Fewer than k%" at its edges (design D3): with 20 files, 2 above is
+    // 10% and not fewer; 5 above is 25% and not fewer.
+    #[test]
+    fn the_edges_of_fewer_than() {
+        let names = names(20);
+        let with = |extra: &[RankedFile<'static>]| {
+            let mut files: Vec<RankedFile<'_>> = names[..20 - extra.len() - 1]
+                .iter()
+                .map(|p| file(p, 1, 2))
+                .collect();
+            files.extend_from_slice(extra);
+            files.push(file("src/T.cs", 9, 40));
+            assert_eq!(files.len(), 20);
+            paths(&hotspots(&files)).contains(&"src/T.cs")
+        };
+        let busier = file("src/B1.cs", 10, 1);
+        let busier2 = file("src/B2.cs", 10, 1);
+        assert!(with(&[busier]), "1 of 20 above in churn");
+        assert!(!with(&[busier, busier2]), "2 of 20 above in churn");
+        let complex: Vec<RankedFile<'static>> = [
+            "src/C1.cs",
+            "src/C2.cs",
+            "src/C3.cs",
+            "src/C4.cs",
+            "src/C5.cs",
+        ]
+        .iter()
+        .map(|p| file(p, 1, 50))
+        .collect();
+        assert!(with(&complex[..4]), "4 of 20 above in complexity");
+        assert!(!with(&complex[..5]), "5 of 20 above in complexity");
     }
 
     #[test]

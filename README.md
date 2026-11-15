@@ -551,8 +551,8 @@ warning src/Cart.cs:12  Cart.Total(): cyclomatic complexity 4 -> 6 (+2); hotspot
 - **What a hotspot is**, per file, measured at the head revision:
   - **changed often:** at least 5 commits in the 182 days before the
     head commit, and fewer than 10% of the files changed more;
-  - **complex:** the sum of its functions' cyclomatic complexity, with
-    fewer than 25% of the files more complex.
+  - **complex:** the sum of its functions' cyclomatic complexity, at
+    least 1, with fewer than 25% of the files more complex.
 - **Which files are ranked:** those qgate reads, without files
   `[files] exclude` names, generated C# and
   [tests](#tests-changed-with-the-code). TypeScript and C# are ranked
@@ -563,14 +563,17 @@ warning src/Cart.cs:12  Cart.Total(): cyclomatic complexity 4 -> 6 (+2); hotspot
   count fewer commits. With squash merges, a pull request counts once.
 - **The window ends at the head commit,** not at the time of the run,
   so a check gives the same answer tomorrow. With `--worktree` it ends
-  at `HEAD`, and uncommitted work is not history. With skewed clocks, a
-  commit behind one dated before the window can be missed.
+  at `HEAD`, and uncommitted work is not history: a file moved with an
+  uncommitted `git mv` has no history under its new name yet. With
+  skewed clocks, a commit behind one dated before the window can be
+  missed.
 - **Every finding but `input/unparsable`** gets the note: complexity,
   duplication, architecture and tests. JSON also has a `hotspot` key
   (see [JSON output](#json-output)).
 - **History must be complete.** In a shallow clone, `qgate check` prints
   `qgate: the history is shallow; hotspots not computed` on standard
-  error and adds no note; the result is otherwise the same. CI needs
+  error when the change has a file to analyze, and adds no note; the
+  result is otherwise the same. CI needs
   `fetch-depth: 0` (GitHub Actions) or `fetchDepth: 0` (Azure
   Pipelines), as the jobs below already have.
 

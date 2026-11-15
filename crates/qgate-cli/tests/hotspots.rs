@@ -111,7 +111,9 @@ fn a_hotspot_nothing_made_worse() {
     assert_eq!(stdout(&out), "No regressions found.\n");
 }
 
-// "An unparsable hotspot"
+// "An unparsable hotspot": its finding has no note. A file that does not
+// parse is never ranked, so the filter in `annotate` is pinned by the
+// unit test `annotate_findings_in_hotspots` (review of PR 2).
 #[test]
 fn an_unparsable_hotspot() {
     let repo = busy_cart(6);
@@ -215,8 +217,8 @@ fn excluded_files_are_not_ranked() {
         repo.git(&["checkout", "-q", "-b", "feature"]);
         raise_total(&repo, &[]).0
     };
-    // Two busier (8 commits against the cart's 7), more complex
-    // migrations among 12 files push the cart out of the top 10% ...
+    // Two busier migrations (8 commits against the cart's 7) among 12
+    // files push the cart out of the top 10% ...
     assert!(!build(false).contains("hotspot"));
     // ... unless they are excluded.
     let out = build(true);
@@ -243,9 +245,80 @@ fn families_are_ranked_apart() {
     }
     repo.git(&["checkout", "-q", "feature"]);
     repo.git_at(&["merge", "-q", "--no-ff", "-m", "main", "main"], &date(25));
+    // The change touches both families, so both are ranked (review of
+    // PR 2: touching TypeScript alone never ranked the C# file).
+    let _ = writeln!(ifs, "        if (d > 98) {{ d--; }}");
+    let _ = writeln!(ifs, "        if (d > 99) {{ d--; }}");
+    repo.write(
+        "src/Big.cs",
+        format!(
+            "// 99\nnamespace Shop;\n\npublic class Big\n{{\n    public int Run(int d)\n    {{\n{ifs}        return d;\n    }}\n}}\n"
+        ),
+    );
     let (out, _, _) = raise_total(&repo, &[]);
-    // A busier, more complex C# file does not push the TypeScript one out.
+    // In one ranking the busier, more complex C# file would push the
+    // TypeScript one out of the top 10% of 4 files; apart, both are
+    // hotspots of their own family.
     assert!(out.contains(NOTE), "{out}");
+    assert!(
+        out.contains("Big.Run(int): cyclomatic complexity 31 -> 33 (+2); hotspot: 10 commits in 6 months, complexity 33"),
+        "{out}"
+    );
+}
+
+// "The edge of the window": exactly 182 days before the head commit is
+// out, a second later is in.
+#[test]
+fn the_edge_of_the_window() {
+    let noted = |edge: &str| {
+        let repo = Repo::new();
+        repo.write("src/a.ts", function("a", 0));
+        repo.write("src/cart.ts", cart(0, 4));
+        repo.commit_at("at the edge", edge);
+        for rev in 1..4 {
+            repo.write("src/cart.ts", cart(rev, 4));
+            repo.commit_at("cart", &date(rev));
+        }
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        // The feature commit is dated 2026-03-01, 182 days after
+        // 2025-08-31.
+        raise_total(&repo, &[]).0.contains("hotspot: 5 commits")
+    };
+    assert!(!noted("2025-08-31T00:00:00Z"));
+    assert!(noted("2025-08-31T00:00:01Z"));
+}
+
+// "Ranked files": generated C# is not ranked.
+#[test]
+fn generated_files_are_not_ranked() {
+    let class = |name: &str, rev: usize, decisions: usize| {
+        let mut ifs = String::new();
+        for i in 0..decisions {
+            let _ = writeln!(ifs, "        if (d > {i}) {{ d--; }}");
+        }
+        format!(
+            "// {rev}\nnamespace Shop;\n\npublic class {name}\n{{\n    public int Run(int d)\n    {{\n{ifs}        return d;\n    }}\n}}\n"
+        )
+    };
+    let repo = Repo::new();
+    repo.write("src/Small.cs", class("Small", 0, 0));
+    for rev in 0..9 {
+        if rev < 6 {
+            repo.write("src/Order.cs", class("Order", rev, 6));
+        }
+        repo.write("src/Api.g.cs", class("Api", rev, 40));
+        repo.commit_at("order and generated client", &date(rev + 1));
+    }
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("src/Order.cs", class("Order", 99, 8));
+    repo.commit_at("raise", FEATURE);
+    let out = stdout(&repo.qgate(&["--base", "main"]));
+    // Ranked, the busier and more complex generated file would push
+    // `Order.cs` out of the top 10% of 3 files.
+    assert!(
+        out.contains("Order.Run(int): cyclomatic complexity 7 -> 9 (+2); hotspot: 7 commits in 6 months, complexity 9"),
+        "{out}"
+    );
 }
 
 // "Shallow history"

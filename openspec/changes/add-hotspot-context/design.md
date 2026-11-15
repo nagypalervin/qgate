@@ -179,6 +179,15 @@ the note is in the message.
   complexity sum, a `HashMap<String, u32>` per family, so the models
   are parsed once.
 - **Two-file form:** untouched.
+- **After the review of PR 2:**
+  - the shallow note is printed when the check has a file to analyze,
+    as hotspot context would otherwise be computed; the spec and the
+    README now say so;
+  - a changed file reported as `input/unparsable`, at its base or its
+    head, is not ranked;
+  - with `--worktree`, a file moved with an uncommitted `git mv` has
+    no history under its new path yet, so it has no note until the
+    move is committed. Accepted, and in the README.
 - **As built (PR 2):**
   - `check_revisions` keeps its signature for the hook and the MCP
     server and wraps `revision_check`, which also returns the shallow
@@ -276,10 +285,28 @@ duplication over the whole tree dominates both versions.
 
 CleanArchitecture and eShop got no note. That is right: in their
 windows no file changed in more than one (CleanArchitecture) or two
-(eShop) commits, so the 5-commit minimum is never met. Twenty of the
-server's 48 notes were in tests, mostly duplication in large test files
-from one 132-file commit. That led to the decision under D3: tests are
-not ranked.
+(eShop) commits, so the 5-commit minimum is never met
+([`evaluation/churn_hs.py`](evaluation/churn_hs.py)). Twenty of the
+server's 48 notes were in test or test-support code: 18 in tests, mostly
+duplication in large test files from one 132-file commit, and 2 in
+seeders. That led to the decision under D3: tests are not ranked. The
+seeders are no tests by any convention and stay.
+
+**Hotspots per family** (D6 asks for it): qgate exposes no list of
+hotspots, by design, so `churn_hs.py` counts the churn half of the
+definition per family at each repository's newest evaluated commit, an
+upper bound on the hotspots:
+
+| | family | ranked files | highest churn | churn-qualified |
+|---|---|---|---|---|
+| CleanArchitecture | TypeScript | 21 | 1 | 0 |
+| CleanArchitecture | C# | 78 | 1 | 0 |
+| eShop | C# | 476 | 2 | 0 |
+| server | C# | 3,689 | 111 | 147 |
+| clients | TypeScript | 5,563 | 112 | 373 |
+
+The complexity condition takes out the simple ones among these; the
+evaluated commits touched 14 (server) and 18 (clients) of the rest.
 
 **Second run (tests not ranked),** the result to ship, every finding in
 [`evaluation/findings.md`](evaluation/findings.md):
@@ -292,22 +319,30 @@ not ranked.
 - **The diff between the runs is exactly the intended one:**
   - 18 notes on test code are gone in server and 2 in clients;
   - nothing new: every note of the second run was in the first.
-- **Central code** (complexity of 50 or more): each of these 39 notes
-  is in a service, controller, repository or large component that a
-  reviewer would call fragile:
+- **How the sort was made:** `classify_hs.py` assigns the categories by
+  rule: seeders and story helpers by name, the two composition roots by
+  name, then complexity of 50 or more against less. Each file was then
+  read by its name and role to check that the label fits; no label was
+  changed. (The review of PR 2 asked for this to be said plainly.)
+- **Central code** (complexity of 50 or more): 39 notes. They are on
+  services, controllers, repositories, commands, background scripts and
+  large components, all of them code a reviewer would treat with care:
   - server: `CipherService.cs` (216), `OrganizationService.cs` (245),
-    `CiphersController.cs` (325), `AccountController.cs` (145);
+    `CiphersController.cs` (325), `AccountController.cs` (145),
+    `RestoreOrganizationUserCommand.cs` (94);
   - clients: `collect-autofill-content.service.ts` (387),
-    `cipher.service.ts` (322), `vault.component.ts` (235).
+    `cipher.service.ts` (322), `vault.component.ts` (235),
+    `runtime.background.ts` (129), `autofill-init.ts` (70).
 - **Composition roots:** `main.background.ts` (90 commits, complexity
   102) and `service-container.ts` (64 commits, complexity 24) change in
   nearly every feature, because every feature wires a service there.
   They are hotspots by any measure, and Tornhill's too. Their notes sit
   on `tests/unchanged-test` and complexity findings for that wiring.
   Accepted; `[tests] exclude` already quiets the tests part.
-- **Small files** (complexity 21 to 42): busy Angular components and
-  C# commands that rank in the top quarter because most files of their
-  family are simpler. Plausible, not wrong.
+- **Small files** (complexity 21 to 42): two busy Angular components,
+  two C# invite-link commands and a SAML options extension. They rank in
+  the top quarter because most files of their family are simpler.
+  Plausible, not wrong.
 - **Support code:** two C# seeders and a Storybook helper, outside every
   test convention. Few enough to accept.
 
@@ -323,6 +358,33 @@ wrong) is not met.
 full clone (`<repo> <out> <qgate> <qgate-0.7.0> '*.cs'`, or `'*.ts'`,
 or both), then `summary_hs.py` and `classify_hs.py <first run>
 <second run>`.
+
+## Review of PR 2
+
+The reviewer found no blocker; it checked the evaluation's counts
+against `findings.md` and mutated the code to see which tests fail.
+Fixed:
+- `families_are_ranked_apart` could not fail: the change touched only
+  TypeScript, so C# was never ranked. It now changes both families and
+  checks the C# note; a mutation that ranks all files together fails
+  it;
+- the "fewer than k%" rule was not pinned at its edges: a unit test
+  now has exactly 10% and 25% above (`<=` fails it), and the scenario
+  "Changed often and complex" has the cart fifth in complexity, as the
+  spec says;
+- the window's edge had no end-to-end test: one now dates a commit
+  exactly 182 days before the head (out) and a second later (in); a
+  250-day window fails it;
+- generated C# files not being ranked had no test; one now has a busy,
+  complex `.g.cs` that would otherwise push a source out;
+- the evaluation lacked hotspots per family (now an upper bound, with
+  `churn_hs.py`), described its rule-based sort as a hand sort, and
+  counted 20 notes "in tests" where 18 were tests and 2 seeders;
+- the spec and README are aligned with the code on the shallow note and
+  unparsable files, the README names "complexity at least 1", and the
+  uncommitted `git mv` limit is recorded (D5);
+- `an_unparsable_hotspot` says that the filter is pinned by a unit
+  test, and two test comments are corrected.
 
 ## Release notes for 0.8.0 (draft, task 2.4)
 
