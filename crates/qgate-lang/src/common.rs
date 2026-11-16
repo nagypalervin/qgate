@@ -3,10 +3,11 @@
 //! D1 of `add-csharp-analysis`), and types written without whitespace.
 
 use std::collections::HashSet;
+use std::hash::{DefaultHasher, Hasher};
 
 use tree_sitter::{Language as Grammar, Node, Parser, Tree};
 
-use crate::ParseError;
+use crate::{Function, ParseError, Token};
 
 /// Parse `source` with `grammar`. A tree with a syntax error is refused
 /// with the line of its first error: counting a partly parsed file could
@@ -150,5 +151,171 @@ pub(crate) fn walk<V: Visit>(root: Node<'_>, visitor: &mut V) {
             }
             ancestors.pop();
         }
+    }
+}
+
+/// What a scope tells about the code in it: the index of the unit that
+/// collects its decision points and fingerprint, if any.
+pub(crate) trait UnitScope: Copy {
+    /// The unit the code in this scope belongs to.
+    fn unit(self) -> Option<usize>;
+}
+
+/// The scope of C# and Rust: a unit, or code that is not measured.
+impl UnitScope for Option<usize> {
+    fn unit(self) -> Option<usize> {
+        self
+    }
+}
+
+/// How many name segments and scopes were open, so leaving a node can
+/// close what entering it opened.
+#[derive(Clone, Copy)]
+pub(crate) struct Mark {
+    segments: usize,
+    scopes: usize,
+}
+
+/// The function units of a file and what names and measures them while
+/// the walk goes (design D2 of `share-adapter-walker`): the name segments
+/// of the enclosing items, the names already given, the scopes that
+/// collect decision points, and one fingerprint hasher per unit.
+pub(crate) struct Units<S> {
+    segments: Vec<String>,
+    taken: HashSet<String>,
+    scopes: Vec<S>,
+    functions: Vec<Function>,
+    hashers: Vec<DefaultHasher>,
+}
+
+impl<S: UnitScope> Units<S> {
+    pub(crate) fn new() -> Self {
+        Self {
+            segments: Vec::new(),
+            taken: HashSet::new(),
+            scopes: Vec::new(),
+            functions: Vec::new(),
+            hashers: Vec::new(),
+        }
+    }
+
+    /// What is open now; [`Self::restore`] closes what opened since.
+    pub(crate) fn mark(&self) -> Mark {
+        Mark {
+            segments: self.segments.len(),
+            scopes: self.scopes.len(),
+        }
+    }
+
+    /// Close the segments and scopes opened since `mark`.
+    pub(crate) fn restore(&mut self, mark: Mark) {
+        self.segments.truncate(mark.segments);
+        self.scopes.truncate(mark.scopes);
+    }
+
+    pub(crate) fn push_segment(&mut self, segment: String) {
+        self.segments.push(segment);
+    }
+
+    pub(crate) fn push_scope(&mut self, scope: S) {
+        self.scopes.push(scope);
+    }
+
+    /// The innermost scope; `None` at top level.
+    pub(crate) fn scope(&self) -> Option<S> {
+        self.scopes.last().copied()
+    }
+
+    /// The unit the current code belongs to, if any.
+    pub(crate) fn unit(&self) -> Option<usize> {
+        self.scope().and_then(UnitScope::unit)
+    }
+
+    /// `name`, or `name#2`, ... if its qualified name is taken.
+    pub(crate) fn unique_segment(&self, name: &str) -> String {
+        unique_segment(&self.segments, &self.taken, name)
+    }
+
+    /// Record the unit `qualified` and return its index; it opens no
+    /// segment or scope.
+    pub(crate) fn add(&mut self, qualified: String, line: u32) -> usize {
+        self.taken.insert(qualified.clone());
+        self.functions.push(Function {
+            name: qualified,
+            line,
+            cyclomatic: 1,
+            fingerprint: 0,
+        });
+        self.hashers.push(DefaultHasher::new());
+        self.functions.len() - 1
+    }
+
+    /// Open the unit `name` inside the current segments: push its unique
+    /// segment and record it. Return its index; the caller pushes its
+    /// scope.
+    pub(crate) fn open(&mut self, name: &str, line: u32) -> usize {
+        let segment = self.unique_segment(name);
+        self.segments.push(segment);
+        let qualified = self.segments.join(".");
+        self.add(qualified, line)
+    }
+
+    /// Add `points` to the complexity of the current unit, if any.
+    pub(crate) fn count(&mut self, points: u32) {
+        if let Some(unit) = self.unit() {
+            self.functions[unit].cyclomatic += points;
+        }
+    }
+
+    /// The fingerprint hasher of `unit`.
+    pub(crate) fn hasher(&mut self, unit: usize) -> &mut DefaultHasher {
+        &mut self.hashers[unit]
+    }
+
+    /// The units in source order, with their fingerprints.
+    pub(crate) fn finish(mut self) -> Vec<Function> {
+        for (function, hasher) in self.functions.iter_mut().zip(&self.hashers) {
+            function.fingerprint = hasher.finish();
+        }
+        self.functions
+    }
+}
+
+/// The normalized tokens of a file (design D4 of `share-adapter-walker`),
+/// whether the walk is in a subtree that produces none, and whether the
+/// last token was a text part, so the next continues the same literal.
+#[derive(Default)]
+pub(crate) struct Tokens {
+    list: Vec<Token>,
+    muted: bool,
+    in_text_run: bool,
+}
+
+impl Tokens {
+    pub(crate) fn muted(&self) -> bool {
+        self.muted
+    }
+
+    /// Mute the subtree being entered; its frame unmutes it.
+    pub(crate) fn mute(&mut self) {
+        self.muted = true;
+    }
+
+    pub(crate) fn unmute(&mut self) {
+        self.muted = false;
+    }
+
+    /// Record `text` at the line of `node`; `text_part` says whether it is
+    /// a part of a literal's text.
+    pub(crate) fn push(&mut self, text: String, node: Node<'_>, text_part: bool) {
+        self.list.push(Token {
+            text,
+            line: line_of(node),
+        });
+        self.in_text_run = text_part;
+    }
+
+    pub(crate) fn finish(self) -> Vec<Token> {
+        self.list
     }
 }

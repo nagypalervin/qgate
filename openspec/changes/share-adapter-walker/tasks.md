@@ -11,7 +11,7 @@ messages and the PR body are written to files first.
 ## 2. The shared skeleton
 
 - [x] 2.1 `walk` and the `Visit` trait in `common.rs` (D1); the Rust adapter moves to them first, as the smallest. Verified: `cargo test -p qgate-lang` passes unchanged.
-- [ ] 2.2 `Units<S>` (D2) and `Tokens` (D4) in `common.rs`; the Rust adapter uses them. Verified: `cargo test --workspace` passes unchanged.
+- [x] 2.2 `Units<S>` (D2) and `Tokens` (D4) in `common.rs`; the Rust adapter uses them. Verified: `cargo test --workspace` passes unchanged.
 - [ ] 2.3 The C# adapter on `walk`, `Units<Option<usize>>` and `Tokens`. Verified: `cargo test --workspace` passes unchanged.
 - [ ] 2.4 The TypeScript adapter on `walk` and `Tokens`, and on `Units<Scope>` if it fits without a change of behavior (D3); the outcome and its reason recorded in `design.md`. Verified: `cargo test --workspace` passes unchanged.
 - [ ] 2.5 Module docs of `common.rs` and the three adapters say what is shared and what is each language's own; no doc mentions a removed item (`cargo doc -p qgate-lang` without warnings).

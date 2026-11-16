@@ -8,25 +8,21 @@
 //! finding copies (D5). Macro arguments and `macro_rules!` bodies are
 //! token trees: they add tokens, but no units and no decision points (D4).
 
-use std::collections::HashSet;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::Hash;
 
 use tree_sitter::Node;
 
-use crate::common::{Visit, compact, line_of, parse_tree, unique_segment, walk};
-use crate::{FileModel, Function, ParseError, Token};
+use crate::common::{Mark, Tokens, Units, Visit, compact, line_of, parse_tree, walk};
+use crate::{FileModel, ParseError};
 
 /// Parse Rust source into a [`FileModel`].
 pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
     let tree = parse_tree(&tree_sitter_rust::LANGUAGE.into(), source)?;
     let mut walker = Walker::new(source.as_bytes());
     walk(tree.root_node(), &mut walker);
-    for (function, hasher) in walker.functions.iter_mut().zip(&walker.hashers) {
-        function.fingerprint = hasher.finish();
-    }
     Ok(FileModel {
-        functions: walker.functions,
-        tokens: walker.tokens,
+        functions: walker.units.finish(),
+        tokens: walker.tokens.finish(),
         ..FileModel::default()
     })
 }
@@ -52,49 +48,31 @@ const NO_TOKEN_KINDS: &[&str] = &[
     "block_comment",
 ];
 
-/// What entering a node pushed, so leaving it can pop the same.
-#[derive(Default)]
+/// What entering a node opened, so leaving it can close the same.
 struct Frame {
-    segments: usize,
-    scopes: usize,
+    units: Mark,
     muted: bool,
     comment: bool,
 }
 
 struct Walker<'s> {
     source: &'s [u8],
-    /// Names of the enclosing inline modules, impls, traits and units.
-    segments: Vec<String>,
-    /// Qualified names already given to a unit.
-    taken: HashSet<String>,
-    /// Innermost last: the unit that collects decision points, or `None`
-    /// where code is not measured. Empty at top level.
-    scopes: Vec<Option<usize>>,
-    /// Units in source order.
-    functions: Vec<Function>,
-    /// The fingerprint of each unit in `functions` so far.
-    hashers: Vec<DefaultHasher>,
+    /// The units, named by the enclosing inline modules, impls, traits and
+    /// units; a scope is the unit that collects decision points, or `None`
+    /// where code is not measured.
+    units: Units<Option<usize>>,
     /// Whether the walk is inside a comment, which is not code of a unit.
     in_comment: bool,
-    /// Normalized tokens in source order.
-    tokens: Vec<Token>,
-    /// Whether the walk is inside a subtree that produces no tokens; the
-    /// frame of the node that opened it closes it.
-    muted: bool,
+    tokens: Tokens,
 }
 
 impl<'s> Walker<'s> {
     fn new(source: &'s [u8]) -> Self {
         Self {
             source,
-            segments: Vec::new(),
-            taken: HashSet::new(),
-            scopes: Vec::new(),
-            functions: Vec::new(),
-            hashers: Vec::new(),
+            units: Units::new(),
             in_comment: false,
-            tokens: Vec::new(),
-            muted: false,
+            tokens: Tokens::default(),
         }
     }
 }
@@ -104,7 +82,11 @@ impl Visit for Walker<'_> {
 
     fn enter(&mut self, node: Node<'_>, ancestors: &[Node<'_>]) -> Frame {
         let parent = ancestors.last().copied();
-        let mut frame = Frame::default();
+        let mut frame = Frame {
+            units: self.units.mark(),
+            muted: false,
+            comment: false,
+        };
         self.record_token(node, parent, &mut frame);
         self.record_code(node, &mut frame);
         match node.kind() {
@@ -112,9 +94,9 @@ impl Visit for Walker<'_> {
             // and names nothing here.
             "mod_item" | "trait_item" if node.child_by_field_name("body").is_some() => {
                 if let Some(name) = node.child_by_field_name("name") {
-                    self.push_segment(self.text(name), &mut frame);
+                    self.units.push_segment(self.text(name));
                 }
-                self.push_scope(None, &mut frame);
+                self.units.push_scope(None);
             }
             "impl_item" => {
                 let ty = node
@@ -125,32 +107,25 @@ impl Visit for Walker<'_> {
                     Some(t) => format!("<{ty} as {}>", compact(&self.text(t))),
                     None => ty,
                 };
-                self.push_segment(segment, &mut frame);
-                self.push_scope(None, &mut frame);
+                self.units.push_segment(segment);
+                self.units.push_scope(None);
             }
             // A `fn` without a body is a `function_signature_item`.
             "function_item" => {
                 if let Some(name) = node.child_by_field_name("name") {
-                    self.open_unit(&self.text(name), line_of(name), &mut frame);
+                    let unit = self.units.open(&self.text(name), line_of(name));
+                    self.units.push_scope(Some(unit));
                 }
             }
-            _ => {
-                let points = decision_points(node, parent);
-                if let (Some(Some(index)), 1..) = (self.scopes.last(), points) {
-                    self.functions[*index].cyclomatic += points;
-                }
-            }
+            _ => self.units.count(decision_points(node, parent)),
         }
         frame
     }
 
     fn leave(&mut self, frame: Frame) {
-        let segments = self.segments.len() - frame.segments;
-        self.segments.truncate(segments);
-        let scopes = self.scopes.len() - frame.scopes;
-        self.scopes.truncate(scopes);
+        self.units.restore(frame.units);
         if frame.muted {
-            self.muted = false;
+            self.tokens.unmute();
         }
         if frame.comment {
             self.in_comment = false;
@@ -159,32 +134,6 @@ impl Visit for Walker<'_> {
 }
 
 impl Walker<'_> {
-    fn push_segment(&mut self, segment: String, frame: &mut Frame) {
-        self.segments.push(segment);
-        frame.segments += 1;
-    }
-
-    fn push_scope(&mut self, scope: Option<usize>, frame: &mut Frame) {
-        self.scopes.push(scope);
-        frame.scopes += 1;
-    }
-
-    /// Start the unit `name` inside the current segments.
-    fn open_unit(&mut self, name: &str, line: u32, frame: &mut Frame) {
-        let segment = unique_segment(&self.segments, &self.taken, name);
-        self.push_segment(segment, frame);
-        let qualified = self.segments.join(".");
-        self.taken.insert(qualified.clone());
-        self.functions.push(Function {
-            name: qualified,
-            line,
-            cyclomatic: 1,
-            fingerprint: 0,
-        });
-        self.hashers.push(DefaultHasher::new());
-        self.push_scope(Some(self.functions.len() - 1), frame);
-    }
-
     /// Add a leaf to the fingerprint of the unit it belongs to (design D1
     /// of `add-test-gap-analysis`): all code but comments, doc comments
     /// included, and semicolons. A doc comment is a subtree of its own.
@@ -193,19 +142,19 @@ impl Walker<'_> {
             self.in_comment = true;
             frame.comment = true;
         }
-        let Some(Some(unit)) = self.scopes.last() else {
+        let Some(unit) = self.units.unit() else {
             return;
         };
         let code = &self.source[node.byte_range()];
         if node.child_count() == 0 && !code.is_empty() && !self.in_comment && node.kind() != ";" {
-            code.hash(&mut self.hashers[*unit]);
+            code.hash(self.units.hasher(unit));
         }
     }
 
     /// Record the normalized token `node` is, if any (design D5), and
     /// mute the subtrees that produce none.
     fn record_token(&mut self, node: Node<'_>, parent: Option<Node<'_>>, frame: &mut Frame) {
-        if self.muted {
+        if self.tokens.muted() {
             return;
         }
         let kind = node.kind();
@@ -213,7 +162,7 @@ impl Walker<'_> {
             self.mute(frame);
         } else if kind == "integer_literal" && follows_path_or_dot(node) {
             // A tuple field, `.0`, is a field name (review of PR 1).
-            self.push_token(self.text(node), node);
+            self.tokens.push(self.text(node), node, false);
         } else if LITERAL_KINDS.contains(&kind) || matches!(kind, "lifetime" | "label") {
             // A lifetime or a loop label is a name: `'a` and `'b` are the
             // same code.
@@ -222,7 +171,7 @@ impl Walker<'_> {
             } else {
                 "$id"
             };
-            self.push_token(text.to_owned(), node);
+            self.tokens.push(text.to_owned(), node, false);
             self.mute(frame);
         } else if node.child_count() == 0 && kind != ";" {
             let text = self.text(node);
@@ -232,21 +181,14 @@ impl Walker<'_> {
                 text
             };
             if !text.is_empty() {
-                self.push_token(text, node);
+                self.tokens.push(text, node, false);
             }
         }
     }
 
     fn mute(&mut self, frame: &mut Frame) {
-        self.muted = true;
+        self.tokens.mute();
         frame.muted = true;
-    }
-
-    fn push_token(&mut self, text: String, node: Node<'_>) {
-        self.tokens.push(Token {
-            text,
-            line: line_of(node),
-        });
     }
 
     fn text(&self, node: Node<'_>) -> String {
