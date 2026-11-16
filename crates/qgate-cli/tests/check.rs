@@ -318,7 +318,7 @@ fn unsupported_extension() {
     let out = qgate(&["check", "js/before.js", "js/after.js"]);
     assert!(stderr(&out).contains("js/before.js"), "{}", stderr(&out));
     assert!(
-        stderr(&out).contains("unsupported file type (expected .ts, .mts, .cts, .tsx or .cs)"),
+        stderr(&out).contains("unsupported file type (expected .ts, .mts, .cts, .tsx, .cs or .rs)"),
         "{}",
         stderr(&out)
     );
@@ -344,6 +344,35 @@ fn csharp_compared_with_typescript() {
     let out = qgate(&["check", "same.ts", "cs/After.cs"]);
     assert!(stderr(&out).contains("same.ts"), "{}", stderr(&out));
     assert!(stderr(&out).contains("cs/After.cs"), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "");
+    assert_eq!(out.status.code(), Some(2));
+}
+
+// check-command: "Rust input"
+#[test]
+fn rust_input() {
+    let out = qgate(&["check", "rs/before.rs", "rs/after.rs"]);
+    assert_eq!(
+        stdout(&out),
+        "warning rs/after.rs:1  total: cyclomatic complexity 2 -> 3 (+1)  \
+         [complexity/cyclomatic-increase]\n",
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(out.status.code(), Some(0));
+}
+
+// check-command: "Rust compared with C#"
+#[test]
+fn rust_compared_with_csharp() {
+    let out = qgate(&["check", "rs/before.rs", "cs/After.cs"]);
+    assert!(
+        stderr(&out).contains(
+            "rs/before.rs and cs/After.cs: a Rust file cannot be compared with a C# file"
+        ),
+        "{}",
+        stderr(&out)
+    );
     assert_eq!(stdout(&out), "");
     assert_eq!(out.status.code(), Some(2));
 }

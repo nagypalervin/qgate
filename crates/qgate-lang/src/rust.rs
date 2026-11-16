@@ -666,6 +666,17 @@ mod tests {
         );
     }
 
+    // The grammar lags behind the language (README "Rust"): it does not
+    // read the edition-2024 `safe` qualifier. If this starts to parse,
+    // update the README.
+    #[test]
+    fn the_grammar_does_not_know_safe_items() {
+        assert_eq!(
+            parse("unsafe extern \"C\" {\n    safe fn sqrt(x: f64) -> f64;\n}\n"),
+            Err(ParseError::Syntax { line: 2 })
+        );
+    }
+
     #[test]
     fn a_syntax_error_names_its_line() {
         assert_eq!(

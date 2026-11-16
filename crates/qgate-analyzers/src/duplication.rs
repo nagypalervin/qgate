@@ -594,6 +594,27 @@ mod tests {
         );
     }
 
+    const DATE_RS: &str = include_str!("../fixtures/duplication/date_helper.rs");
+    const COPY_RS: &str = include_str!("../fixtures/duplication/renamed_copy.rs");
+
+    // duplication-analysis: "Copy of an existing Rust file". `use` lines
+    // and doc comments are no part of the copy.
+    #[test]
+    fn renamed_copy_of_an_unchanged_rust_file() {
+        let rs = |source| parse(Language::Rust, source).expect("parses").tokens;
+        assert_eq!(
+            run(
+                &[("crates/b/src/format.rs", vec![], rs(COPY_RS))],
+                &[("crates/a/src/dates.rs", rs(DATE_RS))],
+            ),
+            [(
+                "crates/b/src/format.rs".to_owned(),
+                8,
+                "duplicates crates/a/src/dates.rs:6-14 (lines 8-16, 67 tokens)".to_owned()
+            )]
+        );
+    }
+
     // Requirement: Compared files, Duplicate block finding
 
     #[test]

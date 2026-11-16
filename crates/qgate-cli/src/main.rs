@@ -234,7 +234,7 @@ fn hook_command() -> Command {
 
 fn check_command() -> Command {
     Command::new("check")
-        .about("Report what got worse between two versions of TypeScript or C# code")
+        .about("Report what got worse between two versions of TypeScript, C# or Rust code")
         .override_usage(
             "qgate check <before> <after> [--format <format>] [--fail-on <level>]\n       \
              qgate check --base <rev> [--head <rev>] [--format <format>] [--fail-on <level>]\n       \
@@ -242,7 +242,7 @@ fn check_command() -> Command {
         )
         .arg(
             Arg::new("before")
-                .help("The file before the change (.ts, .mts, .cts, .tsx or .cs)")
+                .help("The file before the change (.ts, .mts, .cts, .tsx, .cs or .rs)")
                 .value_parser(value_parser!(PathBuf)),
         )
         .arg(
@@ -524,9 +524,11 @@ fn check(args: &ArgMatches) -> Result<Vec<Finding>, String> {
     // `add-csharp-analysis`).
     if before_language.family() != after_language.family() {
         return Err(format!(
-            "{} and {}: a C# file cannot be compared with a TypeScript file",
+            "{} and {}: a {} file cannot be compared with a {} file",
             before_path.display(),
-            after_path.display()
+            after_path.display(),
+            family_name(before_language.family()),
+            family_name(after_language.family()),
         ));
     }
     let change = FileChange {
@@ -813,7 +815,7 @@ fn duplication(
     let family_of = |path: &str| selection.language_of(path).map(Language::family);
     // One index per family with an analyzed change.
     let mut indexes: Vec<(Family, DuplicationIndex)> = Vec::new();
-    for family in [Family::TypeScript, Family::CSharp] {
+    for family in Family::ALL {
         let mut sources: Vec<ChangedSource<'_>> = changes
             .iter()
             .zip(&paths)
@@ -1159,6 +1161,15 @@ fn git_message(error: &GitError, base: &str, head: &Head) -> String {
     }
 }
 
+/// The name of a language family in messages.
+fn family_name(family: Family) -> &'static str {
+    match family {
+        Family::TypeScript => "TypeScript",
+        Family::CSharp => "C#",
+        Family::Rust => "Rust",
+    }
+}
+
 /// The language of an input file of the two-file form, from its
 /// extension. Generated C# files are analyzed here: skipping them is a
 /// rule of revision mode.
@@ -1168,7 +1179,7 @@ fn language_for(path: &Path) -> Result<Language, String> {
         .and_then(Language::from_extension)
         .ok_or_else(|| {
             format!(
-                "{}: unsupported file type (expected .ts, .mts, .cts, .tsx or .cs)",
+                "{}: unsupported file type (expected .ts, .mts, .cts, .tsx, .cs or .rs)",
                 path.display()
             )
         })

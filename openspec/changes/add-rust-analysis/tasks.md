@@ -15,12 +15,12 @@ messages and PR bodies are written to files first.
 
 ## 2. Wiring, self-check and version (PR 2, `change/add-rust-analysis-2`)
 
-- [ ] 2.1 Analyzer fixture pairs: `crates/qgate-analyzers/fixtures/complexity/rust_*` (the scenario "A Rust method that got more complex", a new complex function, a trait impl's `fmt` moved below another impl) and a Rust duplication pair, failing tests first.
-- [ ] 2.2 CLI, revision mode: `.rs` among changed files, one duplication index per family through `Family::ALL`, Rust hotspots ranked among Rust files, no `tests/` finding for Rust. Failing CLI tests first for each scenario of the modified `revision-input`, `duplication-analysis`, `hotspot-analysis` and `test-analysis` requirements, including the working tree.
-- [ ] 2.3 CLI, two-file form: `.rs` accepted, Rust with another family rejected, the unsupported-type message names `.rs`. Failing CLI tests first for the scenarios of "Supported input files".
-- [ ] 2.4 Replay (D8) over the 51 merges of `main`: script in the scratchpad, per pull request the findings by rule and severity, unparsable files, hotspot context and run time; every Error and at least 20 Warnings classified as useful, debatable or noise. Results in "Self-check results" of `design.md`. Stop and ask Ervin if the numbers argue for changing D3 to D6 before the release.
-- [ ] 2.5 README: Rust in the status line, the checks it gets, its decision points and names, macros and `?`, the two-file form; the roadmap row "Languages" names Rust. Check every sentence against a test or the replay.
-- [ ] 2.6 Version 0.9.0 in `Cargo.toml` (with `Cargo.lock`) and every `QGATE_VERSION` of `action.yml`; both release checks pass locally for `v0.9.0`.
+- [x] 2.1 Analyzer fixture pairs: `crates/qgate-analyzers/fixtures/complexity/rust/` (the scenario "A Rust method that got more complex", a new complex function, a trait impl's `fmt` moved below another impl) and a Rust duplication pair, failing tests first.
+- [x] 2.2 CLI, revision mode: `.rs` among changed files, one duplication index per family through `Family::ALL`, Rust hotspots ranked among Rust files, no `tests/` finding for Rust. Failing CLI tests first for each scenario of the modified `revision-input`, `duplication-analysis`, `hotspot-analysis` and `test-analysis` requirements, including the working tree.
+- [x] 2.3 CLI, two-file form: `.rs` accepted, Rust with another family rejected, the unsupported-type message names `.rs`. Failing CLI tests first for the scenarios of "Supported input files".
+- [x] 2.4 Replay (D8) over the merges of `main` (52 by then: PR 1 had merged): script in the scratchpad, per pull request the findings by rule and severity, unparsable files, hotspot context and run time; every Error and at least 20 Warnings classified as useful, debatable or noise. Results in "Self-check results" of `design.md`. Stop and ask Ervin if the numbers argue for changing D3 to D6 before the release.
+- [x] 2.5 README: Rust in the status line, the checks it gets, its decision points and names, macros and `?`, the two-file form; the roadmap row "Languages" names Rust. Check every sentence against a test or the replay.
+- [x] 2.6 Version 0.9.0 in `Cargo.toml` (with `Cargo.lock`) and every `QGATE_VERSION` of `action.yml`; both release checks pass locally for `v0.9.0`.
 
 ## 3. Release 0.9.0 (between PR 2 and PR 3)
 
@@ -29,7 +29,7 @@ messages and PR bodies are written to files first.
 ## 4. Self-check in CI and while coding (PR 3, `change/add-rust-analysis-3`)
 
 - [ ] 4.1 Every README install block, `uses:` and pinned commit at 0.9.0; `grep` finds no `0.8.0` outside release records.
-- [ ] 4.2 The `qgate` job in `.github/workflows/ci.yml` (D9): `pull_request` only, `contents: read`, `pull-requests: write`, `fetch-depth: 0`, `uses: nagypalervin/qgate@v0.9.0`, `fail-on: error`. Verified on PR 3 itself: the job runs and its comment appears (or the "no regressions" result is shown). Add the pin bump to the release record's checklist.
+- [ ] 4.2 The `qgate` job in `.github/workflows/ci.yml` (D9): `pull_request` only, `contents: read`, `pull-requests: write`, `fetch-depth: 0`, `uses: nagypalervin/qgate@v0.9.0`, `fail-on: error`, and a `qgate.toml` with `[files] exclude = ["**/fixtures/**"]` (decided after the replay). Verified on PR 3 itself: the job runs and its comment appears (or the "no regressions" result is shown). Add the pin bump to the release record's checklist.
 - [ ] 4.3 Install the released 0.9.0 binary into `~/.local/bin` on Ervin's machine; commit the Stop hook (`qgate hook claude-code --base main`) in `.claude/settings.json`, keeping `OPENSPEC_TELEMETRY`, and `.mcp.json` with `qgate mcp` (D10). Verified: `claude mcp list` shows qgate connected, and a turn that leaves a deliberately complex function in the working tree is sent back once (then the function is removed). README "Building" says the repository uses both and needs `qgate` on the `PATH`.
 - [ ] 4.4 The roadmap row "Languages" says Rust is done; the follow-ups the replay argued for (test code, Rust tests, `use` rules, the unused `qgate-core` dependency) are listed in the journal entry for Ervin to order.
 

@@ -781,6 +781,41 @@ mod tests {
         assert_eq!(head.role("README.md"), Role::Other);
     }
 
+    // test-analysis: "Checked changes" (`add-rust-analysis`): a Rust file
+    // is neither a source nor a test, wherever it is, and tests nothing.
+    #[test]
+    fn rust_files_have_no_role() {
+        let head = conventions(&[
+            "package.json",
+            "src/app/cart.service.ts",
+            "src/app/tests/cart.service.rs",
+            "src/app/cart.service.spec.rs",
+            "crates/a/src/lib.rs",
+            "crates/a/tests/it.rs",
+            "src/Domain/Domain.csproj",
+            "src/Domain/Order.cs",
+            "tests/Domain.UnitTests/Domain.UnitTests.csproj",
+            "tests/Domain.UnitTests/OrderTests.rs",
+        ]);
+        for path in [
+            "src/app/tests/cart.service.rs",
+            "src/app/cart.service.spec.rs",
+            "crates/a/src/lib.rs",
+            "crates/a/tests/it.rs",
+            "tests/Domain.UnitTests/OrderTests.rs",
+        ] {
+            assert_eq!(head.role(path), Role::Other, "{path}");
+        }
+        // The `.rs` files beside and below them are no tests of the
+        // TypeScript and C# sources.
+        for path in ["src/app/cart.service.ts", "src/Domain/Order.cs"] {
+            assert!(
+                matches!(head.role(path), Role::Source { tests, .. } if tests.is_empty()),
+                "{path}"
+            );
+        }
+    }
+
     #[test]
     fn ancestors_end_at_the_root() {
         assert_eq!(ancestors("a/b").collect::<Vec<_>>(), ["a/b", "a", ""]);
