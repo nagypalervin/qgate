@@ -813,7 +813,7 @@ fn duplication(
     let family_of = |path: &str| selection.language_of(path).map(Language::family);
     // One index per family with an analyzed change.
     let mut indexes: Vec<(Family, DuplicationIndex)> = Vec::new();
-    for family in [Family::TypeScript, Family::CSharp] {
+    for family in Family::ALL {
         let mut sources: Vec<ChangedSource<'_>> = changes
             .iter()
             .zip(&paths)
