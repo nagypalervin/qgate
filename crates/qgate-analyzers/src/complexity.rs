@@ -273,6 +273,25 @@ mod tests {
         );
     }
 
+    // complexity-analysis: "A Rust method that got more complex"; a new
+    // complex function; and design D2 of `add-rust-analysis`: the two
+    // `fmt` of `Display` and `Debug` keep their names when they swap
+    // places, so neither is reported.
+    #[test]
+    fn rust_functions() {
+        assert_eq!(
+            run_in(
+                Language::Rust,
+                include_str!("../fixtures/complexity/rust/before.rs"),
+                include_str!("../fixtures/complexity/rust/after.rs"),
+            ),
+            vec![
+                increase(Severity::Error, "Cart.total", 8, 3, 8),
+                new(Severity::Warning, "Cart.report", 25, 11),
+            ]
+        );
+    }
+
     #[test]
     fn identical_files_have_no_findings() {
         let source = include_str!("../fixtures/complexity/legacy_growth/after.ts");

@@ -15,7 +15,7 @@ messages and PR bodies are written to files first.
 
 ## 2. Wiring, self-check and version (PR 2, `change/add-rust-analysis-2`)
 
-- [ ] 2.1 Analyzer fixture pairs: `crates/qgate-analyzers/fixtures/complexity/rust_*` (the scenario "A Rust method that got more complex", a new complex function, a trait impl's `fmt` moved below another impl) and a Rust duplication pair, failing tests first.
+- [x] 2.1 Analyzer fixture pairs: `crates/qgate-analyzers/fixtures/complexity/rust_*` (the scenario "A Rust method that got more complex", a new complex function, a trait impl's `fmt` moved below another impl) and a Rust duplication pair, failing tests first.
 - [ ] 2.2 CLI, revision mode: `.rs` among changed files, one duplication index per family through `Family::ALL`, Rust hotspots ranked among Rust files, no `tests/` finding for Rust. Failing CLI tests first for each scenario of the modified `revision-input`, `duplication-analysis`, `hotspot-analysis` and `test-analysis` requirements, including the working tree.
 - [ ] 2.3 CLI, two-file form: `.rs` accepted, Rust with another family rejected, the unsupported-type message names `.rs`. Failing CLI tests first for the scenarios of "Supported input files".
 - [ ] 2.4 Replay (D8) over the 51 merges of `main`: script in the scratchpad, per pull request the findings by rule and severity, unparsable files, hotspot context and run time; every Error and at least 20 Warnings classified as useful, debatable or noise. Results in "Self-check results" of `design.md`. Stop and ask Ervin if the numbers argue for changing D3 to D6 before the release.
