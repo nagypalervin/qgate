@@ -3,15 +3,16 @@
 **Went well:**
 - **The adapter pattern carried a third language in one day.** Units,
   decision points, tokens and fingerprints followed the C# adapter; the
-  analyzers needed no change, the CLI one line (`Family::ALL` in the
-  duplication loop). A spike before the proposal parsed all 39 `.rs`
-  files of the repository, so the grammar risk was measured, not
-  guessed.
+  analyzers needed no change, the CLI a few lines (`Family::ALL` in the
+  duplication loop, the two-file form's messages). A spike before the
+  proposal parsed all 39 `.rs` files of the repository, so the grammar
+  risk was measured, not guessed.
 - **The replay turned "does it work on real code?" into numbers.** qgate
   over all 52 merges of its own history took 3.85 s and gave 218
   findings: 62 in fixtures (all noise), 73 in test code, 83 in source.
   Five of six source Errors were functions a reviewer would want to
-  see, and they were the files that later became the hotspots.
+  see, and all six came with hotspot context: each sat in a file that
+  was both complex and changed often.
 - **The reviewer reran the replay** and got the same numbers, then found
   the two results the design had promised and the write-up had skipped
   (macros, integration tests among hotspots). Both were measured before
@@ -55,6 +56,10 @@ a replay of 52 merges run twice (once by the reviewer), one release.
   the CLI's tests);
 - the unused `qgate-core` dependency of `qgate-lang`;
 - whether the `qgate` CI job becomes a required check;
+- test code: 73 of the 218 findings, mostly duplication in integration
+  tests; skipping `#[cfg(test)]` modules would remove only 17, so D6
+  stays, but excluding `crates/*/tests/**` is the next lever if the CI
+  gate gets noisy;
 - Rust test analysis and `use` rules: the replay gives no strong case
   for either yet;
 - then, as planned, the Angular + .NET evaluation for the partner pilot.

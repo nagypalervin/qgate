@@ -280,7 +280,7 @@ findings are in test fixtures.
 A gate with `fail-on: error` would have failed 7 of the 52 pull
 requests: one for fixtures alone, one for test support code, five for
 source code. 35 findings carried hotspot context, 34 of them in source
-code.
+code, all 6 source Errors among them.
 
 **Hand check.** All 6 source Errors, all 20 source duplicates and all 57
 source complexity Warnings, classified as *useful* (a reviewer would want

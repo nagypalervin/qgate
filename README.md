@@ -1179,7 +1179,10 @@ action.yml              the GitHub Action
 docs/adr/               architecture decision records
 docs/journal/           notes on how AI-assisted development went
 openspec/               specs and changes (OpenSpec workflow, see CLAUDE.md)
+qgate.toml              qgate's settings for checking itself
 .claude/agents/         independent reviewer agent
+.claude/settings.json   the qgate Stop hook for Claude Code
+.mcp.json               the qgate MCP server for Claude Code
 ```
 
 ## Building
@@ -1207,7 +1210,8 @@ git config core.hooksPath .githooks
 qgate checks its own code:
 
 - **In pull requests,** the `qgate` job of the CI runs the released
-  action and comments; `qgate.toml` leaves the test fixtures out.
+  action, which comments once it finds something; `qgate.toml` leaves
+  the test fixtures out.
 - **While coding with Claude Code,** `.claude/settings.json` runs the
   [Stop hook](#with-claude-code) with `--base main`, because work here is
   committed within a turn, and `.mcp.json` offers the
