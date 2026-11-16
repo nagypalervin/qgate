@@ -18,7 +18,7 @@ messages and the PR body are written to files first.
 
 ## 3. Proof and review
 
-- [ ] 3.1 Replay with the branch's release binary; the reports equal the baseline byte for byte (D5, check 2). Check 3 on the branch: none of the walker copies, no new copy. Both recorded in "Verification" of `design.md`. (Open: the replay is byte-identical, but 4 source copies remain, 1 a language rule and 3 short idioms, see "Verification" in `design.md`; waiting for Ervin to accept them or ask for more.)
+- [x] 3.1 Replay with the branch's release binary; the reports equal the baseline byte for byte (D5, check 2). Check 3 on the branch: none of the walker copies, no new copy. Both recorded in "Verification" of `design.md`. (Amended: the replay is byte-identical; 4 source copies remain, 1 a language rule and 3 short idioms, see "Verification" in `design.md`. Ervin accepted them on 2026-11-16.)
 - [x] 3.2 The journal entry for the change, with the numbers of 1.1 and 3.1.
 
 ## Workflow follow-up

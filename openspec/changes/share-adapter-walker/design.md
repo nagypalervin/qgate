@@ -196,8 +196,8 @@ configuration.
     and fields; sharing these would need a further abstraction only to
     move tokens below the threshold, which would make the code harder
     to read, not easier to change. This differs from D5's "none of
-    them"; it is put to Ervin in the pull request, and task 3.1 stays
-    open until he decides.
+    them"; Ervin accepted it on 2026-11-16, after the `qgate` job
+    reported exactly these as Warnings on PR #38.
 - **Found while closing the gap:** the three `parse` functions had
   become the same after task 2.4 (a new copy); `run` now parses, walks
   and builds the model for all three. `Tokens::mute` records in the
