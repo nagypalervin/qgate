@@ -139,6 +139,15 @@ churn and complexity, and returns the hotspot set.
   except `input/unparsable`. It is a separate step at the end of the
   check, so no analyzer knows about history.
 
+**Tests are not ranked (decided after the evaluation, 2026-11-15,
+Ervin).** In `bitwarden/server`, 20 of 48 notes fell on test or test
+support code, mostly duplication in large test files from one wide
+commit. Files that are tests by the conventions of `test-analysis` now
+leave the ranking: their findings get no note, and their churn cannot
+push sources out. `qgate_analyzers::tests::tests_among` exposes the
+conventions; `duplication()` drops tests from the complexity map it
+returns.
+
 ### D4. `Finding::hotspot` in `qgate-core` (Gate 1, question 7)
 
 `pub hotspot: Option<Hotspot>`, with `Hotspot { commits: u32,
@@ -170,6 +179,25 @@ the note is in the message.
   complexity sum, a `HashMap<String, u32>` per family, so the models
   are parsed once.
 - **Two-file form:** untouched.
+- **After the review of PR 2:**
+  - the shallow note is printed when the check has a file to analyze,
+    as hotspot context would otherwise be computed; the spec and the
+    README now say so;
+  - a changed file reported as `input/unparsable`, at its base or its
+    head, is not ranked;
+  - with `--worktree`, a file moved with an uncommitted `git mv` has
+    no history under its new path yet, so it has no note until the
+    move is committed. Accepted, and in the README.
+- **As built (PR 2):**
+  - `check_revisions` keeps its signature for the hook and the MCP
+    server and wraps `revision_check`, which also returns the shallow
+    flag that only `qgate check` prints;
+  - `duplication()` returns the complexity of every file it compares,
+    changed (from the analyzed head model) or not, so `hotspot_context`
+    gets one map and the revision check stays under clippy's length
+    limit without an `#[allow]`;
+  - in Markdown the note is escaped like the rest of the cell (`->`
+    becomes `-\>`); the spec's Markdown scenario now shows that.
 
 ### D6. Evaluation and rehearsal (Gate 1, questions 8 and 9)
 
@@ -209,6 +237,177 @@ the note is in the message.
 - **Release 0.8.0.**
 - **PR 3** (`change/add-hotspot-context-3`): the README versions, the
   roadmap, the rehearsal, the journal and the archive.
+
+## Evaluation (task 2.5, 2026-11-15)
+
+**Repositories,** full clones (all history and blobs, not shallow,
+nothing of theirs built or run):
+
+| | commits | head |
+|---|---|---|
+| `jasontaylordev/CleanArchitecture` | 984 | 2026-11-09 |
+| `dotnet/eShop` | 349 | 2026-10-15 |
+| `bitwarden/server` | 8,167 | 2026-11-13 |
+| `bitwarden/clients` | 23,835 | 2026-11-13 |
+
+**Binaries:** release builds of this branch (9b17616 for the first
+run; the second run's build of the code in the commit that records it)
+against the published 0.7.0.
+
+**Run:** the last 30 non-merge commits touching `.cs` (server, eShop),
+`.ts` (clients) or both (CleanArchitecture). Each is checked out with an
+untracked `qgate.toml` that excludes `**/Migrations/**`, and both
+binaries run `check --base <commit>^ --worktree --format json`. The
+`git log` qgate runs is timed on its own.
+
+**Nothing else changed:** in all 120 commits, every finding equals
+0.7.0's once the note and the `hotspot` key are removed. No run failed,
+and nothing reported a shallow history.
+
+**Time per commit,** this branch against 0.7.0, mean (max):
+
+| | this branch | 0.7.0 | its `git log` |
+|---|---|---|---|
+| CleanArchitecture | 0.06 s (0.11) | 0.06 s (0.09) | 0.00 s |
+| eShop | 0.17 s (0.23) | 0.18 s (0.26) | 0.00 s |
+| server | 4.77 s (5.83) | 5.20 s (6.13) | 0.08 s (0.10) |
+| clients | 4.93 s (5.76) | 5.05 s (5.72) | 0.14 s (0.17) |
+
+The history read costs at most 0.17 s, about 3% of a large check;
+duplication over the whole tree dominates both versions.
+
+**First run (tests ranked):**
+
+| | findings | with a note | in files | in test or test support code |
+|---|---|---|---|---|
+| server | 187 | 48 (26%) | 22 | 20 |
+| clients | 177 | 28 (16%) | 20 | 3 |
+
+CleanArchitecture and eShop got no note. That is right: in their
+windows no file changed in more than one (CleanArchitecture) or two
+(eShop) commits, so the 5-commit minimum is never met
+([`evaluation/churn_hs.py`](evaluation/churn_hs.py)). Twenty of the
+server's 48 notes were in test or test-support code: 18 in tests, mostly
+duplication in large test files from one 132-file commit, and 2 in
+seeders. That led to the decision under D3: tests are not ranked. The
+seeders are no tests by any convention and stay.
+
+**Hotspots per family** (D6 asks for it): qgate exposes no list of
+hotspots, by design, so `churn_hs.py` counts the churn half of the
+definition per family at each repository's newest evaluated commit, an
+upper bound on the hotspots:
+
+| | family | ranked files | highest churn | churn-qualified |
+|---|---|---|---|---|
+| CleanArchitecture | TypeScript | 21 | 1 | 0 |
+| CleanArchitecture | C# | 78 | 1 | 0 |
+| eShop | C# | 476 | 2 | 0 |
+| server | C# | 3,689 | 111 | 147 |
+| clients | TypeScript | 5,563 | 112 | 373 |
+
+The complexity condition takes out the simple ones among these; the
+evaluated commits touched 14 (server) and 18 (clients) of the rest.
+
+**Second run (tests not ranked),** the result to ship, every finding in
+[`evaluation/findings.md`](evaluation/findings.md):
+
+| | with a note | central code | composition root | small file | support code |
+|---|---|---|---|---|---|
+| server | 30 in 14 files | 23 | 0 | 5 | 2 |
+| clients | 26 in 18 files | 16 | 7 | 2 | 1 |
+
+- **The diff between the runs is exactly the intended one:**
+  - 18 notes on test code are gone in server and 2 in clients;
+  - nothing new: every note of the second run was in the first.
+- **How the sort was made:** `classify_hs.py` assigns the categories by
+  rule: seeders and story helpers by name, the two composition roots by
+  name, then complexity of 50 or more against less. Each file was then
+  read by its name and role to check that the label fits; no label was
+  changed. (The review of PR 2 asked for this to be said plainly.)
+- **Central code** (complexity of 50 or more): 39 notes. They are on
+  services, controllers, repositories, commands, background scripts and
+  large components, all of them code a reviewer would treat with care:
+  - server: `CipherService.cs` (216), `OrganizationService.cs` (245),
+    `CiphersController.cs` (325), `AccountController.cs` (145),
+    `RestoreOrganizationUserCommand.cs` (94);
+  - clients: `collect-autofill-content.service.ts` (387),
+    `cipher.service.ts` (322), `vault.component.ts` (235),
+    `runtime.background.ts` (129), `autofill-init.ts` (70).
+- **Composition roots:** `main.background.ts` (90 commits, complexity
+  102) and `service-container.ts` (64 commits, complexity 24) change in
+  nearly every feature, because every feature wires a service there.
+  They are hotspots by any measure, and Tornhill's too. Their notes sit
+  on `tests/unchanged-test` and complexity findings for that wiring.
+  Accepted; `[tests] exclude` already quiets the tests part.
+- **Small files** (complexity 21 to 42): two busy Angular components,
+  two C# invite-link commands and a SAML options extension. They rank in
+  the top quarter because most files of their family are simpler.
+  Plausible, not wrong.
+- **Support code:** two C# seeders and a Storybook helper, outside every
+  test convention. Few enough to accept.
+
+**Option 2, severity raising,** would have turned 24 (server) and 25
+(clients) Warnings into Errors in 60 commits. That supports annotation
+only.
+
+**Thresholds** stay as specified: nothing in the sort calls for another
+value, and the stop rule (a slow `git log`, or thresholds that look
+wrong) is not met.
+
+**To reproduce:** [`evaluation/run_hs.py`](evaluation/run_hs.py) on each
+full clone (`<repo> <out> <qgate> <qgate-0.7.0> '*.cs'`, or `'*.ts'`,
+or both), then `summary_hs.py` and `classify_hs.py <first run>
+<second run>`.
+
+## Review of PR 2
+
+The reviewer found no blocker; it checked the evaluation's counts
+against `findings.md` and mutated the code to see which tests fail.
+Fixed:
+- `families_are_ranked_apart` could not fail: the change touched only
+  TypeScript, so C# was never ranked. It now changes both families and
+  checks the C# note; a mutation that ranks all files together fails
+  it;
+- the "fewer than k%" rule was not pinned at its edges: a unit test
+  now has exactly 10% and 25% above (`<=` fails it), and the scenario
+  "Changed often and complex" has the cart fifth in complexity, as the
+  spec says;
+- the window's edge had no end-to-end test: one now dates a commit
+  exactly 182 days before the head (out) and a second later (in); a
+  250-day window fails it;
+- generated C# files not being ranked had no test; one now has a busy,
+  complex `.g.cs` that would otherwise push a source out;
+- the evaluation lacked hotspots per family (now an upper bound, with
+  `churn_hs.py`), described its rule-based sort as a hand sort, and
+  counted 20 notes "in tests" where 18 were tests and 2 seeders;
+- the spec and README are aligned with the code on the shallow note and
+  unparsable files, the README names "complexity at least 1", and the
+  uncommitted `git mv` limit is recorded (D5);
+- `an_unparsable_hotspot` says that the filter is pinned by a unit
+  test, and two test comments are corrected.
+
+## Release notes for 0.8.0 (draft, task 2.4)
+
+To go above GitHub's generated list when the release is published:
+
+```markdown
+qgate now adds hotspot context from git history (M5b): in `--base` and
+`--worktree` mode, the Claude Code hook and the MCP server, a finding in
+a file that is both complex and changed often ends with
+`; hotspot: <n> commits in 6 months, complexity <c>`.
+
+- Context only: no severity, `--fail-on` result or exit code changes,
+  and there is no list of hotspots.
+- The JSON report gets an optional `hotspot` key on such findings,
+  `{"commits": <n>, "complexity": <c>}`; within `schema_version` 1,
+  consumers that ignore unknown keys need no change.
+- History must be complete: in a shallow clone `qgate check` says
+  `qgate: the history is shallow; hotspots not computed` on standard
+  error and adds no note. CI jobs need `fetch-depth: 0` / `fetchDepth: 0`,
+  as the README's already have.
+
+See "Hotspots" in the README.
+```
 
 ## Review of PR 1
 

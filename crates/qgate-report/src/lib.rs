@@ -101,6 +101,16 @@ struct JsonFinding<'a> {
     metric: Option<JsonMetric>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     related: Vec<JsonLocation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hotspot: Option<JsonHotspot>,
+}
+
+/// Why the finding's file is a hotspot (design D4 of
+/// `add-hotspot-context`).
+#[derive(Serialize)]
+struct JsonHotspot {
+    commits: u32,
+    complexity: u32,
 }
 
 impl<'a> From<&'a Finding> for JsonFinding<'a> {
@@ -115,6 +125,10 @@ impl<'a> From<&'a Finding> for JsonFinding<'a> {
             end_line: f.location.line.and(f.location.end_line),
             metric: f.metric.as_ref().and_then(JsonMetric::new),
             related: f.related.iter().filter_map(JsonLocation::new).collect(),
+            hotspot: f.hotspot.map(|h| JsonHotspot {
+                commits: h.commits,
+                complexity: h.complexity,
+            }),
         }
     }
 }
@@ -298,6 +312,29 @@ mod tests {
              \"severity\":\"warning\",\"message\":\"f: cyclomatic complexity 2 -> 4 (+2)\",\
              \"path\":\"src/a.ts\",\"line\":1,\"metric\":{\"before\":2,\"after\":4}}],\
              \"summary\":{\"count\":1,\"failing\":0,\"fail_on\":\"error\"}}\n"
+        );
+    }
+
+    // report-formats: "Finding fields", "A finding in a hotspot"
+    // (design D4 of `add-hotspot-context`)
+    #[test]
+    fn json_hotspot() {
+        let mut f = finding(
+            "complexity/cyclomatic-increase",
+            "Cart.Total(): cyclomatic complexity 4 -> 6 (+2); hotspot: 31 commits in 6 months, complexity 87",
+            at("src/Cart.cs", Some(12), None),
+            Some(metric(Some(4.0), Some(6.0))),
+        );
+        f.hotspot = Some(qgate_core::Hotspot {
+            commits: 31,
+            complexity: 87,
+        });
+        assert_eq!(
+            only(&render_json(&[f], DEFAULT)),
+            "{\"rule\":\"complexity/cyclomatic-increase\",\"severity\":\"warning\",\
+             \"message\":\"Cart.Total(): cyclomatic complexity 4 -> 6 (+2); hotspot: 31 commits in 6 months, complexity 87\",\
+             \"path\":\"src/Cart.cs\",\"line\":12,\"metric\":{\"before\":4,\"after\":6},\
+             \"hotspot\":{\"commits\":31,\"complexity\":87}}"
         );
     }
 

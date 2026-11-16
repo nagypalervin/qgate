@@ -68,6 +68,21 @@ pub fn analyze<'a>(
         .collect()
 }
 
+/// The paths among `candidates` that are tests by this module's
+/// conventions, judged against every path of the head revision. Hotspot
+/// ranking leaves them out (decided after the evaluation of
+/// `add-hotspot-context`).
+pub fn tests_among<'a>(
+    head_paths: impl IntoIterator<Item = &'a str>,
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> HashSet<&'a str> {
+    let conventions = Conventions::new(head_paths);
+    candidates
+        .into_iter()
+        .filter(|path| conventions.role(path) == Role::Test)
+        .collect()
+}
+
 /// The finding for one changed file, if it needs one.
 fn finding(
     conventions: &Conventions<'_>,
@@ -723,6 +738,39 @@ mod tests {
         assert_eq!(
             head.role("src/Application/Orders.cs"),
             source(&[], Some("OrdersTests.cs in Application.UnitTests"))
+        );
+    }
+
+    // hotspot-analysis: "Ranked files", tests left out (decided after the
+    // evaluation of `add-hotspot-context`)
+    #[test]
+    fn tests_among_candidates() {
+        let head = [
+            "package.json",
+            "src/app/cart.service.ts",
+            "src/app/cart.service.spec.ts",
+            "e2e/helpers.ts",
+            "src/Domain/Domain.csproj",
+            "src/Domain/Order.cs",
+            "tests/Domain.UnitTests/Domain.UnitTests.csproj",
+            "tests/Domain.UnitTests/OrderTests.cs",
+        ];
+        let candidates = [
+            "src/app/cart.service.ts",
+            "src/app/cart.service.spec.ts",
+            "e2e/helpers.ts",
+            "src/Domain/Order.cs",
+            "tests/Domain.UnitTests/OrderTests.cs",
+        ];
+        let mut found: Vec<&str> = tests_among(head, candidates).into_iter().collect();
+        found.sort_unstable();
+        assert_eq!(
+            found,
+            [
+                "e2e/helpers.ts",
+                "src/app/cart.service.spec.ts",
+                "tests/Domain.UnitTests/OrderTests.cs",
+            ]
         );
     }
 

@@ -93,8 +93,8 @@ SHALL NOT be followed for it.
 ### Requirement: Complexity of a file
 
 A file's complexity SHALL be the sum of the cyclomatic complexity of its
-function units in the head revision. A file that cannot be parsed SHALL
-NOT be ranked.
+function units in the head revision. A file that cannot be parsed, and
+a changed file reported as `input/unparsable`, SHALL NOT be ranked.
 
 #### Scenario: Two methods
 
@@ -104,14 +104,21 @@ NOT be ranked.
 ### Requirement: Ranked files
 
 The ranked files SHALL be the files of the head revision whose language
-is supported, that `[files] exclude` does not name and that are not
-generated C#, each language family ranked on its own: TypeScript with
-TypeScript, C# with C#.
+is supported, that `[files] exclude` does not name, that are not
+generated C# and that are not tests by the conventions of
+`test-analysis`, each language family ranked on its own: TypeScript
+with TypeScript, C# with C#. A test's findings get no hotspot context.
 
 #### Scenario: Excluded migrations
 
 - **GIVEN** `[files]` has `exclude = ["**/Migrations/**"]`, and migrations changed in every commit
 - **THEN** no migration is ranked, and they push no other file out of the top
+
+#### Scenario: Tests are not ranked
+
+- **GIVEN** `src/cart.spec.ts` changed in more commits than `src/cart.ts` and is more complex, and the change makes both more complex
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** the finding for `src/cart.ts` has hotspot context and the one for `src/cart.spec.ts` has none
 
 #### Scenario: Families apart
 
@@ -158,7 +165,7 @@ Markdown, Azure Pipelines and GitHub Actions annotations, and JSON.
 
 - **GIVEN** the change of "A complexity increase in a hotspot"
 - **WHEN** the user runs `qgate check --base main --format markdown`
-- **THEN** the finding's cell reads `Cart.Total(): cyclomatic complexity 4 -> 6 (+2); hotspot: 31 commits in 6 months, complexity 87`
+- **THEN** the finding's cell reads `Cart.Total(): cyclomatic complexity 4 -\> 6 (+2); hotspot: 31 commits in 6 months, complexity 87`, with `>` escaped as for every cell
 
 #### Scenario: Azure Pipelines
 
@@ -168,10 +175,10 @@ Markdown, Azure Pipelines and GitHub Actions annotations, and JSON.
 
 ### Requirement: Shallow history
 
-When the repository is shallow, the system SHALL add no hotspot
-context, and `qgate check` SHALL print `qgate: the history is shallow;
-hotspots not computed` to standard error once; the hook and the MCP
-server print nothing more. Standard output, the findings and the exit
+When the repository is shallow and the check has a changed file to
+analyze, the system SHALL add no hotspot context, and `qgate check`
+SHALL print `qgate: the history is shallow; hotspots not computed` to
+standard error once; the hook and the MCP server print nothing more. Standard output, the findings and the exit
 code SHALL be as without hotspot analysis.
 
 #### Scenario: A shallow clone in CI

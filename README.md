@@ -5,7 +5,8 @@
 > Status: early. `qgate check` compares TypeScript and [C#](#c) code
 > between two git revisions (or two files) for cyclomatic complexity,
 > newly duplicated code, [code changed without its
-> tests](#tests-changed-with-the-code) and, with a
+> tests](#tests-changed-with-the-code), with [hotspot](#hotspots) context
+> from git history, and, with a
 > [`qgate.toml`](#architecture-rules-qgatetoml), forbidden imports and
 > C# `using` directives. It
 > reports on pull requests in GitHub Actions and Azure Pipelines; more
@@ -382,7 +383,9 @@ qgate check --base main --format json | jq .
     `after` would be absent for a removed item;
   - `related`, when the finding refers to other places: for a duplicate
     block, the existing copies, one per file by path, each with `path`,
-    `line` and `end_line`. The first is the one the message names.
+    `line` and `end_line`. The first is the one the message names;
+  - `hotspot`, when the finding's file is a [hotspot](#hotspots):
+    `commits` (how often it changed in 6 months) and `complexity`.
 - **`summary`:** `count` (the number of findings), `failing` (how many
   are at or above the `--fail-on` level, so the run exits with `1` when
   it is not `0`) and `fail_on` (that level).
@@ -530,6 +533,49 @@ findings pointed at code whose test should have changed or should
 exist. Most of the rest were refactors, composition roots and models
 that need no test of their own. Those are what `[tests] exclude` is
 for.
+
+### Hotspots
+
+A hotspot is a file that is both complex and changed often, after Adam
+Tornhill's *Your Code as a Crime Scene*. In `--base` and `--worktree`
+mode, and so in the Claude Code hook and the MCP server, a finding in a
+hotspot says so at the end of its message:
+
+```
+warning src/Cart.cs:12  Cart.Total(): cyclomatic complexity 4 -> 6 (+2); hotspot: 31 commits in 6 months, complexity 87  [complexity/cyclomatic-increase]
+```
+
+- **Context only.** The note changes no severity, no `--fail-on` result
+  and no exit code. qgate reports what got worse, so a hotspot that
+  nothing made worse is not reported, and there is no list of hotspots.
+- **What a hotspot is**, per file, measured at the head revision:
+  - **changed often:** at least 5 commits in the 182 days before the
+    head commit, and fewer than 10% of the files changed more;
+  - **complex:** the sum of its functions' cyclomatic complexity, at
+    least 1, with fewer than 25% of the files more complex.
+- **Which files are ranked:** those qgate reads, without files
+  `[files] exclude` names, generated C# and
+  [tests](#tests-changed-with-the-code). TypeScript and C# are ranked
+  apart.
+- **Commits:** merge commits do not count, the commits they bring in
+  do. Renames are followed along a file's own history; a rename made on
+  another branch than an edit is not, so a freshly renamed file may
+  count fewer commits. With squash merges, a pull request counts once.
+- **The window ends at the head commit,** not at the time of the run,
+  so a check gives the same answer tomorrow. With `--worktree` it ends
+  at `HEAD`, and uncommitted work is not history: a file moved with an
+  uncommitted `git mv` has no history under its new name yet. With
+  skewed clocks, a commit behind one dated before the window can be
+  missed.
+- **Every finding but `input/unparsable`** gets the note: complexity,
+  duplication, architecture and tests. JSON also has a `hotspot` key
+  (see [JSON output](#json-output)).
+- **History must be complete.** In a shallow clone, `qgate check` prints
+  `qgate: the history is shallow; hotspots not computed` on standard
+  error when the change has a file to analyze, and adds no note; the
+  result is otherwise the same. CI needs
+  `fetch-depth: 0` (GitHub Actions) or `fetchDepth: 0` (Azure
+  Pipelines), as the jobs below already have.
 
 ### Architecture rules (`qgate.toml`)
 
@@ -1075,7 +1121,7 @@ analysis, notably Adam Tornhill's *Your Code as a Crime Scene*.
 crates/
   qgate-core/       shared types: Finding, Metric, Severity
   qgate-lang/       language adapters (tree-sitter)
-  qgate-analyzers/  architecture, complexity, duplication, tests
+  qgate-analyzers/  architecture, complexity, duplication, tests, hotspots
   qgate-report/     text, JSON, Markdown, Azure Pipelines and GitHub Actions annotations (SARIF later)
   qgate-git/        changed files and blobs, via the `git` command
   qgate-config/     reads qgate.toml

@@ -14,6 +14,8 @@
 //!   analysis with its own index rather than an [`Analyzer`].
 //! - [`tests`]: source files whose code changed while their tests did
 //!   not, and new files without a test. Repository-level too.
+//! - [`hotspots`]: which files are both complex and changed often, and
+//!   the note their findings get. Context only, after the analyzers.
 //!
 //! Shared with the CLI:
 //!
@@ -44,6 +46,7 @@
 pub mod architecture;
 pub mod complexity;
 pub mod duplication;
+pub mod hotspots;
 pub mod patterns;
 pub mod tests;
 
