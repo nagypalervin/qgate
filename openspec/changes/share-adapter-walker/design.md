@@ -166,3 +166,28 @@ configuration.
   modules (out of scope). 18 are in source code: 15 copies of the walker
   skeleton (the parse entry, `new`, `walk`, `open_unit`, `leave`, the
   token push) and 3 of generic node helpers (D7).
+
+**After the refactor (task 3.1, the branch's release binary):**
+
+- **Replay: byte-identical.** The 54 reports without run times equal the
+  baseline byte for byte (SHA-256 `8e9eba0562e9a7fe...` both): the same
+  229 findings, with their names, lines, complexities, copies, test
+  findings and hotspot context, over TypeScript, C# and Rust code.
+- **Check 3: 30 duplicates down to 16.** The 12 between test modules are
+  unchanged (out of scope). In source code, 18 went down to 4:
+  - **1 language rule, kept on purpose:** the start of TypeScript's and
+    C#'s `is_decision_point` (a list check, then a `match` with
+    `operator_in`). It is each language's rule and was in the baseline.
+  - **3 short idioms of the skeleton, accepted:** the `parse` entry with
+    the head of its `From<Walker>` (4 lines plus the struct literal),
+    the start of `enter` that builds the adapter's own frame and records
+    the token and the code, and TypeScript's and C#'s handling of
+    literal and text-part tokens. Each adapter has its own frame type
+    and fields; sharing these would need a further abstraction only to
+    move tokens below the threshold, which would make the code harder
+    to read, not easier to change. This differs from D5's "none of
+    them"; it is put to Ervin in the pull request.
+- **Found while closing the gap:** the three `parse` functions had
+  become the same after task 2.4 (a new copy); `run` now parses, walks
+  and builds the model for all three. `Tokens::mute` records in the
+  frame that it muted, so the adapters' own `mute` methods went too.

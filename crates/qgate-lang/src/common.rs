@@ -18,7 +18,7 @@ use std::hash::{DefaultHasher, Hasher};
 
 use tree_sitter::{Language as Grammar, Node, Parser, Tree};
 
-use crate::{Function, ParseError, Token};
+use crate::{FileModel, Function, ParseError, Token};
 
 /// Parse `source` with `grammar`. A tree with a syntax error is refused
 /// with the line of its first error: counting a partly parsed file could
@@ -134,6 +134,26 @@ pub(crate) trait Visit {
     fn descend(&mut self, _node: Node<'_>) -> bool {
         true
     }
+}
+
+/// Parse `source` with `grammar`, walk the tree with `visitor` and turn
+/// what it found into the file's model.
+pub(crate) fn run<V>(
+    grammar: &Grammar,
+    source: &str,
+    mut visitor: V,
+) -> Result<FileModel, ParseError>
+where
+    V: Visit + Into<FileModel>,
+{
+    let tree = parse_tree(grammar, source)?;
+    walk(tree.root_node(), &mut visitor);
+    Ok(visitor.into())
+}
+
+/// The source text of `node`.
+pub(crate) fn node_text(node: Node<'_>, source: &[u8]) -> String {
+    node.utf8_text(source).unwrap_or_default().to_owned()
 }
 
 /// Walk the tree below `root` depth first, without recursion, so deeply
@@ -314,9 +334,11 @@ impl Tokens {
         self.muted
     }
 
-    /// Mute the subtree being entered; its frame unmutes it.
-    pub(crate) fn mute(&mut self) {
+    /// Mute the subtree being entered, and note in its frame's `muted`
+    /// that leaving it unmutes.
+    pub(crate) fn mute(&mut self, muted: &mut bool) {
         self.muted = true;
+        *muted = true;
     }
 
     pub(crate) fn unmute(&mut self) {

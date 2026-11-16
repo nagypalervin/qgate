@@ -14,21 +14,14 @@ use std::hash::Hash;
 use tree_sitter::Node;
 
 use crate::common::{
-    Mark, Tokens, Units, Visit, compact, has_child, line_of, operator_in, parse_tree, walk,
+    Mark, Tokens, Units, Visit, compact, has_child, line_of, node_text, operator_in, run,
 };
 use crate::{FileModel, ParseError, Using};
 
 /// Parse C# source into a [`FileModel`].
 pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
-    let tree = parse_tree(&tree_sitter_c_sharp::LANGUAGE.into(), source)?;
-    let mut walker = Walker::new(source.as_bytes());
-    walk(tree.root_node(), &mut walker);
-    Ok(FileModel {
-        functions: walker.units.finish(),
-        imports: Vec::new(),
-        usings: walker.usings,
-        tokens: walker.tokens.finish(),
-    })
+    let walker = Walker::new(source.as_bytes());
+    run(&tree_sitter_c_sharp::LANGUAGE.into(), source, walker)
 }
 
 /// Type declarations: they add their name to the units inside them, and
@@ -114,6 +107,17 @@ impl<'s> Walker<'s> {
             units: Units::new(),
             tokens: Tokens::default(),
             usings: Vec::new(),
+        }
+    }
+}
+
+impl From<Walker<'_>> for FileModel {
+    fn from(walker: Walker<'_>) -> Self {
+        Self {
+            functions: walker.units.finish(),
+            imports: Vec::new(),
+            usings: walker.usings,
+            tokens: walker.tokens.finish(),
         }
     }
 }
@@ -220,11 +224,11 @@ impl Walker<'_> {
         let kind = node.kind();
         let parent = ancestors.last().copied();
         if produces_no_tokens(node, parent) {
-            self.mute(frame);
+            self.tokens.mute(&mut frame.muted);
         } else if node.is_named() && LITERAL_KINDS.contains(&kind) {
             self.tokens.push("$lit".to_owned(), node, false);
             if node.child_count() > 0 {
-                self.mute(frame);
+                self.tokens.mute(&mut frame.muted);
             }
         } else if node.is_named()
             && TEXT_PART_KINDS.contains(&kind)
@@ -243,7 +247,7 @@ impl Walker<'_> {
             };
             self.tokens.push(text, node, false);
             if node.child_count() > 0 {
-                self.mute(frame);
+                self.tokens.mute(&mut frame.muted);
             }
         } else if node.child_count() == 0 && kind != ";" && !kind.starts_with('#') {
             let text = self.text(node);
@@ -251,11 +255,6 @@ impl Walker<'_> {
                 self.tokens.push(text, node, false);
             }
         }
-    }
-
-    fn mute(&mut self, frame: &mut Frame) {
-        self.tokens.mute();
-        frame.muted = true;
     }
 
     /// A unit's own name: its signature (design D2), after the interface
@@ -386,7 +385,7 @@ impl Walker<'_> {
     }
 
     fn text(&self, node: Node<'_>) -> String {
-        node.utf8_text(self.source).unwrap_or_default().to_owned()
+        node_text(node, self.source)
     }
 
     /// The name a `using` directive uses: the named child that is not its

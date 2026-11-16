@@ -16,8 +16,8 @@ use std::hash::Hash;
 use tree_sitter::Node;
 
 use crate::common::{
-    Mark, Tokens, UnitScope, Units, Visit, has_child, line_of, named_children, operator_in,
-    parse_tree, walk,
+    Mark, Tokens, UnitScope, Units, Visit, has_child, line_of, named_children, node_text,
+    operator_in, run,
 };
 use crate::{FileModel, Import, Language, ParseError};
 
@@ -33,15 +33,7 @@ pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, Parse
             });
         }
     };
-    let tree = parse_tree(&grammar.into(), source)?;
-    let mut walker = Walker::new(source.as_bytes());
-    walk(tree.root_node(), &mut walker);
-    Ok(FileModel {
-        functions: walker.units.finish(),
-        imports: walker.imports,
-        usings: Vec::new(),
-        tokens: walker.tokens.finish(),
-    })
+    run(&grammar.into(), source, Walker::new(source.as_bytes()))
 }
 
 /// Nodes that define a function unit, if they get a name.
@@ -132,7 +124,7 @@ struct Bound {
 /// What collects the decision points of the code inside a node.
 #[derive(Clone, Copy)]
 enum Scope {
-    /// The unit with index `i` in the file's units.
+    /// The unit with this index among the file's units.
     Unit(usize),
     /// A class body: its non-function code (field initializers) is not
     /// measured, but a call bound to a field passes its name through.
@@ -175,6 +167,17 @@ impl<'s> Walker<'s> {
             imports: Vec::new(),
             tokens: Tokens::default(),
             not_code: false,
+        }
+    }
+}
+
+impl From<Walker<'_>> for FileModel {
+    fn from(walker: Walker<'_>) -> Self {
+        Self {
+            functions: walker.units.finish(),
+            imports: walker.imports,
+            usings: Vec::new(),
+            tokens: walker.tokens.finish(),
         }
     }
 }
@@ -393,7 +396,7 @@ impl Walker<'_> {
     }
 
     fn text(&self, node: Node<'_>) -> String {
-        node.utf8_text(self.source).unwrap_or_default().to_owned()
+        node_text(node, self.source)
     }
 
     /// Add a leaf to the fingerprint of the unit it belongs to (design D1
@@ -486,7 +489,7 @@ impl Walker<'_> {
             return;
         }
         if produces_no_tokens(node, parent) {
-            self.mute(frame);
+            self.tokens.mute(&mut frame.muted);
             return;
         }
         let kind = node.kind();
@@ -497,7 +500,7 @@ impl Walker<'_> {
             // One `$lit` per literal, without entering it.
             self.tokens.push("$lit".to_owned(), node, false);
             if node.child_count() > 0 {
-                self.mute(frame);
+                self.tokens.mute(&mut frame.muted);
             }
         } else if node.is_named() && TEXT_PART_KINDS.contains(&kind) {
             // A run of text parts is one literal: `\n` in a template or
@@ -516,11 +519,6 @@ impl Walker<'_> {
                 self.tokens.push(text, node, false);
             }
         }
-    }
-
-    fn mute(&mut self, frame: &mut Frame) {
-        self.tokens.mute();
-        frame.muted = true;
     }
 
     /// Record the import `node` makes, if it is one (design D4 of

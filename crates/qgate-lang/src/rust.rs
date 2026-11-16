@@ -14,19 +14,13 @@ use std::hash::Hash;
 
 use tree_sitter::Node;
 
-use crate::common::{Mark, Tokens, Units, Visit, compact, line_of, parse_tree, walk};
+use crate::common::{Mark, Tokens, Units, Visit, compact, line_of, node_text, run};
 use crate::{FileModel, ParseError};
 
 /// Parse Rust source into a [`FileModel`].
 pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
-    let tree = parse_tree(&tree_sitter_rust::LANGUAGE.into(), source)?;
-    let mut walker = Walker::new(source.as_bytes());
-    walk(tree.root_node(), &mut walker);
-    Ok(FileModel {
-        functions: walker.units.finish(),
-        tokens: walker.tokens.finish(),
-        ..FileModel::default()
-    })
+    let walker = Walker::new(source.as_bytes());
+    run(&tree_sitter_rust::LANGUAGE.into(), source, walker)
 }
 
 /// Literals that become one `$lit` each, without entering them. `true`
@@ -75,6 +69,16 @@ impl<'s> Walker<'s> {
             units: Units::new(),
             in_comment: false,
             tokens: Tokens::default(),
+        }
+    }
+}
+
+impl From<Walker<'_>> for FileModel {
+    fn from(walker: Walker<'_>) -> Self {
+        Self {
+            functions: walker.units.finish(),
+            tokens: walker.tokens.finish(),
+            ..Self::default()
         }
     }
 }
@@ -161,7 +165,7 @@ impl Walker<'_> {
         }
         let kind = node.kind();
         if produces_no_tokens(node, parent) {
-            self.mute(frame);
+            self.tokens.mute(&mut frame.muted);
         } else if kind == "integer_literal" && follows_path_or_dot(node) {
             // A tuple field, `.0`, is a field name (review of PR 1).
             self.tokens.push(self.text(node), node, false);
@@ -174,7 +178,7 @@ impl Walker<'_> {
                 "$id"
             };
             self.tokens.push(text.to_owned(), node, false);
-            self.mute(frame);
+            self.tokens.mute(&mut frame.muted);
         } else if node.child_count() == 0 && kind != ";" {
             let text = self.text(node);
             let text = if is_name(kind) && text != "Self" && !follows_path_or_dot(node) {
@@ -188,13 +192,8 @@ impl Walker<'_> {
         }
     }
 
-    fn mute(&mut self, frame: &mut Frame) {
-        self.tokens.mute();
-        frame.muted = true;
-    }
-
     fn text(&self, node: Node<'_>) -> String {
-        node.utf8_text(self.source).unwrap_or_default().to_owned()
+        node_text(node, self.source)
     }
 }
 
