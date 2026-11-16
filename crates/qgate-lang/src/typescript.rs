@@ -6,15 +6,20 @@
 //! module level or in a class field initializer are handled in the same
 //! walk (design of `analyze-wrapped-functions`), and so are the file's
 //! imports (design D4 of `add-forbidden-imports`). What counts as a
-//! decision point follows the `complexity` rule of `ESLint`.
+//! decision point follows the `complexity` rule of `ESLint`. The walk,
+//! the unit bookkeeping and the tokens are the shared ones of `common.rs`;
+//! the scopes are TypeScript's own: a unit, a class body or an opaque
+//! function.
 
-use std::collections::HashSet;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::Hash;
 
 use tree_sitter::Node;
 
-use crate::common::{line_of, named_children, parse_tree, unique_segment};
-use crate::{FileModel, Function, Import, Language, ParseError, Token};
+use crate::common::{
+    Mark, Tokens, UnitScope, Units, Visit, has_child, line_of, named_children, node_text,
+    operator_in, run,
+};
+use crate::{FileModel, Import, Language, ParseError};
 
 /// Parse TypeScript or TSX source into a [`FileModel`].
 pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, ParseError> {
@@ -28,16 +33,7 @@ pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, Parse
             });
         }
     };
-    let tree = parse_tree(&grammar.into(), source)?;
-    let mut walker = Walker::new(source.as_bytes());
-    walker.walk(tree.root_node());
-    let (functions, imports, tokens) = walker.finish();
-    Ok(FileModel {
-        functions,
-        imports,
-        usings: Vec::new(),
-        tokens,
-    })
+    run(&grammar.into(), source, Walker::new(source.as_bytes()))
 }
 
 /// Nodes that define a function unit, if they get a name.
@@ -101,14 +97,10 @@ const DECISION_KINDS: &[&str] = &[
     "object_assignment_pattern",
 ];
 
-/// What entering a node pushed, so leaving it can pop the same.
-// Each flag is an independent undo step for `leave`, one per stack, not a
-// state; an enum or state machine would not fit.
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Default)]
+/// What entering a node opened, so leaving it can close the same: the
+/// segments and scopes, and one flag per other stack or state.
 struct Frame {
-    segment: bool,
-    scope: bool,
+    units: Mark,
     bound: bool,
     muted: bool,
     not_code: bool,
@@ -131,7 +123,7 @@ struct Bound {
 /// What collects the decision points of the code inside a node.
 #[derive(Clone, Copy)]
 enum Scope {
-    /// The unit `functions[i]`.
+    /// The unit with this index among the file's units.
     Unit(usize),
     /// A class body: its non-function code (field initializers) is not
     /// measured, but a call bound to a field passes its name through.
@@ -141,90 +133,53 @@ enum Scope {
     Opaque,
 }
 
+impl UnitScope for Scope {
+    fn unit(self) -> Option<usize> {
+        match self {
+            Self::Unit(unit) => Some(unit),
+            Self::ClassBody | Self::Opaque => None,
+        }
+    }
+}
+
 struct Walker<'s> {
     source: &'s [u8],
-    /// Names of the named ancestors, joined with `.` for qualified names.
-    segments: Vec<String>,
-    /// Innermost scope last; empty at module level.
-    scopes: Vec<Scope>,
-    /// Units in source order (by start position).
-    functions: Vec<Function>,
-    /// The fingerprint of each unit in `functions` so far.
-    hashers: Vec<DefaultHasher>,
-    /// Qualified names already given to a unit.
-    taken: HashSet<String>,
+    /// The units, named by their named ancestors; a scope tells what
+    /// collects the decision points of the code in it.
+    units: Units<Scope>,
     /// Bound calls being walked, innermost last.
     bound: Vec<Bound>,
     /// Imports in source order.
     imports: Vec<Import>,
-    /// Normalized tokens in source order.
-    tokens: Vec<Token>,
-    /// Whether the walk is inside a subtree that produces no tokens; the
-    /// frame of the node that opened it closes it.
-    muted: bool,
-    /// Whether the last token was a text part of a literal, so the next
-    /// one continues the same literal.
-    in_text_run: bool,
+    tokens: Tokens,
     /// Whether the walk is inside TypeScript-only code, which is no part
     /// of a fingerprint; the frame of the node that opened it closes it.
     not_code: bool,
 }
 
-impl<'s> Walker<'s> {
-    fn new(source: &'s [u8]) -> Self {
+impl From<Walker<'_>> for FileModel {
+    fn from(walker: Walker<'_>) -> Self {
         Self {
-            source,
-            segments: Vec::new(),
-            scopes: Vec::new(),
-            functions: Vec::new(),
-            hashers: Vec::new(),
-            taken: HashSet::new(),
-            bound: Vec::new(),
-            imports: Vec::new(),
-            tokens: Vec::new(),
-            muted: false,
-            in_text_run: false,
-            not_code: false,
+            functions: walker.units.finish(),
+            imports: walker.imports,
+            usings: Vec::new(),
+            tokens: walker.tokens.finish(),
         }
     }
+}
 
-    /// Depth-first walk without recursion, so deeply nested code cannot
-    /// overflow the stack.
-    fn walk(&mut self, root: Node<'_>) {
-        let mut cursor = root.walk();
-        let mut frames = Vec::new();
-        // The ancestors of the current node, so no node has to ask
-        // tree-sitter for its parent.
-        let mut ancestors: Vec<Node<'_>> = Vec::new();
-        loop {
-            let node = cursor.node();
-            frames.push(self.enter(node, ancestors.last().copied()));
-            if TYPE_KINDS.contains(&node.kind()) {
-                // Not entered, but `import("./x").T` in a type still
-                // imports a module.
-                self.record_imports_below(node);
-            } else if cursor.goto_first_child() {
-                ancestors.push(node);
-                continue;
-            }
-            loop {
-                if let Some(frame) = frames.pop() {
-                    self.leave(&frame);
-                }
-                if cursor.goto_next_sibling() {
-                    break;
-                }
-                if !cursor.goto_parent() {
-                    return;
-                }
-                ancestors.pop();
-            }
-        }
-    }
+impl Visit for Walker<'_> {
+    type Frame = Frame;
 
-    fn enter(&mut self, node: Node<'_>, parent: Option<Node<'_>>) -> Frame {
+    fn enter(&mut self, node: Node<'_>, ancestors: &[Node<'_>]) -> Frame {
         let kind = node.kind();
-        let mut frame = Frame::default();
+        let parent = ancestors.last().copied();
+        let mut frame = Frame {
+            units: self.units.mark(),
+            bound: false,
+            muted: false,
+            not_code: false,
+        };
         self.record_import(node);
         self.record_token(node, parent, &mut frame);
         self.record_code(node, parent, &mut frame);
@@ -236,11 +191,10 @@ impl<'s> Walker<'s> {
                 .last()
                 .filter(|b| b.top == pass_through_top(node).id())
             {
-                self.segments.push(bound.segment.clone());
-                frame.segment = true;
-                if let (true, Some(unit)) = (FUNCTION_KINDS.contains(&kind), bound.unit) {
-                    self.scopes.push(Scope::Unit(unit));
-                    frame.scope = true;
+                let (segment, unit) = (bound.segment.clone(), bound.unit);
+                self.units.push_segment(segment);
+                if let (true, Some(unit)) = (FUNCTION_KINDS.contains(&kind), unit) {
+                    self.units.push_scope(Scope::Unit(unit));
                 }
                 return frame;
             }
@@ -250,45 +204,70 @@ impl<'s> Walker<'s> {
             // Anonymous functions open no unit: their decision points go to
             // the enclosing unit. Without one, they are opaque.
             if let Some((name, line)) = self.name_of(node) {
-                let segment = self.unique_segment(&name);
-                self.segments.push(segment);
-                let qualified = self.segments.join(".");
-                let unit = self.open_unit(qualified, line);
+                let unit = self.units.open(&name, line);
                 self.record_decorators(node, unit);
-                self.scopes.push(Scope::Unit(unit));
-                frame.segment = true;
-                frame.scope = true;
+                self.units.push_scope(Scope::Unit(unit));
             } else if !self.collecting() {
-                self.scopes.push(Scope::Opaque);
-                frame.scope = true;
+                self.units.push_scope(Scope::Opaque);
             }
         } else if CONTAINER_KINDS.contains(&kind) {
             if let Some((name, _)) = self.name_of(node) {
-                self.segments.push(name);
-                frame.segment = true;
+                self.units.push_segment(name);
             }
         } else if kind == "class_body" {
-            self.scopes.push(Scope::ClassBody);
-            frame.scope = true;
+            self.units.push_scope(Scope::ClassBody);
         } else if kind == "class_static_block" {
-            self.scopes.push(Scope::Opaque);
-            frame.scope = true;
+            self.units.push_scope(Scope::Opaque);
         } else if CALL_KINDS.contains(&kind)
-            && matches!(self.scopes.last(), None | Some(Scope::ClassBody))
+            && matches!(self.units.scope(), None | Some(Scope::ClassBody))
         {
             // Module level or a class field initializer only.
             frame.bound = self.enter_bound_call(node);
         } else if is_decision_point(node) {
-            if let Some(Scope::Unit(index)) = self.scopes.last() {
-                self.functions[*index].cyclomatic += 1;
-            }
+            self.units.count(1);
         }
         frame
     }
 
+    fn leave(&mut self, frame: Frame) {
+        self.units.restore(frame.units);
+        if frame.bound {
+            self.bound.pop();
+        }
+        if frame.muted {
+            self.tokens.unmute();
+        }
+        if frame.not_code {
+            self.not_code = false;
+        }
+    }
+
+    /// Type-level code is not entered, but `import("./x").T` in a type
+    /// still imports a module.
+    fn descend(&mut self, node: Node<'_>) -> bool {
+        if TYPE_KINDS.contains(&node.kind()) {
+            self.record_imports_below(node);
+            return false;
+        }
+        true
+    }
+}
+
+impl<'s> Walker<'s> {
+    fn new(source: &'s [u8]) -> Self {
+        Self {
+            source,
+            units: Units::new(),
+            bound: Vec::new(),
+            imports: Vec::new(),
+            tokens: Tokens::default(),
+            not_code: false,
+        }
+    }
+
     /// Whether a unit collects the decision points at the current position.
     fn collecting(&self) -> bool {
-        matches!(self.scopes.last(), Some(Scope::Unit(_)))
+        matches!(self.units.scope(), Some(Scope::Unit(_)))
     }
 
     /// Start a bound call if `node` is bound to a name. The unit of the
@@ -303,14 +282,13 @@ impl<'s> Walker<'s> {
         // suffix is needed only for a unit whose name is taken.
         let passes = passes_a_function(node);
         let segment = if passes {
-            self.unique_segment(&name)
+            self.units.unique_segment(&name)
         } else {
             name
         };
         let unit = passes.then(|| {
-            let mut parts = self.segments.clone();
-            parts.push(segment.clone());
-            self.open_unit(parts.join("."), line)
+            let qualified = self.units.qualify(&segment);
+            self.units.add(qualified, line)
         });
         self.bound.push(Bound {
             top: pass_through_top(node).id(),
@@ -318,44 +296,6 @@ impl<'s> Walker<'s> {
             unit,
         });
         true
-    }
-
-    /// Add the unit `qualified` and return its index.
-    fn open_unit(&mut self, qualified: String, line: u32) -> usize {
-        self.taken.insert(qualified.clone());
-        self.functions.push(Function {
-            name: qualified,
-            line,
-            cyclomatic: 1,
-            fingerprint: 0,
-        });
-        self.hashers.push(DefaultHasher::new());
-        self.functions.len() - 1
-    }
-
-    /// `name`, or `name#2`, `name#3`, ... if the qualified name it would
-    /// produce is already taken. Nested units inherit the suffix because it
-    /// is part of the segment.
-    fn unique_segment(&self, name: &str) -> String {
-        unique_segment(&self.segments, &self.taken, name)
-    }
-
-    fn leave(&mut self, frame: &Frame) {
-        if frame.segment {
-            self.segments.pop();
-        }
-        if frame.scope {
-            self.scopes.pop();
-        }
-        if frame.bound {
-            self.bound.pop();
-        }
-        if frame.muted {
-            self.muted = false;
-        }
-        if frame.not_code {
-            self.not_code = false;
-        }
     }
 
     /// The name a function or container gets, and the 1-based line it
@@ -453,14 +393,7 @@ impl<'s> Walker<'s> {
     }
 
     fn text(&self, node: Node<'_>) -> String {
-        node.utf8_text(self.source).unwrap_or_default().to_owned()
-    }
-
-    fn finish(mut self) -> (Vec<Function>, Vec<Import>, Vec<Token>) {
-        for (function, hasher) in self.functions.iter_mut().zip(&self.hashers) {
-            function.fingerprint = hasher.finish();
-        }
-        (self.functions, self.imports, self.tokens)
+        node_text(node, self.source)
     }
 
     /// Add a leaf to the fingerprint of the unit it belongs to (design D1
@@ -478,8 +411,8 @@ impl<'s> Walker<'s> {
         }
         // The code of a bound call around the functions that pass through
         // it (`withAuth`, its options) is code of their unit.
-        let unit = match self.scopes.last() {
-            Some(Scope::Unit(unit)) => *unit,
+        let unit = match self.units.scope() {
+            Some(Scope::Unit(unit)) => unit,
             None | Some(Scope::ClassBody) => match self.bound.last().and_then(|b| b.unit) {
                 Some(unit) => unit,
                 None => return,
@@ -533,7 +466,7 @@ impl<'s> Walker<'s> {
         if code.is_empty() || SKIPPED_LEAF_KINDS.contains(&kind) || kind == "html_comment" {
             return;
         }
-        let hasher = &mut self.hashers[unit];
+        let hasher = self.units.hasher(unit);
         if kind == "jsx_text" {
             for word in code
                 .split(u8::is_ascii_whitespace)
@@ -549,12 +482,11 @@ impl<'s> Walker<'s> {
     /// Record the normalized token `node` is, if any (design D1 of
     /// `add-duplicate-detection`), and mute the subtrees that produce none.
     fn record_token(&mut self, node: Node<'_>, parent: Option<Node<'_>>, frame: &mut Frame) {
-        if self.muted {
+        if self.tokens.muted() {
             return;
         }
         if produces_no_tokens(node, parent) {
-            self.muted = true;
-            frame.muted = true;
+            self.tokens.mute(&mut frame.muted);
             return;
         }
         let kind = node.kind();
@@ -563,16 +495,15 @@ impl<'s> Walker<'s> {
         // are muted or never entered, so this is a guard, not a known case.
         if node.is_named() && LITERAL_KINDS.contains(&kind) {
             // One `$lit` per literal, without entering it.
-            self.push_token("$lit".to_owned(), node, false);
+            self.tokens.push("$lit".to_owned(), node, false);
             if node.child_count() > 0 {
-                self.muted = true;
-                frame.muted = true;
+                self.tokens.mute(&mut frame.muted);
             }
         } else if node.is_named() && TEXT_PART_KINDS.contains(&kind) {
             // A run of text parts is one literal: `\n` in a template or
             // `&amp;` in JSX text does not add tokens.
-            if !self.in_text_run {
-                self.push_token("$lit".to_owned(), node, true);
+            if !self.tokens.in_text_run() {
+                self.tokens.push("$lit".to_owned(), node, true);
             }
         } else if node.child_count() == 0 && !SKIPPED_LEAF_KINDS.contains(&kind) {
             let text =
@@ -582,17 +513,9 @@ impl<'s> Walker<'s> {
                     self.text(node)
                 };
             if !text.is_empty() {
-                self.push_token(text, node, false);
+                self.tokens.push(text, node, false);
             }
         }
-    }
-
-    fn push_token(&mut self, text: String, node: Node<'_>, text_part: bool) {
-        self.tokens.push(Token {
-            text,
-            line: line_of(node),
-        });
-        self.in_text_run = text_part;
     }
 
     /// Record the import `node` makes, if it is one (design D4 of
@@ -734,13 +657,13 @@ fn produces_no_tokens(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
     match kind {
         "export_statement" => {
             node.child_by_field_name("source").is_some()
-                || has_child_kind(node, &["type", "namespace"])
+                || has_child(node, &["type", "namespace"])
                 || node.child_by_field_name("declaration").is_some_and(|d| {
                     TYPE_KINDS.contains(&d.kind()) || TYPE_ONLY_KINDS.contains(&d.kind())
                 })
         }
-        "export_specifier" => has_child_kind(node, &["type"]),
-        "public_field_definition" => has_child_kind(node, &["declare", "abstract"]),
+        "export_specifier" => has_child(node, &["type"]),
+        "public_field_definition" => has_child(node, &["declare", "abstract"]),
         "required_parameter" => node
             .child_by_field_name("pattern")
             .is_some_and(|p| p.kind() == "this"),
@@ -755,13 +678,6 @@ fn produces_no_tokens(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
             _ => false,
         }),
     }
-}
-
-/// Whether one of `node`'s direct children has one of `kinds`.
-fn has_child_kind(node: Node<'_>, kinds: &[&str]) -> bool {
-    let mut cursor = node.walk();
-    node.children(&mut cursor)
-        .any(|c| kinds.contains(&c.kind()))
 }
 
 /// Whether an identifier keeps its text because it is not a variable: a
@@ -844,12 +760,6 @@ fn is_decision_point(node: Node<'_>) -> bool {
         "?." => node.parent().is_some_and(|p| p.kind() == "call_expression"),
         _ => false,
     }
-}
-
-/// Whether the node's `operator` field is one of `operators`.
-fn operator_in(node: Node<'_>, operators: &[&str]) -> bool {
-    node.child_by_field_name("operator")
-        .is_some_and(|op| operators.contains(&op.kind()))
 }
 
 #[cfg(test)]
