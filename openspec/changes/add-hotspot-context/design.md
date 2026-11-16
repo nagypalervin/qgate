@@ -386,6 +386,21 @@ Fixed:
 - `an_unparsable_hotspot` says that the filter is pinned by a unit
   test, and two test comments are corrected.
 
+## Review of PR 3
+
+The reviewer found no blocker and checked the tag, both runs, the
+published release and its notes, every archive size, the arm64 binary,
+an equivalent hotspot repository and every README version. Fixed:
+- coverage had no home once M5 was done; Ervin chose the "Later" row
+  (see "README at 0.8.0");
+- the slip record now says the checkout moved and was restored;
+- the rehearsal record names the Warning row and the REST API reads;
+- task 4.1 says what was built beyond its text;
+- the journal entry matches the record on the PR 2 review (one test
+  that could not fail, two edges no test pinned) and on the effort
+  (three calendar days);
+- the "How it works" diagram shows the hotspot step.
+
 ## Release notes for 0.8.0 (draft, task 2.4)
 
 To go above GitHub's generated list when the release is published:
@@ -468,9 +483,14 @@ repositories. Fixed:
 Every install block, both `uses:` lines and the pinned commit
 (`1ab25beb08eeb8d78c903d1aa627811792cbd815`, `v0.8.0^{commit}`) name
 0.8.0. `grep` finds one `0.7.0`, on purpose: the M5 row dates the tests
-analyzer. The M5 row is done, with both halves dated. "How it works" no
-longer ties the unbuilt coverage check to M5, and neither do the crate
-docs of `qgate-analyzers`. The Linux install block, run as written
+analyzer. The M5 row is done, with both halves dated.
+
+**Coverage moves to "Later" (decided in the review of PR 3,
+2026-11-16, Ervin).** The coverage-drop check was never in the M5 row,
+but "How it works" and the crate docs of `qgate-analyzers` tied it to
+M5 as planned. With M5 done it needed a home: Ervin chose the roadmap's
+"Later" row, which now names it, and the crate docs and "How it works"
+point there. The "How it works" diagram also gained the hotspot step. The Linux install block, run as written
 against the published release (with the arm64 target and a scratch
 directory instead of `~/.local/bin`), passed its checksum and installed
 `qgate 0.8.0`.
@@ -497,21 +517,25 @@ directory instead of `~/.local/bin`), passed its checksum and installed
   - `qgate comment`: "created the qgate comment (1 finding, 0 at or
     above error)";
   - one warning build issue of code `complexity/cyclomatic-increase`
-    at `src/grade.ts` line 2: `grade: cyclomatic complexity 2 -> 3
-    (+1); hotspot: 8 commits in 6 months, complexity 3`;
+    at `src/grade.ts` line 2, read from the build timeline through the
+    REST API: `grade: cyclomatic complexity 2 -> 3 (+1); hotspot: 8
+    commits in 6 months, complexity 3`;
   - no shallow-history note: the job's `fetchDepth: 0` checkout has the
     whole history.
 - **Thread 4565,** active, by "qgate-rehearsal Build Service
   (<organization>)", read through the REST API: "1 finding, none at or
-  above `error`." and one row whose Finding cell ends with `; hotspot:
-  8 commits in 6 months, complexity 3` (with `->` escaped as `-\>`).
+  above `error`." and one Warning row whose Finding cell ends with `;
+  hotspot: 8 commits in 6 months, complexity 3` (with `->` escaped as
+  `-\>`).
 - **A slip on the agent's side, without harm:** the first attempt at
   this rehearsal ran `cd` into a scratch clone that no longer existed,
   and the `;`-chained `git switch main; git reset --hard origin/main`
-  that followed ran in the qgate repository. `main` already equalled
-  `origin/main`, the tree was clean, and the PR 3 branch kept its
-  commit, so nothing changed. Commands against other repositories now
-  use `git -C <path>`.
+  that followed ran in the qgate repository. The checkout moved from the
+  PR 3 branch to `main`, and was switched back. The reset changed
+  nothing, since `main` already equalled `origin/main`; the tree was
+  clean, and the PR 3 branch kept its commit (checked in the reflog), so
+  nothing was lost. Commands against other repositories now use `git -C
+  <path>`.
 
 ## Risks / Trade-offs
 

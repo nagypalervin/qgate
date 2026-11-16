@@ -23,7 +23,7 @@
 //!   `[files] exclude` and `[tests] exclude` settings, and namespace
 //!   patterns for C# rules.
 //!
-//! Planned:
+//! Later, on the roadmap's "Later" row:
 //!
 //! - coverage drop, in `tests`
 //!

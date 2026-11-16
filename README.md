@@ -1084,10 +1084,11 @@ git diff base..head ─► parser (tree-sitter) ─► analyzers ─► findings
                                               ├ complexity      ├ JSON / SARIF
                                               ├ duplication     ├ PR comment
                                               └ tests           └ MCP server
+                       git log ─► hotspot context on the findings
 ```
 
-Coverage in the `tests` analyzer and SARIF output (Later) are not
-built yet; the rest works today.
+A coverage check in the `tests` analyzer and SARIF output are on the
+roadmap's "Later" row; the rest works today.
 
 Design principles:
 
@@ -1110,7 +1111,7 @@ Design principles:
 | **Languages** | C# next to TypeScript: complexity and duplication (0.4.0), architecture rules for `using` directives (0.6.0) | done |
 | **M5** | Change risk from git history: code changed without its tests (0.7.0), hotspot context on findings in code that is both complex and changed often (0.8.0) | done |
 | **M6** | Baseline and trends over time, optional AI summary | planned |
-| **Later** | A git pre-commit hook, which needs a check of the staged changes (`--staged`); SARIF output, once a consumer fits a tool that reports only what got worse | not planned yet |
+| **Later** | A git pre-commit hook, which needs a check of the staged changes (`--staged`); SARIF output, once a consumer fits a tool that reports only what got worse; a coverage drop in the `tests` analyzer, which needs coverage reports qgate does not read today | not planned yet |
 
 The hotspot analysis in M5 builds on published work on behavioral code
 analysis, notably Adam Tornhill's *Your Code as a Crime Scene*.
