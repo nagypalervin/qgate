@@ -25,7 +25,7 @@
 //!
 //! Planned:
 //!
-//! - coverage drop, in `tests` (M5)
+//! - coverage drop, in `tests`
 //!
 //! ```
 //! use std::path::PathBuf;

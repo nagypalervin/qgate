@@ -433,6 +433,48 @@ repositories. Fixed:
 - `day()` is arithmetic, merges share a `merge_at` helper, and
   `parse_log` has tests on synthetic input (copies, merges, errors).
 
+## Release 0.8.0 (task 3.1)
+
+- PR #32 merged as 1ab25be. Ervin confirmed the merge, the CI run of
+  `main` (43857772041) passed, and then the agent pushed the annotated
+  tag `v0.8.0` ("qgate 0.8.0") after `check-version.sh` and
+  `check-action-version.sh` accepted it.
+- Release run 43858735458: all nine jobs green.
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six. The Linux arm64 archive's binary (11,342,912
+  bytes) printed `qgate 0.8.0`, and its `qgate-pr-comment.ps1` is byte
+  for byte the one on `main`. In a throwaway repository where
+  `src/cart.ts` changed in six dated commits, an uncommitted edit of
+  `total` gave `warning src/cart.ts:2  total: cyclomatic complexity 3
+  -> 4 (+1); hotspot: 6 commits in 6 months, complexity 4
+  [complexity/cyclomatic-increase]`, exit code 0.
+- Archive sizes in bytes against 0.7.0:
+
+  | Archive | 0.7.0 | 0.8.0 |
+  |---|---|---|
+  | `x86_64-unknown-linux-musl.tar.gz` | 2,182,364 | 2,211,193 |
+  | `aarch64-unknown-linux-musl.tar.gz` | 1,982,046 | 2,006,768 |
+  | `aarch64-apple-darwin.tar.gz` | 1,981,135 | 2,005,504 |
+  | `x86_64-apple-darwin.tar.gz` | 2,013,757 | 2,042,543 |
+  | `x86_64-pc-windows-msvc.zip` | 1,969,096 | 1,995,280 |
+  | `aarch64-pc-windows-msvc.zip` | 1,861,251 | 1,886,174 |
+
+- The agent put the drafted release notes above the generated list in
+  the draft (Ervin asked why he should), and Ervin published it on
+  2026-11-16 (11:43 UTC). `releases/latest` is `v0.8.0`.
+
+## README at 0.8.0 (task 4.1)
+
+Every install block, both `uses:` lines and the pinned commit
+(`1ab25beb08eeb8d78c903d1aa627811792cbd815`, `v0.8.0^{commit}`) name
+0.8.0. `grep` finds one `0.7.0`, on purpose: the M5 row dates the tests
+analyzer. The M5 row is done, with both halves dated. "How it works" no
+longer ties the unbuilt coverage check to M5, and neither do the crate
+docs of `qgate-analyzers`. The Linux install block, run as written
+against the published release (with the arm64 target and a scratch
+directory instead of `~/.local/bin`), passed its checksum and installed
+`qgate 0.8.0`.
+
 ## Risks / Trade-offs
 
 - **[`git log --find-renames` is slow on large windows]** It is O(changed
