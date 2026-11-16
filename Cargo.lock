@@ -173,7 +173,6 @@ version = "0.9.0"
 name = "qgate-lang"
 version = "0.9.0"
 dependencies = [
- "qgate-core",
  "tree-sitter",
  "tree-sitter-c-sharp",
  "tree-sitter-rust",
