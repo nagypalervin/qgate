@@ -2,7 +2,8 @@
 
 **Detects where your codebase starts to break under fast, AI-assisted development.**
 
-> Status: early. `qgate check` compares TypeScript and [C#](#c) code
+> Status: early. `qgate check` compares TypeScript, [C#](#c) and
+> [Rust](#rust) code
 > between two git revisions (or two files) for cyclomatic complexity,
 > newly duplicated code, [code changed without its
 > tests](#tests-changed-with-the-code), with [hotspot](#hotspots) context
@@ -78,7 +79,7 @@ Or build it from a clone of this repository, with Rust 1.85 or later:
 cargo install --locked --path crates/qgate-cli
 ```
 
-Then, in a git repository with TypeScript or C# code, check what your
+Then, in a git repository with TypeScript, C# or Rust code, check what your
 branch changed compared with `main`:
 
 ```sh
@@ -87,7 +88,7 @@ qgate check --base main
 
 qgate compares the merge base of `main` and `HEAD` with `HEAD` (what a
 pull request shows) and analyzes every changed `.ts`, `.mts`, `.cts`,
-`.tsx` and `.cs` file, except generated C# files (see [C#](#c)).
+`.tsx`, `.cs` and `.rs` file, except generated C# files (see [C#](#c)).
 `--head <rev>` checks another revision instead of `HEAD`, and
 `--worktree` checks your uncommitted work (see
 [below](#checking-uncommitted-work)). Paths in the output are relative to
@@ -123,8 +124,8 @@ Exit codes:
   line on standard error says why the run failed, for example
   `qgate: failing: 1 finding at or above "error" (see --fail-on)`;
 - `2`: the check could not run, for example: an invalid invocation, an
-  unsupported or unparsable file in the two-file form, a C# file compared
-  with a TypeScript file, an unknown revision,
+  unsupported or unparsable file in the two-file form, two files of
+  different languages (TypeScript, C#, Rust), an unknown revision,
   revisions without a merge base, a directory outside a git repository, or
   no `git` on the `PATH`. This wins over `1`.
 
@@ -419,8 +420,8 @@ src/orders/total.ts:1 complexity/cyclomatic-increase
 ### Duplicated code
 
 In `--base` mode qgate compares the code a change adds with every
-TypeScript file of the checked revision, or for C# with every C# file,
-and reports a new copy:
+TypeScript file of the checked revision, for C# with every C# file and
+for Rust with every Rust file, and reports a new copy:
 
 ```
 warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 tokens)  [duplication/duplicate-block]
@@ -432,8 +433,9 @@ warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 
   - member names (`.getFullYear`), keywords and operators are compared;
   - comments and semicolons are ignored, and so are imports and type
     annotations in TypeScript, and `using` directives, namespace
-    declarations and preprocessor directives in C#. C# types are
-    compared like other names.
+    declarations and preprocessor directives in C#, and `use`
+    declarations, module declarations and attributes in Rust. C# and
+    Rust types are compared like other names.
 - **Copies across files only.** A block counts when it occurs in two or
   more files; repetition within one file (a data table, similar test
   cases one after another) does not.
@@ -494,6 +496,8 @@ warning src/app/orders/order.service.ts:8  OrderService.load and 1 more have no 
   - for C#, the project has a test project for classes.
 
   An existing file without a test is not reported.
+- **Rust files are not checked:** their unit tests live in the same
+  file, which these conventions do not cover yet.
 - **Feature test projects:** acceptance, integration, functional and
   end-to-end test projects (`Web.AcceptanceTests`, `Api.IntegrationTest`)
   hold tests for `tests/unchanged-test`. `tests/missing-test` neither
@@ -555,8 +559,9 @@ warning src/Cart.cs:12  Cart.Total(): cyclomatic complexity 4 -> 6 (+2); hotspot
     least 1, with fewer than 25% of the files more complex.
 - **Which files are ranked:** those qgate reads, without files
   `[files] exclude` names, generated C# and
-  [tests](#tests-changed-with-the-code). TypeScript and C# are ranked
-  apart.
+  [tests](#tests-changed-with-the-code). TypeScript, C# and Rust are
+  ranked apart. Rust has no test conventions, so every Rust file is
+  ranked, integration tests under `tests/` too.
 - **Commits:** merge commits do not count, the commits they bring in
   do. Renames are followed along a file's own history; a rename made on
   another branch than an edit is not, so a freshly renamed file may
@@ -764,6 +769,46 @@ its `using` directives against namespace patterns (see
   changed 314 C# files, this hit 2 files.
 - **Not read:** C# script (`.csx`), Razor (`.cshtml`, `.razor`), VB.NET
   and F#, and files that are not UTF-8 (`input/unparsable`).
+
+### Rust
+
+`.rs` files get the complexity check in every form, and the duplication
+check in `--base` and `--worktree` mode, and so in the Claude Code hook
+and the MCP server. They get no [tests](#tests-changed-with-the-code)
+check and no architecture rules yet.
+
+- **Units and names.** Every `fn` with a body is measured: free
+  functions, methods, default methods of traits and `fn` items nested in
+  another function. Closures count towards the function they are in. A
+  unit is named by its inline modules, its `impl` and its own name, not
+  by its file: `Cart.total`, `<Cart as fmt::Display>.fmt` for a trait
+  implementation, `Stack<T>.push`, `tests.adds_two`, `outer.inner`. So
+  the `fmt` of `Display` and of `Debug` keep apart when one moves.
+- **Decision points:** `if` (and `if let`), `while` (and `while let`),
+  `for`, `let ... else`, each `match` arm except `_`, a match guard, each
+  `|` between pattern alternatives, `&&` and `||`, also in a let chain.
+  A `const` or `static` inside a function counts towards it.
+- **Not decision points:** `?`, which returns early on an error like a
+  call that throws in TypeScript or C#; and `loop`, `break`, `continue`
+  and `return`, whose conditions count instead.
+- **A new enum variant adds one to every `match` over it.** Each
+  exhaustive `match` gets an arm, so adding a variant reports a `+1`
+  Warning for every function that matches on the enum. In the replay
+  of qgate's own history this was 12 of 57 complexity Warnings in source
+  code.
+- **Macros are read as written, not expanded.** The arguments of a
+  macro call (`assert!(a && b)`, `format!(...)`) and the body of a
+  `macro_rules!` are compared for copies, but their decision points do
+  not count, and a `macro_rules!` is not a unit.
+- **Copies:** names after `.` and `::` keep their text, so
+  `Vec::new()` and `Vec::default()` differ, as do `self.0` and
+  `self.1`; lifetimes are names like any other.
+- **Unparsable:** the grammar may lag behind the language. Today it
+  does not read the edition-2024 `safe` qualifier in an `unsafe extern`
+  block; such a file is reported as `input/unparsable`.
+- **Generated Rust is not detected.** Leave it out with
+  [`[files] exclude`](#leaving-files-out-files-exclude); build-script
+  output under `target/` is not committed anyway.
 
 ### In GitHub Actions
 
@@ -1108,7 +1153,7 @@ Design principles:
 | **M2** | Architecture rules (`qgate.toml`), duplication detection | done |
 | **M3** | Checking while coding: the working tree as head, JSON output, a Claude Code hook, an MCP server, so agents check their own changes before opening a pull request | done |
 | **M4** | CI integration: release binaries, GitHub Action, Azure DevOps Pipelines, pull request comments | done |
-| **Languages** | C# next to TypeScript: complexity and duplication (0.4.0), architecture rules for `using` directives (0.6.0) | done |
+| **Languages** | C# next to TypeScript: complexity and duplication (0.4.0), architecture rules for `using` directives (0.6.0); Rust: complexity and duplication (0.9.0), and qgate checks its own code | in progress |
 | **M5** | Change risk from git history: code changed without its tests (0.7.0), hotspot context on findings in code that is both complex and changed often (0.8.0) | done |
 | **M6** | Baseline and trends over time, optional AI summary | planned |
 | **Later** | A git pre-commit hook, which needs a check of the staged changes (`--staged`); SARIF output, once a consumer fits a tool that reports only what got worse; a coverage drop in the `tests` analyzer, which needs coverage reports qgate does not read today | not planned yet |
