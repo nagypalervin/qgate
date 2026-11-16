@@ -179,11 +179,12 @@ and counts the findings at or above it (see "JSON summary" in
 ### Requirement: Supported input files
 
 In the two-file mode the system SHALL accept files with the extensions
-`.ts`, `.mts`, `.cts`, `.tsx` and `.cs`, and SHALL reject any other file
-with an error naming the file and exit code 2. The two files SHALL be
-accepted even if their extensions differ, as long as both are in this
-set and both are C# or neither is; a C# file compared with a TypeScript
-file SHALL be rejected with an error naming both files and exit code 2.
+`.ts`, `.mts`, `.cts`, `.tsx`, `.cs` and `.rs`, and SHALL reject any
+other file with an error naming the file and exit code 2. The two files
+SHALL be accepted even if their extensions differ, as long as both are
+in this set and of one language family (TypeScript, C# or Rust); files
+of two families SHALL be rejected with an error naming both files and
+exit code 2.
 
 #### Scenario: TSX input
 
@@ -195,10 +196,22 @@ file SHALL be rejected with an error naming both files and exit code 2.
 - **WHEN** the user runs `qgate check Before.cs After.cs` on valid C# files that produce no Error finding
 - **THEN** the analysis runs and the exit code is 0
 
+#### Scenario: Rust input
+
+- **WHEN** the user runs `qgate check before.rs after.rs` on valid Rust files that produce no Error finding
+- **THEN** the analysis runs and the exit code is 0
+
 #### Scenario: C# compared with TypeScript
 
 - **WHEN** the user runs `qgate check before.ts after.cs`
 - **THEN** standard error contains an error that names `before.ts` and `after.cs`
+- **AND** standard output is empty
+- **AND** the exit code is 2
+
+#### Scenario: Rust compared with C#
+
+- **WHEN** the user runs `qgate check before.rs after.cs`
+- **THEN** standard error contains an error that names `before.rs` and `after.cs`
 - **AND** standard output is empty
 - **AND** the exit code is 2
 

@@ -107,7 +107,9 @@ The ranked files SHALL be the files of the head revision whose language
 is supported, that `[files] exclude` does not name, that are not
 generated C# and that are not tests by the conventions of
 `test-analysis`, each language family ranked on its own: TypeScript
-with TypeScript, C# with C#. A test's findings get no hotspot context.
+with TypeScript, C# with C#, Rust with Rust. Rust has no test
+conventions, so every Rust file is ranked. A test's findings get no
+hotspot context.
 
 #### Scenario: Excluded migrations
 
@@ -124,6 +126,11 @@ with TypeScript, C# with C#. A test's findings get no hotspot context.
 
 - **GIVEN** a repository with 40 C# files and 400 TypeScript files
 - **THEN** a C# file's rank is among the 40 C# files only
+
+#### Scenario: Rust files
+
+- **GIVEN** a repository with 30 Rust files, among them `crates/cli/tests/check.rs`, an integration test
+- **THEN** each of the 30 is ranked among the Rust files, `crates/cli/tests/check.rs` too
 
 ### Requirement: Hotspot files
 

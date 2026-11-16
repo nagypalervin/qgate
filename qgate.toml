@@ -1,0 +1,5 @@
+# qgate checks itself (add-rust-analysis). The test fixtures are copies
+# and complex code on purpose; in the replay of this repository's history
+# they gave 62 of 218 findings, all noise.
+[files]
+exclude = ["**/fixtures/**"]

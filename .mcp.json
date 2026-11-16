@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "qgate": { "command": "qgate", "args": ["mcp"] }
+  }
+}

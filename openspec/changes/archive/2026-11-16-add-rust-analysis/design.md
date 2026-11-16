@@ -222,6 +222,38 @@ configuration changes. Rollback: `[files] exclude = ["**/*.rs"]`.
   count as an arm (and a `|`) though they match like `_`; rustc warns
   about both, so idiomatic code does not have them.
 
+## Release 0.9.0
+
+- **Tagged** `v0.9.0` on `172c131` (the merge of PR 2) by Claude at
+  Ervin's go, annotated like `v0.8.0`, 2026-11-16 14:16 UTC; the
+  release workflow passed (9 jobs).
+- **Draft checked:** six archives and `SHA256SUMS`, `sha256sum --check`
+  OK for all six; the Linux arm64 binary is static, prints
+  `qgate 0.9.0` and reports `total: cyclomatic complexity 2 -> 3 (+1)`
+  for the `rs` pair of the CLI tests. Archive sizes: 2.0 MB (Windows
+  arm64) to 2.3 MB (Linux x64).
+- **Notes** written into the draft by Claude; **published** by Ervin at
+  14:30 UTC.
+- **The CI pin** (D9): there is no release checklist file, so the
+  reminder to bump `nagypalervin/qgate@v0.9.0` after a release is a
+  comment at the pin in `ci.yml`.
+- **The exclusion works:** with `qgate.toml` in the working tree, two
+  copies of a file under `src/` are reported, two under `fixtures/`
+  are not.
+
+## While coding (task 4.3)
+
+- **Binary:** the released Linux arm64 archive's `qgate` 0.9.0 in
+  `~/.local/bin` on Ervin's machine, 2026-11-16.
+- **Hook, simulated:** with a new function of complexity 23 in the
+  working tree, `qgate hook claude-code --base main` given Claude Code's
+  Stop input blocked once (`"decision":"block"` with the finding) and,
+  with `stop_hook_active`, only showed the finding.
+- **MCP server:** `initialize` and a `check` call over stdio answer as
+  specified (no findings on this branch). `claude mcp list` lists the
+  server as "Pending approval": Claude Code asks the user once before
+  it starts a repository's MCP server.
+
 ## Self-check results
 
 Replay of task 2.4 (D8), 2026-11-16, with the build of
@@ -248,7 +280,7 @@ findings are in test fixtures.
 A gate with `fail-on: error` would have failed 7 of the 52 pull
 requests: one for fixtures alone, one for test support code, five for
 source code. 35 findings carried hotspot context, 34 of them in source
-code.
+code, all 6 source Errors among them.
 
 **Hand check.** All 6 source Errors, all 20 source duplicates and all 57
 source complexity Warnings, classified as *useful* (a reviewer would want
