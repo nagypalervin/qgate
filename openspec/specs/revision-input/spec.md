@@ -31,9 +31,10 @@ the head.
 
 The system SHALL analyze only files that differ between the two compared
 revisions and whose head path has the extension `.ts`, `.mts`, `.cts`,
-`.tsx` or `.cs`, except generated C# files (see `csharp-analysis`).
-Other files SHALL be ignored without a message. All changed files in
-the repository count, regardless of the current directory.
+`.tsx`, `.cs` or `.rs`, except generated C# files (see
+`csharp-analysis`). Other files SHALL be ignored without a message. All
+changed files in the repository count, regardless of the current
+directory.
 
 #### Scenario: Unchanged and unsupported files
 
@@ -46,6 +47,12 @@ the repository count, regardless of the current directory.
 - **GIVEN** the head changes `src/Cart.cs`, `src/Cart.Designer.cs` and `src/Shop.csproj`
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** only `src/Cart.cs` is analyzed
+
+#### Scenario: Rust files
+
+- **GIVEN** the head changes `crates/shop/src/cart.rs`, `crates/shop/Cargo.toml` and `Cargo.lock`
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** only `crates/shop/src/cart.rs` is analyzed
 
 #### Scenario: No changes
 

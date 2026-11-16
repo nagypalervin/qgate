@@ -14,8 +14,9 @@ The system SHALL measure the cyclomatic complexity of a function unit as 1
 plus the number of decision points in its body, following ESLint's
 `complexity` rule except where this spec says otherwise. The requirements
 on units, names and decision points in this spec apply to TypeScript; for
-C#, the `csharp-analysis` capability defines them. Matching, the rules
-and the findings apply to both.
+C#, the `csharp-analysis` capability defines them, and for Rust the
+`rust-analysis` capability. Matching, the rules and the findings apply
+to all three.
 
 #### Scenario: Straight-line function
 
@@ -32,6 +33,12 @@ and the findings apply to both.
 - **GIVEN** the before version of `src/Cart.cs` has `Cart.Total(int)` with complexity 3, and the after version adds two `if` statements to it
 - **WHEN** the two versions are compared
 - **THEN** a Warning `complexity/cyclomatic-increase` finding reports `Cart.Total(int): cyclomatic complexity 3 -> 5 (+2)`
+
+#### Scenario: A Rust method that got more complex
+
+- **GIVEN** the before version of `src/cart.rs` has `Cart.total` with complexity 3, and the after version adds a `match` with five arms and a final `_` arm to it
+- **WHEN** the two versions are compared
+- **THEN** an Error `complexity/cyclomatic-increase` finding reports `Cart.total: cyclomatic complexity 3 -> 8 (+5)`
 
 ### Requirement: Decision points
 
