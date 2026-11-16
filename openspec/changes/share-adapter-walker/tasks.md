@@ -19,7 +19,7 @@ messages and the PR body are written to files first.
 ## 3. Proof and review
 
 - [x] 3.1 Replay with the branch's release binary; the reports equal the baseline byte for byte (D5, check 2). Check 3 on the branch: none of the walker copies, no new copy. Both recorded in "Verification" of `design.md`.
-- [ ] 3.2 The journal entry for the change, with the numbers of 1.1 and 3.1.
+- [x] 3.2 The journal entry for the change, with the numbers of 1.1 and 3.1.
 
 ## Workflow follow-up
 
