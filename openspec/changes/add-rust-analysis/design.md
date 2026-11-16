@@ -80,6 +80,12 @@ Counting it would put most I/O functions of this repository above 10.
 `loop`, `break`, `continue` and `return` are not counted: the conditions
 that lead to them are.
 
+A `const` or `static` inside a function is the function's code: its
+decision points count and its text is part of the fingerprint, as for a
+C# local constant. Only those outside functions are not measured (Ervin,
+2026-11-16, after the review of PR 1 found the first version left local
+ones out of both).
+
 ### D4. Macros are token trees
 
 tree-sitter does not parse a macro call's arguments or a `macro_rules!`
@@ -96,7 +102,11 @@ As in C#: identifiers and lifetimes become `$id`, literals `$lit`,
 keywords, primitive types and punctuation keep their text. A name after
 `.` (`field_identifier`) and a path segment after `::` keep their text:
 `Vec::new()` and `Vec::default()` must differ, as must `.year` and
-`.month`; the first segment of a path is a name like any other. Types
+`.month`; the first segment of a path is a name like any other. A tuple
+field such as `.0` is a field name and keeps its text too, so
+`self.0.len()` and `self.1.len()` differ (Ervin, 2026-11-16, after the
+review of PR 1: newtypes and tuple structs are common in Rust). A loop
+label is a name like a lifetime: one `$id`. Types
 are code, as in C#: `Result<u32, Error>` is part of what a copy copies.
 No tokens for `use`, `extern crate`, `mod x;`, the head of an inline
 `mod x {`, attributes, comments and semicolons: they repeat across files
@@ -204,6 +214,13 @@ configuration changes. Rollback: `[files] exclude = ["**/*.rs"]`.
 - **Grammar detail found in task 1.4:** `macro_rules!` is one token,
   not `macro_rules` and `!`; it changes nothing for copies, since every
   definition starts the same way.
+- **Grammar lag found in the review of PR 1:** `tree-sitter-rust` 0.24
+  does not know the edition-2024 `safe` qualifier in an `unsafe extern`
+  block (`unsafe extern "C" { safe fn sqrt(x: f64) -> f64; }`); such a
+  file is `input/unparsable`. The README names it (task 2.5).
+- **Accepted in the review of PR 1:** the patterns `(_)` and `_ | 1`
+  count as an arm (and a `|`) though they match like `_`; rustc warns
+  about both, so idiomatic code does not have them.
 
 ## Self-check results
 

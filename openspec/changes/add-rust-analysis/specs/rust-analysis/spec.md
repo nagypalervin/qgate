@@ -47,7 +47,9 @@ in an `extern` block) SHALL NOT be a unit.
 
 A closure SHALL NOT be a unit of its own; its decision points SHALL
 count towards the nearest enclosing unit. Code outside units, such as
-the initializers of `const` and `static` items, SHALL NOT be measured.
+the initializers of `const` and `static` items outside functions, SHALL
+NOT be measured; a `const` or `static` inside a function SHALL count
+towards it.
 
 #### Scenario: An iterator chain in a function
 
@@ -60,6 +62,12 @@ the initializers of `const` and `static` items, SHALL NOT be measured.
 - **GIVEN** a file whose only code is `static LIMIT: LazyLock<u32> = LazyLock::new(|| if cfg!(test) { 1 } else { 9 });`
 - **WHEN** the file is analyzed
 - **THEN** no function unit is found
+
+#### Scenario: A constant inside a function
+
+- **GIVEN** `fn limit() -> u32 { const L: u32 = if cfg!(test) { 1 } else { 9 }; L }`
+- **WHEN** the file is analyzed
+- **THEN** the only unit is `limit` with complexity 2, and changing `9` to `8` changes the unit
 
 ### Requirement: Rust qualified names
 
@@ -144,8 +152,8 @@ SHALL still be compared, normalized like other code.
 
 In Rust, these rules SHALL replace the TypeScript ones of
 `duplication-analysis`. Identifiers and lifetimes SHALL become one
-placeholder, except a field or method name after `.` and a path segment
-after `::`, which keep their text. Each string, raw string, byte string,
+placeholder, except a field or method name after `.` (a tuple field
+such as `.0` too) and a path segment after `::`, which keep their text. Each string, raw string, byte string,
 character and number literal SHALL become another. Keywords, including
 primitive types, `self`, `Self`, `true` and `false`, operators and other
 punctuation SHALL keep their text.
@@ -158,6 +166,11 @@ punctuation SHALL keep their text.
 #### Scenario: Different members and paths
 
 - **GIVEN** two functions that differ only in reading `.year` and `.month`, or in calling `Vec::new()` and `Vec::default()`
+- **THEN** their normalized tokens differ
+
+#### Scenario: Tuple fields
+
+- **GIVEN** two functions that differ only in reading `self.0` and `self.1`
 - **THEN** their normalized tokens differ
 
 ### Requirement: Rust code without tokens

@@ -45,4 +45,9 @@ impl Cart {
     }
 }
 
+fn local_const() -> u32 {
+    const L: u32 = 5;
+    L
+}
+
 static TABLE: [u32; 2] = [1, 2];

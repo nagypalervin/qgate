@@ -31,10 +31,6 @@ pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
     })
 }
 
-/// Items whose code is not measured, even inside a function: the
-/// initializers of `const` and `static` items.
-const UNMEASURED_KINDS: &[&str] = &["const_item", "static_item"];
-
 /// Literals that become one `$lit` each, without entering them. `true`
 /// and `false` are keywords and keep their text.
 const LITERAL_KINDS: &[&str] = &[
@@ -163,7 +159,6 @@ impl<'s> Walker<'s> {
                     self.open_unit(&self.text(name), line_of(name), &mut frame);
                 }
             }
-            kind if UNMEASURED_KINDS.contains(&kind) => self.push_scope(None, &mut frame),
             _ => {
                 let points = decision_points(node, parent);
                 if let (Some(Some(index)), 1..) = (self.scopes.last(), points) {
@@ -239,9 +234,17 @@ impl<'s> Walker<'s> {
         let kind = node.kind();
         if produces_no_tokens(node, parent) {
             self.mute(frame);
-        } else if LITERAL_KINDS.contains(&kind) || kind == "lifetime" {
-            // A lifetime is a name: `'a` and `'b` are the same code.
-            let text = if kind == "lifetime" { "$id" } else { "$lit" };
+        } else if kind == "integer_literal" && follows_path_or_dot(node) {
+            // A tuple field, `.0`, is a field name (review of PR 1).
+            self.push_token(self.text(node), node);
+        } else if LITERAL_KINDS.contains(&kind) || matches!(kind, "lifetime" | "label") {
+            // A lifetime or a loop label is a name: `'a` and `'b` are the
+            // same code.
+            let text = if LITERAL_KINDS.contains(&kind) {
+                "$lit"
+            } else {
+                "$id"
+            };
             self.push_token(text.to_owned(), node);
             self.mute(frame);
         } else if node.child_count() == 0 && kind != ";" {
@@ -308,9 +311,13 @@ fn is_name(kind: &str) -> bool {
 /// Whether the node comes right after `.` or `::`: a field or method name,
 /// or a path segment, which keeps its text (design D5). Inside a macro
 /// call, where the grammar builds no paths, the previous token decides.
+/// Comments in between do not count.
 fn follows_path_or_dot(node: Node<'_>) -> bool {
-    node.prev_sibling()
-        .is_some_and(|p| matches!(p.kind(), "." | "::"))
+    let mut previous = node.prev_sibling();
+    while let Some(p) = previous.filter(Node::is_extra) {
+        previous = p.prev_sibling();
+    }
+    previous.is_some_and(|p| matches!(p.kind(), "." | "::"))
 }
 
 /// How much the node adds to the enclosing unit's complexity (design D3).
@@ -458,8 +465,8 @@ mod tests {
                 // scenario "A condition inside an assertion": macro
                 // arguments are not code
                 ("in_macros", 1),
-                // a `const` initializer is not measured
-                ("const_inside", 1),
+                // a `const` inside a function is its code (review of PR 1)
+                ("const_inside", 2),
             ])
         );
     }
@@ -590,6 +597,29 @@ mod tests {
         assert_eq!(model.tokens[0].text, "fn");
     }
 
+    // Review of PR 1: a comment between `.` and a member is not the
+    // previous token; a loop label is one name, like a lifetime.
+    #[test]
+    fn comments_after_a_dot_and_loop_labels() {
+        assert_eq!(
+            tokens("fn f() { x. /* c */ year; v!(x. /* c */ year) }"),
+            texts("fn $id ( ) { $id . year $id ! ( $id . year ) }")
+        );
+        // A tuple field is a field name (review of PR 1).
+        assert_ne!(
+            tokens("fn f() { t.0.len() }"),
+            tokens("fn f() { t.1.len() }")
+        );
+        assert_eq!(
+            tokens("fn f() { self.0.len() }"),
+            texts("fn $id ( ) { self . 0 . len ( ) }")
+        );
+        assert_eq!(
+            tokens("fn f() { 'outer: loop { break 'outer; } }"),
+            texts("fn $id ( ) { $id : loop { break $id } }")
+        );
+    }
+
     #[test]
     fn tokens_carry_their_line() {
         let model = parse("fn f()\n{\n    1\n}\n").expect("parses");
@@ -631,6 +661,7 @@ mod tests {
                 "outer.inner",
                 "closure",
                 "in_macro",
+                "local_const",
             ]
         );
     }
