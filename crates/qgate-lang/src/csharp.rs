@@ -100,17 +100,6 @@ struct Walker<'s> {
     usings: Vec<Using>,
 }
 
-impl<'s> Walker<'s> {
-    fn new(source: &'s [u8]) -> Self {
-        Self {
-            source,
-            units: Units::new(),
-            tokens: Tokens::default(),
-            usings: Vec::new(),
-        }
-    }
-}
-
 impl From<Walker<'_>> for FileModel {
     fn from(walker: Walker<'_>) -> Self {
         Self {
@@ -189,7 +178,16 @@ impl Visit for Walker<'_> {
     }
 }
 
-impl Walker<'_> {
+impl<'s> Walker<'s> {
+    fn new(source: &'s [u8]) -> Self {
+        Self {
+            source,
+            units: Units::new(),
+            tokens: Tokens::default(),
+            usings: Vec::new(),
+        }
+    }
+
     /// Start the unit `name` inside the current segments.
     fn open_unit(&mut self, name: &str, line: u32) {
         let unit = self.units.open(name, line);

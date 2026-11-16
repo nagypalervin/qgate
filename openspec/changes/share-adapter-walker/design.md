@@ -191,3 +191,15 @@ configuration.
   become the same after task 2.4 (a new copy); `run` now parses, walks
   and builds the model for all three. `Tokens::mute` records in the
   frame that it muted, so the adapters' own `mute` methods went too.
+- **qgate on its own refactor** (`qgate check --base main`, 0.9.0): a
+  first version split each walker's inherent `impl<'s> Walker<'s>` into
+  `impl<'s> Walker<'s>` for `new` and `impl Walker<'_>` for the rest, and
+  qgate reported `Walker<'_>.record_token` as a new function in all three
+  adapters: a Rust name holds the `impl`'s type as written, lifetime
+  included (D2 of `add-rust-analysis`), so renaming a lifetime renames
+  the units. One inherent `impl<'s> Walker<'s>` again, as before, keeps
+  the names. What remains are 5 Warnings: `<Walker<'_> as Visit>.enter`
+  as a new function in C# and TypeScript (the method really moved into
+  the trait; in Rust it stays below 11) and the three idioms above as
+  new copies. The lifetime in names is a follow-up for the Rust naming
+  rule.

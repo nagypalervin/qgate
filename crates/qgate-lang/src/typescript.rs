@@ -158,19 +158,6 @@ struct Walker<'s> {
     not_code: bool,
 }
 
-impl<'s> Walker<'s> {
-    fn new(source: &'s [u8]) -> Self {
-        Self {
-            source,
-            units: Units::new(),
-            bound: Vec::new(),
-            imports: Vec::new(),
-            tokens: Tokens::default(),
-            not_code: false,
-        }
-    }
-}
-
 impl From<Walker<'_>> for FileModel {
     fn from(walker: Walker<'_>) -> Self {
         Self {
@@ -267,7 +254,18 @@ impl Visit for Walker<'_> {
     }
 }
 
-impl Walker<'_> {
+impl<'s> Walker<'s> {
+    fn new(source: &'s [u8]) -> Self {
+        Self {
+            source,
+            units: Units::new(),
+            bound: Vec::new(),
+            imports: Vec::new(),
+            tokens: Tokens::default(),
+            not_code: false,
+        }
+    }
+
     /// Whether a unit collects the decision points at the current position.
     fn collecting(&self) -> bool {
         matches!(self.units.scope(), Some(Scope::Unit(_)))

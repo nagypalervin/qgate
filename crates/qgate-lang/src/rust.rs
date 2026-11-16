@@ -62,17 +62,6 @@ struct Walker<'s> {
     tokens: Tokens,
 }
 
-impl<'s> Walker<'s> {
-    fn new(source: &'s [u8]) -> Self {
-        Self {
-            source,
-            units: Units::new(),
-            in_comment: false,
-            tokens: Tokens::default(),
-        }
-    }
-}
-
 impl From<Walker<'_>> for FileModel {
     fn from(walker: Walker<'_>) -> Self {
         Self {
@@ -139,7 +128,16 @@ impl Visit for Walker<'_> {
     }
 }
 
-impl Walker<'_> {
+impl<'s> Walker<'s> {
+    fn new(source: &'s [u8]) -> Self {
+        Self {
+            source,
+            units: Units::new(),
+            in_comment: false,
+            tokens: Tokens::default(),
+        }
+    }
+
     /// Add a leaf to the fingerprint of the unit it belongs to (design D1
     /// of `add-test-gap-analysis`): all code but comments, doc comments
     /// included, and semicolons. A doc comment is a subtree of its own.
