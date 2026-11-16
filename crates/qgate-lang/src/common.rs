@@ -305,6 +305,10 @@ impl Tokens {
         self.muted = false;
     }
 
+    pub(crate) fn in_text_run(&self) -> bool {
+        self.in_text_run
+    }
+
     /// Record `text` at the line of `node`; `text_part` says whether it is
     /// a part of a literal's text.
     pub(crate) fn push(&mut self, text: String, node: Node<'_>, text_part: bool) {
@@ -318,4 +322,17 @@ impl Tokens {
     pub(crate) fn finish(self) -> Vec<Token> {
         self.list
     }
+}
+
+/// Whether `node` has a child (named or not) of one of `kinds`.
+pub(crate) fn has_child(node: Node<'_>, kinds: &[&str]) -> bool {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .any(|c| kinds.contains(&c.kind()))
+}
+
+/// Whether the node's `operator` field is one of `operators`.
+pub(crate) fn operator_in(node: Node<'_>, operators: &[&str]) -> bool {
+    node.child_by_field_name("operator")
+        .is_some_and(|op| operators.contains(&op.kind()))
 }

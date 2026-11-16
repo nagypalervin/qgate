@@ -8,27 +8,25 @@
 //! finding copies (D4) and lists the `using` directives for architecture
 //! rules (design D2 of `add-csharp-architecture`).
 
-use std::collections::HashSet;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::Hash;
 
 use tree_sitter::Node;
 
-use crate::common::{compact, line_of, parse_tree, unique_segment};
-use crate::{FileModel, Function, ParseError, Token, Using};
+use crate::common::{
+    Mark, Tokens, Units, Visit, compact, has_child, line_of, operator_in, parse_tree, walk,
+};
+use crate::{FileModel, ParseError, Using};
 
 /// Parse C# source into a [`FileModel`].
 pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
     let tree = parse_tree(&tree_sitter_c_sharp::LANGUAGE.into(), source)?;
     let mut walker = Walker::new(source.as_bytes());
-    walker.walk(tree.root_node());
-    for (function, hasher) in walker.functions.iter_mut().zip(&walker.hashers) {
-        function.fingerprint = hasher.finish();
-    }
+    walk(tree.root_node(), &mut walker);
     Ok(FileModel {
-        functions: walker.functions,
+        functions: walker.units.finish(),
         imports: Vec::new(),
         usings: walker.usings,
-        tokens: walker.tokens,
+        tokens: walker.tokens.finish(),
     })
 }
 
@@ -90,91 +88,46 @@ const LITERAL_KINDS: &[&str] = &[
 /// The text parts of an interpolated string: a run of them is one `$lit`.
 const TEXT_PART_KINDS: &[&str] = &["string_content", "escape_sequence", "raw_string_content"];
 
-/// What entering a node pushed, so leaving it can pop the same. An
-/// expression-bodied property pushes two segments: its name and `get`.
-#[derive(Default)]
+/// What entering a node opened, so leaving it can close the same. An
+/// expression-bodied property opens two segments: its name and `get`.
 struct Frame {
-    segments: usize,
-    scopes: usize,
+    units: Mark,
     muted: bool,
 }
 
 struct Walker<'s> {
     source: &'s [u8],
-    /// Names of the enclosing types, members and units.
-    segments: Vec<String>,
-    /// Qualified names already given to a unit.
-    taken: HashSet<String>,
-    /// Innermost last: the unit that collects decision points, or `None`
-    /// in a type body, where code is not measured. Empty at top level.
-    scopes: Vec<Option<usize>>,
-    /// Units in source order.
-    functions: Vec<Function>,
-    /// The fingerprint of each unit in `functions` so far.
-    hashers: Vec<DefaultHasher>,
-    /// Normalized tokens in source order.
-    tokens: Vec<Token>,
+    /// The units, named by the enclosing types, members and units; a scope
+    /// is the unit that collects decision points, or `None` in a type
+    /// body, where code is not measured.
+    units: Units<Option<usize>>,
+    tokens: Tokens,
     /// `using` directives in source order.
     usings: Vec<Using>,
-    /// Whether the walk is inside a subtree that produces no tokens; the
-    /// frame of the node that opened it closes it.
-    muted: bool,
-    /// Whether the last token was a text part of an interpolated string,
-    /// so the next one continues the same literal.
-    in_text_run: bool,
 }
 
 impl<'s> Walker<'s> {
     fn new(source: &'s [u8]) -> Self {
         Self {
             source,
-            segments: Vec::new(),
-            taken: HashSet::new(),
-            scopes: Vec::new(),
-            functions: Vec::new(),
-            hashers: Vec::new(),
-            tokens: Vec::new(),
+            units: Units::new(),
+            tokens: Tokens::default(),
             usings: Vec::new(),
-            muted: false,
-            in_text_run: false,
         }
     }
+}
 
-    /// Depth-first walk without recursion, so deeply nested code cannot
-    /// overflow the stack.
-    fn walk(&mut self, root: Node<'_>) {
-        let mut cursor = root.walk();
-        let mut frames = Vec::new();
-        // The ancestors of the current node, so no node has to ask
-        // tree-sitter for its parent.
-        let mut ancestors: Vec<Node<'_>> = Vec::new();
-        loop {
-            let node = cursor.node();
-            frames.push(self.enter(node, &ancestors));
-            if cursor.goto_first_child() {
-                ancestors.push(node);
-                continue;
-            }
-            loop {
-                if let Some(frame) = frames.pop() {
-                    self.leave(&frame);
-                }
-                if cursor.goto_next_sibling() {
-                    break;
-                }
-                if !cursor.goto_parent() {
-                    return;
-                }
-                ancestors.pop();
-            }
-        }
-    }
+impl Visit for Walker<'_> {
+    type Frame = Frame;
 
     /// `ancestors` are the node's ancestors, its parent last.
     fn enter(&mut self, node: Node<'_>, ancestors: &[Node<'_>]) -> Frame {
         let kind = node.kind();
         let parent = ancestors.last().copied();
-        let mut frame = Frame::default();
+        let mut frame = Frame {
+            units: self.units.mark(),
+            muted: false,
+        };
         self.record_token(node, ancestors, &mut frame);
         self.record_code(node, ancestors);
         if TYPE_KINDS.contains(&kind) {
@@ -188,25 +141,22 @@ impl<'s> Walker<'s> {
                     .find(|c| c.kind() == "type_parameter_list")
                     .map(|t| compact(&self.text(t)))
                     .unwrap_or_default();
-                self.segments
-                    .push(format!("{}{type_parameters}", self.text(name)));
-                frame.segments += 1;
+                self.units
+                    .push_segment(format!("{}{type_parameters}", self.text(name)));
             }
-            self.scopes.push(None);
-            frame.scopes += 1;
+            self.units.push_scope(None);
         } else if ACCESSOR_OWNER_KINDS.contains(&kind) {
-            self.segments.push(self.member_name(node));
-            frame.segments += 1;
+            self.units.push_segment(self.member_name(node));
             // `int Count => n;` is a getter of its own.
             if node
                 .child_by_field_name("value")
                 .is_some_and(|v| v.kind() == "arrow_expression_clause")
             {
-                self.open_unit("get", Self::member_line(node), &mut frame);
+                self.open_unit("get", Self::member_line(node));
             }
         } else if UNIT_KINDS.contains(&kind) && node.child_by_field_name("body").is_some() {
             let name = self.unit_name(node);
-            self.open_unit(&name, Self::member_line(node), &mut frame);
+            self.open_unit(&name, Self::member_line(node));
         } else if kind == "using_directive" {
             if let Some(name) = self.using_target(node) {
                 self.usings.push(Using {
@@ -216,34 +166,29 @@ impl<'s> Walker<'s> {
             }
         } else if kind == "accessor_declaration" && node.child_by_field_name("body").is_some() {
             if let Some(name) = node.child_by_field_name("name") {
-                self.open_unit(&self.text(name), line_of(name), &mut frame);
+                self.open_unit(&self.text(name), line_of(name));
             }
-        } else if !self.muted && is_decision_point(node, parent) {
+        } else if !self.tokens.muted() && is_decision_point(node, parent) {
             // Not in muted code: the condition of `#if DEBUG && TRACE` is
             // not code of the unit.
-            if let Some(Some(index)) = self.scopes.last() {
-                self.functions[*index].cyclomatic += 1;
-            }
+            self.units.count(1);
         }
         frame
     }
 
+    fn leave(&mut self, frame: Frame) {
+        self.units.restore(frame.units);
+        if frame.muted {
+            self.tokens.unmute();
+        }
+    }
+}
+
+impl Walker<'_> {
     /// Start the unit `name` inside the current segments.
-    fn open_unit(&mut self, name: &str, line: u32, frame: &mut Frame) {
-        let segment = unique_segment(&self.segments, &self.taken, name);
-        self.segments.push(segment);
-        let qualified = self.segments.join(".");
-        self.taken.insert(qualified.clone());
-        self.functions.push(Function {
-            name: qualified,
-            line,
-            cyclomatic: 1,
-            fingerprint: 0,
-        });
-        self.hashers.push(DefaultHasher::new());
-        self.scopes.push(Some(self.functions.len() - 1));
-        frame.segments += 1;
-        frame.scopes += 1;
+    fn open_unit(&mut self, name: &str, line: u32) {
+        let unit = self.units.open(name, line);
+        self.units.push_scope(Some(unit));
     }
 
     /// Add a leaf to the fingerprint of the unit it belongs to (design D1
@@ -251,7 +196,7 @@ impl<'s> Walker<'s> {
     /// `#region` lines, which only label code; types, attributes and the
     /// directives of conditional compilation count.
     fn record_code(&mut self, node: Node<'_>, ancestors: &[Node<'_>]) {
-        let Some(Some(unit)) = self.scopes.last() else {
+        let Some(unit) = self.units.unit() else {
             return;
         };
         let code = &self.source[node.byte_range()];
@@ -261,43 +206,31 @@ impl<'s> Walker<'s> {
             && !matches!(node.kind(), "comment" | ";")
             && !ancestors.iter().any(region)
         {
-            code.hash(&mut self.hashers[*unit]);
-        }
-    }
-
-    fn leave(&mut self, frame: &Frame) {
-        let segments = self.segments.len() - frame.segments;
-        self.segments.truncate(segments);
-        let scopes = self.scopes.len() - frame.scopes;
-        self.scopes.truncate(scopes);
-        if frame.muted {
-            self.muted = false;
+            code.hash(self.units.hasher(unit));
         }
     }
 
     /// Record the normalized token `node` is, if any (design D4), and
     /// mute the subtrees that produce none.
     fn record_token(&mut self, node: Node<'_>, ancestors: &[Node<'_>], frame: &mut Frame) {
-        if self.muted {
+        if self.tokens.muted() {
             return;
         }
         let kind = node.kind();
         let parent = ancestors.last().copied();
         if produces_no_tokens(node, parent) {
-            self.muted = true;
-            frame.muted = true;
+            self.mute(frame);
         } else if node.is_named() && LITERAL_KINDS.contains(&kind) {
-            self.push_token("$lit".to_owned(), node, false);
+            self.tokens.push("$lit".to_owned(), node, false);
             if node.child_count() > 0 {
-                self.muted = true;
-                frame.muted = true;
+                self.mute(frame);
             }
         } else if node.is_named()
             && TEXT_PART_KINDS.contains(&kind)
             && parent.is_some_and(|p| p.kind() == "interpolated_string_expression")
         {
-            if !self.in_text_run {
-                self.push_token("$lit".to_owned(), node, true);
+            if !self.tokens.in_text_run() {
+                self.tokens.push("$lit".to_owned(), node, true);
             }
         } else if kind == "identifier" {
             // An identifier is one token even when the grammar puts a
@@ -307,25 +240,21 @@ impl<'s> Walker<'s> {
             } else {
                 "$id".to_owned()
             };
-            self.push_token(text, node, false);
+            self.tokens.push(text, node, false);
             if node.child_count() > 0 {
-                self.muted = true;
-                frame.muted = true;
+                self.mute(frame);
             }
         } else if node.child_count() == 0 && kind != ";" && !kind.starts_with('#') {
             let text = self.text(node);
             if !text.is_empty() {
-                self.push_token(text, node, false);
+                self.tokens.push(text, node, false);
             }
         }
     }
 
-    fn push_token(&mut self, text: String, node: Node<'_>, text_part: bool) {
-        self.tokens.push(Token {
-            text,
-            line: line_of(node),
-        });
-        self.in_text_run = text_part;
+    fn mute(&mut self, frame: &mut Frame) {
+        self.tokens.mute();
+        frame.muted = true;
     }
 
     /// A unit's own name: its signature (design D2), after the interface
@@ -553,13 +482,6 @@ fn is_field(parent: Node<'_>, field: &str, node: Node<'_>) -> bool {
         .is_some_and(|f| f.id() == node.id())
 }
 
-/// Whether `node` has a child (named or not) of one of `kinds`.
-fn has_child(node: Node<'_>, kinds: &[&str]) -> bool {
-    let mut cursor = node.walk();
-    node.children(&mut cursor)
-        .any(|c| kinds.contains(&c.kind()))
-}
-
 /// Whether the node adds one to the enclosing unit's complexity.
 fn is_decision_point(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
     let kind = node.kind();
@@ -576,12 +498,6 @@ fn is_decision_point(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
         "switch_expression_arm" => node.named_child(0).is_some_and(|p| p.kind() != "discard"),
         _ => false,
     }
-}
-
-/// Whether the node's `operator` field is one of `operators`.
-fn operator_in(node: Node<'_>, operators: &[&str]) -> bool {
-    node.child_by_field_name("operator")
-        .is_some_and(|op| operators.contains(&op.kind()))
 }
 
 #[cfg(test)]

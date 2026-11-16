@@ -13,7 +13,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use tree_sitter::Node;
 
-use crate::common::{line_of, named_children, parse_tree, unique_segment};
+use crate::common::{has_child, line_of, named_children, operator_in, parse_tree, unique_segment};
 use crate::{FileModel, Function, Import, Language, ParseError, Token};
 
 /// Parse TypeScript or TSX source into a [`FileModel`].
@@ -734,13 +734,13 @@ fn produces_no_tokens(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
     match kind {
         "export_statement" => {
             node.child_by_field_name("source").is_some()
-                || has_child_kind(node, &["type", "namespace"])
+                || has_child(node, &["type", "namespace"])
                 || node.child_by_field_name("declaration").is_some_and(|d| {
                     TYPE_KINDS.contains(&d.kind()) || TYPE_ONLY_KINDS.contains(&d.kind())
                 })
         }
-        "export_specifier" => has_child_kind(node, &["type"]),
-        "public_field_definition" => has_child_kind(node, &["declare", "abstract"]),
+        "export_specifier" => has_child(node, &["type"]),
+        "public_field_definition" => has_child(node, &["declare", "abstract"]),
         "required_parameter" => node
             .child_by_field_name("pattern")
             .is_some_and(|p| p.kind() == "this"),
@@ -755,13 +755,6 @@ fn produces_no_tokens(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
             _ => false,
         }),
     }
-}
-
-/// Whether one of `node`'s direct children has one of `kinds`.
-fn has_child_kind(node: Node<'_>, kinds: &[&str]) -> bool {
-    let mut cursor = node.walk();
-    node.children(&mut cursor)
-        .any(|c| kinds.contains(&c.kind()))
 }
 
 /// Whether an identifier keeps its text because it is not a variable: a
@@ -844,12 +837,6 @@ fn is_decision_point(node: Node<'_>) -> bool {
         "?." => node.parent().is_some_and(|p| p.kind() == "call_expression"),
         _ => false,
     }
-}
-
-/// Whether the node's `operator` field is one of `operators`.
-fn operator_in(node: Node<'_>, operators: &[&str]) -> bool {
-    node.child_by_field_name("operator")
-        .is_some_and(|op| operators.contains(&op.kind()))
 }
 
 #[cfg(test)]
