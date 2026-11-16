@@ -66,17 +66,26 @@ replaces.
 the functions and their hashers:
 
 - `open(name, line) -> usize` makes the segment unique, pushes it,
-  records the function and its hasher, and returns its index;
-- `push_segment`, `push_scope` and their pops, which the adapter's frame
-  undoes;
-- `current_unit()` for decision points and fingerprints, through a small
-  trait on `S` that says which unit a scope collects for;
+  records the function and its hasher, and returns its index; `add`
+  records a unit named elsewhere, and `qualify` gives the name a segment
+  would have (TypeScript's bound calls, D3);
+- `push_segment` and `push_scope`;
+- `unit()` for decision points (`count`) and fingerprints (`hasher`),
+  through the trait `UnitScope`, which says which unit a scope collects
+  for;
 - `finish() -> Vec<Function>` writes the fingerprints.
 
-C# and Rust use `S = Option<usize>`, as today. The frames keep counts
-(`segments`, `scopes`), so leaving pops exactly what entering pushed.
-*Alternative:* a fixed scope type for all; TypeScript's class bodies and
-opaque scopes would leak into the other two.
+**Closing what a node opened** (decided during apply): a frame takes a
+`Mark` of the stack lengths when the node is entered, and leaving it
+truncates to that mark (`restore`). The old frames counted their pushes
+and popped as many. The two are the same because every push of a
+segment or scope happens in the node's own `enter`, and nothing in
+`enter` pops: by the time a node is left, its children have restored
+their marks. The tests of `common.rs` and the replay check it.
+
+C# and Rust use `S = Option<usize>`, as before. *Alternative:* a fixed
+scope type for all; TypeScript's class bodies and opaque scopes would
+leak into the other two.
 
 ### D3. TypeScript as far as it fits
 
@@ -102,9 +111,10 @@ unchanged; the replay (task 3.1) is the final word.
 
 `Tokens` holds the tokens, the muted state and the text run:
 
-- `push(text, line, text_part)` records a token and whether a text run
-  continues;
-- `mute()` and `unmute()`, with the frame recording who muted.
+- `push(text, node, text_part)` records a token at the node's line and
+  whether a text run continues;
+- `mute(&mut frame.muted)` mutes and notes in the frame that it did;
+  leaving that frame calls `unmute()`.
 
 Rust never starts a text run; it passes `false`, as its walker
 effectively does today.
@@ -186,7 +196,8 @@ configuration.
     and fields; sharing these would need a further abstraction only to
     move tokens below the threshold, which would make the code harder
     to read, not easier to change. This differs from D5's "none of
-    them"; it is put to Ervin in the pull request.
+    them"; it is put to Ervin in the pull request, and task 3.1 stays
+    open until he decides.
 - **Found while closing the gap:** the three `parse` functions had
   become the same after task 2.4 (a new copy); `run` now parses, walks
   and builds the model for all three. `Tokens::mute` records in the

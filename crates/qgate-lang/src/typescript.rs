@@ -97,7 +97,6 @@ const DECISION_KINDS: &[&str] = &[
     "object_assignment_pattern",
 ];
 
-/// What entering a node pushed, so leaving it can pop the same.
 /// What entering a node opened, so leaving it can close the same: the
 /// segments and scopes, and one flag per other stack or state.
 struct Frame {

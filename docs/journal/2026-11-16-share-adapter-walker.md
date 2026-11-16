@@ -6,6 +6,13 @@
   checked with the binary before and after, gave byte-identical reports
   (229 findings over TypeScript, C# and Rust code). Together with the
   unchanged unit tests, no reviewer had to trust the refactor.
+- **The reviewer went further than the replay.** It dumped the whole
+  model of 6263 TypeScript, C# and Rust files with the library from
+  `main` and from the branch: byte-identical. Mutating the shared code,
+  the suites caught 22 of 24 mutations; the two survivors cannot be
+  observed. Its findings were bookkeeping: a ticked task whose goal was
+  only partly met, a design that still described the old frames, and no
+  tests of the shared code's own.
 - **qgate measured its own clean-up.** Counting the copies among the
   adapters (an empty commit, then the sources, `qgate check --base
   HEAD~1`) gave 30 before: 18 in source code, 12 between test modules.
@@ -35,7 +42,8 @@
   them would need an abstraction whose only purpose is to move tokens
   below the threshold.
 
-**Effort:** a few hours; 1 PR, 9 commits, the replay run three times.
+**Effort:** a few hours; 1 PR, a dozen commits, the replay run three
+times, one review round.
 
 **Follow-ups for Ervin to order:**
 - Rust names without lifetime arguments (`Walker.record_token`), so a

@@ -220,6 +220,7 @@ pub(crate) struct Units<S> {
 }
 
 impl<S: UnitScope> Units<S> {
+    /// No units, segments or scopes yet.
     pub(crate) fn new() -> Self {
         Self {
             segments: Vec::new(),
@@ -244,10 +245,12 @@ impl<S: UnitScope> Units<S> {
         self.scopes.truncate(mark.scopes);
     }
 
+    /// Open a name segment; it names the units opened inside it.
     pub(crate) fn push_segment(&mut self, segment: String) {
         self.segments.push(segment);
     }
 
+    /// Open a scope; it decides what collects the code inside it.
     pub(crate) fn push_scope(&mut self, scope: S) {
         self.scopes.push(scope);
     }
@@ -330,6 +333,7 @@ pub(crate) struct Tokens {
 }
 
 impl Tokens {
+    /// Whether the walk is in a subtree that produces no tokens.
     pub(crate) fn muted(&self) -> bool {
         self.muted
     }
@@ -341,10 +345,13 @@ impl Tokens {
         *muted = true;
     }
 
+    /// Leave the subtree that muted the tokens.
     pub(crate) fn unmute(&mut self) {
         self.muted = false;
     }
 
+    /// Whether the last token was a text part, so a next one continues
+    /// the same literal.
     pub(crate) fn in_text_run(&self) -> bool {
         self.in_text_run
     }
@@ -359,6 +366,7 @@ impl Tokens {
         self.in_text_run = text_part;
     }
 
+    /// The tokens in source order.
     pub(crate) fn finish(self) -> Vec<Token> {
         self.list
     }
@@ -375,4 +383,126 @@ pub(crate) fn has_child(node: Node<'_>, kinds: &[&str]) -> bool {
 pub(crate) fn operator_in(node: Node<'_>, operators: &[&str]) -> bool {
     node.child_by_field_name("operator")
         .is_some_and(|op| operators.contains(&op.kind()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::hash::Hash;
+
+    use super::*;
+
+    fn rust_tree(source: &str) -> Tree {
+        parse_tree(&tree_sitter_rust::LANGUAGE.into(), source).expect("parses")
+    }
+
+    /// Records what `walk` does, and does not descend into blocks.
+    #[derive(Default)]
+    struct Recorder {
+        events: Vec<String>,
+    }
+
+    impl Visit for Recorder {
+        type Frame = String;
+
+        fn enter(&mut self, node: Node<'_>, ancestors: &[Node<'_>]) -> String {
+            let parent = ancestors.last().map_or("-", |p| p.kind());
+            self.events.push(format!(
+                "enter {} {} {parent}",
+                node.kind(),
+                ancestors.len()
+            ));
+            node.kind().to_owned()
+        }
+
+        fn leave(&mut self, frame: String) {
+            self.events.push(format!("leave {frame}"));
+        }
+
+        fn descend(&mut self, node: Node<'_>) -> bool {
+            node.kind() != "block"
+        }
+    }
+
+    // Design D1: depth first, every enter left once, in reverse order,
+    // with its ancestors; `descend` keeps a subtree out.
+    #[test]
+    fn walk_enters_and_leaves_in_order() {
+        let tree = rust_tree("fn f() { 1 }");
+        let mut recorder = Recorder::default();
+        walk(tree.root_node(), &mut recorder);
+        assert_eq!(
+            recorder.events,
+            [
+                "enter source_file 0 -",
+                "enter function_item 1 source_file",
+                "enter fn 2 function_item",
+                "leave fn",
+                "enter identifier 2 function_item",
+                "leave identifier",
+                "enter parameters 2 function_item",
+                "enter ( 3 parameters",
+                "leave (",
+                "enter ) 3 parameters",
+                "leave )",
+                "leave parameters",
+                "enter block 2 function_item",
+                "leave block",
+                "leave function_item",
+                "leave source_file",
+            ]
+        );
+    }
+
+    // Design D2: a mark closes exactly what opened after it; names are made
+    // unique within their segments; points go to the current unit only.
+    #[test]
+    fn units_restore_marks_and_name_uniquely() {
+        let mut units: Units<Option<usize>> = Units::new();
+        units.push_segment("A".to_owned());
+        assert_eq!(units.qualify("x"), "A.x");
+        let mark = units.mark();
+        let first = units.open("f", 1);
+        units.push_scope(Some(first));
+        units.count(2);
+        assert_eq!(units.unit(), Some(first));
+        units.restore(mark);
+        assert_eq!(units.unit(), None);
+        units.count(5);
+        let second = units.open("f", 2);
+        units.push_scope(None);
+        assert_eq!(units.unit(), None);
+        "code".hash(units.hasher(second));
+        let functions = units.finish();
+        let summary: Vec<(&str, u32, u32)> = functions
+            .iter()
+            .map(|f| (f.name.as_str(), f.line, f.cyclomatic))
+            .collect();
+        assert_eq!(summary, [("A.f", 1, 3), ("A.f#2", 2, 1)]);
+        assert_ne!(functions[0].fingerprint, functions[1].fingerprint);
+    }
+
+    // Design D4: muting notes it in the frame; a text part starts a run
+    // that the next other token ends.
+    #[test]
+    fn tokens_mute_and_track_text_runs() {
+        let tree = rust_tree("fn f() {}\nfn g() {}");
+        let second = tree.root_node().named_child(1).expect("second item");
+        let mut tokens = Tokens::default();
+        let mut muted = false;
+        assert!(!tokens.muted());
+        tokens.mute(&mut muted);
+        assert!(tokens.muted() && muted);
+        tokens.unmute();
+        assert!(!tokens.muted());
+        tokens.push("$lit".to_owned(), second, true);
+        assert!(tokens.in_text_run());
+        tokens.push("x".to_owned(), second, false);
+        assert!(!tokens.in_text_run());
+        let pushed: Vec<(String, u32)> = tokens
+            .finish()
+            .into_iter()
+            .map(|t| (t.text, t.line))
+            .collect();
+        assert_eq!(pushed, [("$lit".to_owned(), 2), ("x".to_owned(), 2)]);
+    }
 }
