@@ -6,7 +6,8 @@
 //! overload keeps its name when another one is added above it. The same
 //! walk counts decision points (D3), records the normalized tokens for
 //! finding copies (D4) and lists the `using` directives for architecture
-//! rules (design D2 of `add-csharp-architecture`).
+//! rules (design D2 of `add-csharp-architecture`). The walk, the unit
+//! bookkeeping and the tokens are the shared ones of `common.rs`.
 
 use std::hash::Hash;
 

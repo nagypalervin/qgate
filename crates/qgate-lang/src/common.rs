@@ -1,6 +1,17 @@
-//! Helpers that every tree-sitter adapter needs: building the tree and
-//! refusing a file with syntax errors, lines, unique unit names (design
-//! D1 of `add-csharp-analysis`), and types written without whitespace.
+//! What every tree-sitter adapter needs, so each adapter holds only its
+//! language's rules (design of `share-adapter-walker`):
+//!
+//! - building the tree and refusing a file with syntax errors, and lines;
+//! - [`walk`] over the tree with a [`Visit`]or, which enters each node and
+//!   leaves it again, so state a node opens is closed after its subtree;
+//! - [`Units`]: the function units with their names, made unique (design
+//!   D1 of `add-csharp-analysis`), the scopes that collect decision
+//!   points, and the fingerprints;
+//! - [`Tokens`]: the normalized tokens and the muted state;
+//! - small node helpers, and types written without whitespace.
+//!
+//! Which nodes are units, how they are named, what counts as a decision
+//! point and which tokens a node gives stay in each adapter.
 
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hasher};

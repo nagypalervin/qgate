@@ -6,7 +6,10 @@
 //! module level or in a class field initializer are handled in the same
 //! walk (design of `analyze-wrapped-functions`), and so are the file's
 //! imports (design D4 of `add-forbidden-imports`). What counts as a
-//! decision point follows the `complexity` rule of `ESLint`.
+//! decision point follows the `complexity` rule of `ESLint`. The walk,
+//! the unit bookkeeping and the tokens are the shared ones of `common.rs`;
+//! the scopes are TypeScript's own: a unit, a class body or an opaque
+//! function.
 
 use std::hash::Hash;
 
@@ -129,7 +132,7 @@ struct Bound {
 /// What collects the decision points of the code inside a node.
 #[derive(Clone, Copy)]
 enum Scope {
-    /// The unit `functions[i]`.
+    /// The unit with index `i` in the file's units.
     Unit(usize),
     /// A class body: its non-function code (field initializers) is not
     /// measured, but a call bound to a field passes its name through.

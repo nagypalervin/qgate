@@ -7,6 +7,8 @@
 //! counts decision points (D3) and records the normalized tokens for
 //! finding copies (D5). Macro arguments and `macro_rules!` bodies are
 //! token trees: they add tokens, but no units and no decision points (D4).
+//! The walk, the unit bookkeeping and the tokens are the shared ones of
+//! `common.rs`.
 
 use std::hash::Hash;
 
