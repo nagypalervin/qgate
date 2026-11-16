@@ -1154,7 +1154,7 @@ Design principles:
 | **M2** | Architecture rules (`qgate.toml`), duplication detection | done |
 | **M3** | Checking while coding: the working tree as head, JSON output, a Claude Code hook, an MCP server, so agents check their own changes before opening a pull request | done |
 | **M4** | CI integration: release binaries, GitHub Action, Azure DevOps Pipelines, pull request comments | done |
-| **Languages** | C# next to TypeScript: complexity and duplication (0.4.0), architecture rules for `using` directives (0.6.0); Rust: complexity and duplication (0.9.0), and qgate checks its own code | in progress |
+| **Languages** | C# next to TypeScript: complexity and duplication (0.4.0), architecture rules for `using` directives (0.6.0); Rust: complexity and duplication (0.9.0), and qgate checks its own code | done |
 | **M5** | Change risk from git history: code changed without its tests (0.7.0), hotspot context on findings in code that is both complex and changed often (0.8.0) | done |
 | **M6** | Baseline and trends over time, optional AI summary | planned |
 | **Later** | A git pre-commit hook, which needs a check of the staged changes (`--staged`); SARIF output, once a consumer fits a tool that reports only what got worse; a coverage drop in the `tests` analyzer, which needs coverage reports qgate does not read today | not planned yet |
