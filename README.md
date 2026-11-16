@@ -791,11 +791,11 @@ check and no architecture rules yet.
 - **Not decision points:** `?`, which returns early on an error like a
   call that throws in TypeScript or C#; and `loop`, `break`, `continue`
   and `return`, whose conditions count instead.
-- **A new enum variant adds one to every `match` over it.** Each
-  exhaustive `match` gets an arm, so adding a variant reports a `+1`
-  Warning for every function that matches on the enum. In the replay
-  of qgate's own history this was 12 of 57 complexity Warnings in source
-  code.
+- **A new enum variant adds one to every `match` that lists all
+  variants.** Such a `match` needs an arm for the new variant, so adding
+  it reports a `+1` Warning for every function with one; a `match` with
+  a `_` arm needs none and is not reported. In the replay of qgate's own
+  history this was 12 of 57 complexity Warnings in source code.
 - **Macros are read as written, not expanded.** The arguments of a
   macro call (`assert!(a && b)`, `format!(...)`) and the body of a
   `macro_rules!` are compared for copies, but their decision points do
@@ -805,7 +805,8 @@ check and no architecture rules yet.
   `self.1`; lifetimes are names like any other.
 - **Unparsable:** the grammar may lag behind the language. Today it
   does not read the edition-2024 `safe` qualifier in an `unsafe extern`
-  block; such a file is reported as `input/unparsable`.
+  block; such a file is reported as `input/unparsable` in `--base` and
+  `--worktree` mode, and fails the two-file form with exit code `2`.
 - **Generated Rust is not detected.** Leave it out with
   [`[files] exclude`](#leaving-files-out-files-exclude); build-script
   output under `target/` is not committed anyway.

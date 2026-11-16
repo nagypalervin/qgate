@@ -165,8 +165,20 @@ fn rust_integration_tests_are_ranked() {
     let repo = Repo::new();
     repo.write("crates/cli/src/main.rs", rust_file(0, 0));
     repo.write("crates/cli/src/lib.rs", rust_file(0, 1));
-    for rev in 0..6 {
-        repo.write("crates/cli/tests/check.rs", rust_file(rev, 8));
+    // A busier, more complex TypeScript file: ranked with the Rust files,
+    // it would push `check.rs` out of the top 10% (review of PR 2).
+    let mut ts = String::new();
+    for i in 0..20 {
+        let _ = writeln!(ts, "  if (d > {i}) {{ d--; }}");
+    }
+    for rev in 0..9 {
+        if rev < 6 {
+            repo.write("crates/cli/tests/check.rs", rust_file(rev, 8));
+        }
+        repo.write(
+            "web/busy.ts",
+            format!("// {rev}\nexport function busy(d: number) {{\n{ts}  return d;\n}}\n"),
+        );
         repo.commit_at("check", &format!("2026-01-{:02}T00:00:00Z", rev + 1));
     }
     repo.git(&["checkout", "-q", "-b", "feature"]);

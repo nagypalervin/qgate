@@ -257,7 +257,7 @@ to see it), *debatable* or *noise*:
 - **Errors (6):**
   - **Useful (5):** `main` 6 -> 11; `check_revisions` 12 -> 20 and
     `duplication` 15 -> 21, both in the CLI's busiest file (hotspot, 38
-    commits); `parse_log` new at 21, a state machine. `Walker.enter`
+    commits); `parse_log` new at 21, a state machine. `Walker<'s>.enter`
     8 -> 16 in the TypeScript adapter is useful too: the dispatcher
     gained a nested special case.
   - **Debatable (1):** `git_message` 4 -> 10: two new match arms, each
@@ -281,10 +281,15 @@ to see it), *debatable* or *noise*:
     (`typescript.rs` `parse`) the new variant joined an existing arm,
     `Language::CSharp | Language::Rust`; the `|` counts as much as a
     separate arm would, so the rule is consistent.
-  - **Useful or debatable (20): new functions of 11 to 20.** Parsers,
-    walkers and dispatchers (`record_token`, `produces_no_tokens`,
-    `Server.dispatch`, `decision_points`). True and informative; whether
-    a reviewer acts on them is a matter of taste.
+  - **New functions of 11 to 20 (20):** *useful (11)* where the
+    function does several things a reviewer could split
+    (`parse_raw_diff`, `BlobReader.exchange`, `DuplicationIndex.blocks`,
+    `duplication`, `mcp_server`, `Server<C>.handle`, `parse_arguments`,
+    `cell`, `Conventions<'a>.new`, `revision_check`, `target`);
+    *debatable (9)* where it is a dispatcher over syntax kinds or
+    messages, complex by nature (`Walker<'s>.enter` and
+    `Walker<'s>.record_token` of each adapter, `produces_no_tokens`,
+    `import_source`, `Server<C>.dispatch`, `decision_points`).
   - **Useful (25): growth of existing functions,** most of them in the
     CLI's `main.rs`, which grew from complexity 49 to 179 over the
     history, every step of it a hotspot.
@@ -295,6 +300,78 @@ which exists both in `qgate-git`'s `test_support.rs` and in the CLI's
 `tests/support`, and repeated test set-ups. Only 17 findings are in
 `#[cfg(test)]` modules, so skipping those (D6) would change little;
 `[files] exclude` for fixtures and integration tests would.
+
+**Macros (D4).** In the Rust code of this repository at the time of the
+replay (fixtures left out), 13 decision tokens (`if`, `match`, `&&`,
+...) sit inside macro arguments, against 983 decision points qgate
+counts: 1.3% are invisible. 107 of 1,217 functions consist of macro
+calls only, nearly all of them tests made of `assert!`s.
+
+**Integration tests among hotspots (D7).**
+`crates/qgate-cli/tests/revisions.rs` is among the most changed Rust
+files (churn top 10%) in 36 of the 52 merges, yet it pushed no source
+file out of the top in any of them: without the tests, the 10% shrinks
+too. None of the 56 integration-test findings had hotspot context,
+because no test file was also in the complexity top 25%.
+
+**Per pull request.** The first 19 rows are the history before the move
+to the public repository, whose numbers restarted there. "Of them
+outside fixtures" is what a gate with the fixtures excluded would show.
+
+| Merge | Pull request | `.rs` files | Findings | Errors | Of them outside fixtures | Seconds |
+|---|---|---|---|---|---|---|
+| `bf402a5` | #2 `add-cyclomatic-complexity-check` | 3 | 2 | 0 | 1 | 0.04 |
+| `388d54b` | #3 `add-cyclomatic-complexity-check-2` | 2 | 19 | 3 | 0 | 0.04 |
+| `b20e54a` | #4 `add-cyclomatic-complexity-check-3` | 2 | 8 | 0 | 0 | 0.04 |
+| `0b103b0` | #5 `add-git-revision-input` | 2 | 1 | 0 | 1 | 0.03 |
+| `d26fca1` | #6 `add-git-revision-input-2` | 4 | 6 | 1 | 6 | 0.04 |
+| `7b2ff9f` | #7 `add-fail-on` | 3 | 6 | 0 | 3 | 0.06 |
+| `aa174d8` | #8 `analyze-wrapped-functions` | 4 | 6 | 1 | 2 | 0.06 |
+| `0a8c895` | #9 `pre-commit-hook` | 0 | 0 | 0 | 0 | 0.01 |
+| `0bfd2a3` | #10 `add-forbidden-imports` | 3 | 2 | 0 | 1 | 0.06 |
+| `699380c` | #11 `add-forbidden-imports-2` | 5 | 2 | 0 | 2 | 0.06 |
+| `3fa180a` | #12 `add-forbidden-imports-3` | 5 | 5 | 0 | 5 | 0.08 |
+| `388966f` | #13 `msrv-ci-2` | 0 | 0 | 0 | 0 | 0.01 |
+| `840ac6d` | #14 `add-duplicate-detection` | 4 | 4 | 0 | 3 | 0.07 |
+| `f71b062` | #15 `add-duplicate-detection-2` | 1 | 1 | 0 | 1 | 0.07 |
+| `88dee45` | #16 `add-duplicate-detection-3` | 6 | 8 | 0 | 4 | 0.10 |
+| `967fc26` | #17 `roadmap` | 0 | 0 | 0 | 0 | 0.01 |
+| `a39c4c7` | #18 `m2-done` | 0 | 0 | 0 | 0 | 0.01 |
+| `9792c83` | #19 `roadmap-agent-first` | 2 | 0 | 0 | 0 | 0.06 |
+| `c2cf98e` | #1 `license-holder` | 0 | 0 | 0 | 0 | 0.01 |
+| `bb27486` | #2 `add-worktree-input` | 2 | 1 | 0 | 1 | 0.08 |
+| `4e8cdc5` | #3 `add-worktree-input-2` | 3 | 4 | 1 | 4 | 0.09 |
+| `d7e543c` | #4 `add-report-formats` | 6 | 1 | 0 | 1 | 0.09 |
+| `fc1016a` | #5 `add-report-formats-2` | 8 | 10 | 2 | 10 | 0.11 |
+| `85334c1` | #6 `add-agent-hooks` | 3 | 3 | 0 | 3 | 0.09 |
+| `4f53dea` | #7 `fix-racy-worktree-snapshot` | 2 | 4 | 0 | 4 | 0.10 |
+| `e657ad0` | #8 `add-mcp-server` | 3 | 11 | 0 | 11 | 0.11 |
+| `96b9ca0` | #9 `close-m3` | 0 | 0 | 0 | 0 | 0.01 |
+| `68849fd` | #10 `add-release-binaries` | 2 | 0 | 0 | 0 | 0.13 |
+| `fdca116` | #11 `add-release-binaries-2` | 0 | 0 | 0 | 0 | 0.01 |
+| `2dd4e7a` | #12 `add-release-binaries-3` | 0 | 0 | 0 | 0 | 0.01 |
+| `8fa081f` | #13 `add-azure-pipelines` | 0 | 0 | 0 | 0 | 0.01 |
+| `c24029f` | #14 `add-pr-comments` | 7 | 7 | 0 | 7 | 0.12 |
+| `5400961` | #15 `add-pr-comments-2` | 0 | 0 | 0 | 0 | 0.01 |
+| `e29df6e` | #16 `add-github-action` | 5 | 3 | 0 | 3 | 0.13 |
+| `85feeec` | #17 `add-github-action-2` | 0 | 0 | 0 | 0 | 0.01 |
+| `f03ae2c` | #18 `fix-pr-comment-details` | 2 | 2 | 0 | 2 | 0.11 |
+| `ada1eb8` | #19 `fix-pr-comment-details-2` | 1 | 0 | 0 | 0 | 0.11 |
+| `af528f9` | #20 `close-m4` | 0 | 0 | 0 | 0 | 0.01 |
+| `ea2fd6e` | #21 `add-csharp-analysis` | 9 | 17 | 0 | 16 | 0.16 |
+| `cb474ba` | #22 `add-csharp-analysis-2` | 6 | 17 | 2 | 15 | 0.15 |
+| `5731da7` | #23 `add-csharp-analysis-3` | 0 | 0 | 0 | 0 | 0.01 |
+| `d408ea1` | #24 `add-path-exclusion` | 6 | 8 | 0 | 8 | 0.13 |
+| `98961ec` | #25 `add-path-exclusion-2` | 0 | 0 | 0 | 0 | 0.01 |
+| `fdcbadd` | #26 `add-csharp-architecture` | 10 | 5 | 0 | 5 | 0.17 |
+| `a858dea` | #27 `add-csharp-architecture-2` | 0 | 0 | 0 | 0 | 0.01 |
+| `1133b17` | #28 `add-test-gap-analysis` | 4 | 10 | 0 | 5 | 0.16 |
+| `19e4f32` | #29 `add-test-gap-analysis-2` | 6 | 14 | 0 | 3 | 0.19 |
+| `a1f22a9` | #30 `add-test-gap-analysis-3` | 0 | 0 | 0 | 0 | 0.01 |
+| `5c5d56a` | #31 `add-hotspot-context` | 14 | 1 | 1 | 1 | 0.23 |
+| `1ab25be` | #32 `add-hotspot-context-2` | 9 | 5 | 0 | 5 | 0.17 |
+| `e8c8128` | #33 `add-hotspot-context-3` | 1 | 0 | 0 | 0 | 0.14 |
+| `6575cc5` | #34 `add-rust-analysis` | 10 | 25 | 0 | 23 | 0.17 |
 
 ## Decisions after the replay
 

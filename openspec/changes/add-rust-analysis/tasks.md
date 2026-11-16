@@ -15,10 +15,10 @@ messages and PR bodies are written to files first.
 
 ## 2. Wiring, self-check and version (PR 2, `change/add-rust-analysis-2`)
 
-- [x] 2.1 Analyzer fixture pairs: `crates/qgate-analyzers/fixtures/complexity/rust_*` (the scenario "A Rust method that got more complex", a new complex function, a trait impl's `fmt` moved below another impl) and a Rust duplication pair, failing tests first.
+- [x] 2.1 Analyzer fixture pairs: `crates/qgate-analyzers/fixtures/complexity/rust/` (the scenario "A Rust method that got more complex", a new complex function, a trait impl's `fmt` moved below another impl) and a Rust duplication pair, failing tests first.
 - [x] 2.2 CLI, revision mode: `.rs` among changed files, one duplication index per family through `Family::ALL`, Rust hotspots ranked among Rust files, no `tests/` finding for Rust. Failing CLI tests first for each scenario of the modified `revision-input`, `duplication-analysis`, `hotspot-analysis` and `test-analysis` requirements, including the working tree.
 - [x] 2.3 CLI, two-file form: `.rs` accepted, Rust with another family rejected, the unsupported-type message names `.rs`. Failing CLI tests first for the scenarios of "Supported input files".
-- [x] 2.4 Replay (D8) over the 51 merges of `main`: script in the scratchpad, per pull request the findings by rule and severity, unparsable files, hotspot context and run time; every Error and at least 20 Warnings classified as useful, debatable or noise. Results in "Self-check results" of `design.md`. Stop and ask Ervin if the numbers argue for changing D3 to D6 before the release.
+- [x] 2.4 Replay (D8) over the merges of `main` (52 by then: PR 1 had merged): script in the scratchpad, per pull request the findings by rule and severity, unparsable files, hotspot context and run time; every Error and at least 20 Warnings classified as useful, debatable or noise. Results in "Self-check results" of `design.md`. Stop and ask Ervin if the numbers argue for changing D3 to D6 before the release.
 - [x] 2.5 README: Rust in the status line, the checks it gets, its decision points and names, macros and `?`, the two-file form; the roadmap row "Languages" names Rust. Check every sentence against a test or the replay.
 - [x] 2.6 Version 0.9.0 in `Cargo.toml` (with `Cargo.lock`) and every `QGATE_VERSION` of `action.yml`; both release checks pass locally for `v0.9.0`.
 
