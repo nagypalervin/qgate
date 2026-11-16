@@ -6,8 +6,9 @@
 //! `docs/adr/0001-rust-and-tree-sitter.md`. This crate does no I/O: callers
 //! read files and pick the [`Language`].
 //!
-//! Supported: TypeScript, TSX, C# and Rust. The model holds one [`Function`] per
-//! named function unit with its qualified name, line, cyclomatic
+//! Supported: TypeScript, TSX, C# and Rust. The model holds one
+//! [`Function`] per named function unit with its qualified name, line,
+//! cyclomatic
 //! complexity and a fingerprint of its code, which tells whether the unit
 //! changed between two versions. Anonymous functions count towards their
 //! nearest named ancestor; code outside named functions is not measured.
@@ -28,11 +29,15 @@
 //! member names, keywords and punctuation keep their text; comments and
 //! semicolons produce none, nor do TypeScript's imports and type-level
 //! code, or C#'s `using` directives, namespace declarations and
-//! preprocessor directives. C# types are code and keep their tokens.
+//! preprocessor directives, or Rust's `use` declarations, module
+//! declarations and attributes. C# and Rust types are code and keep their
+//! tokens; Rust macro calls are compared by their tokens too.
 //!
 //! C# units are named by their types and signature, such as
 //! `Cart.Total(int)`; [`csharp_generated_name`] and
-//! [`csharp_generated_header`] tell generated C# files.
+//! [`csharp_generated_header`] tell generated C# files. Rust units are
+//! named by their inline modules and their `impl` or trait, such as
+//! `Cart.total` or `<Cart as Display>.fmt`.
 //!
 //! ```
 //! use qgate_lang::{Language, parse};

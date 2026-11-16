@@ -3,14 +3,17 @@
 //!
 //! One walk over the syntax tree finds the function units and names them
 //! by their inline modules, their `impl` or trait and their own name
-//! (design D2): `Cart.total`, `<Cart as Display>.fmt`.
+//! (design D2): `Cart.total`, `<Cart as Display>.fmt`. The same walk
+//! counts decision points (D3) and records the normalized tokens for
+//! finding copies (D5). Macro arguments and `macro_rules!` bodies are
+//! token trees: they add tokens, but no units and no decision points (D4).
 
 use std::collections::HashSet;
 
 use tree_sitter::Node;
 
 use crate::common::{compact, line_of, parse_tree, unique_segment};
-use crate::{FileModel, Function, ParseError};
+use crate::{FileModel, Function, ParseError, Token};
 
 /// Parse Rust source into a [`FileModel`].
 pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
@@ -19,6 +22,7 @@ pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
     walker.walk(tree.root_node());
     Ok(FileModel {
         functions: walker.functions,
+        tokens: walker.tokens,
         ..FileModel::default()
     })
 }
@@ -27,11 +31,33 @@ pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
 /// initializers of `const` and `static` items.
 const UNMEASURED_KINDS: &[&str] = &["const_item", "static_item"];
 
+/// Literals that become one `$lit` each, without entering them. `true`
+/// and `false` are keywords and keep their text.
+const LITERAL_KINDS: &[&str] = &[
+    "string_literal",
+    "raw_string_literal",
+    "char_literal",
+    "integer_literal",
+    "float_literal",
+];
+
+/// Subtrees that produce no tokens (design D5): they repeat across files
+/// without being copied logic.
+const NO_TOKEN_KINDS: &[&str] = &[
+    "use_declaration",
+    "extern_crate_declaration",
+    "attribute_item",
+    "inner_attribute_item",
+    "line_comment",
+    "block_comment",
+];
+
 /// What entering a node pushed, so leaving it can pop the same.
 #[derive(Default)]
 struct Frame {
     segments: usize,
     scopes: usize,
+    muted: bool,
 }
 
 struct Walker<'s> {
@@ -45,6 +71,11 @@ struct Walker<'s> {
     scopes: Vec<Option<usize>>,
     /// Units in source order.
     functions: Vec<Function>,
+    /// Normalized tokens in source order.
+    tokens: Vec<Token>,
+    /// Whether the walk is inside a subtree that produces no tokens; the
+    /// frame of the node that opened it closes it.
+    muted: bool,
 }
 
 impl<'s> Walker<'s> {
@@ -55,6 +86,8 @@ impl<'s> Walker<'s> {
             taken: HashSet::new(),
             scopes: Vec::new(),
             functions: Vec::new(),
+            tokens: Vec::new(),
+            muted: false,
         }
     }
 
@@ -90,6 +123,7 @@ impl<'s> Walker<'s> {
 
     fn enter(&mut self, node: Node<'_>, parent: Option<Node<'_>>) -> Frame {
         let mut frame = Frame::default();
+        self.record_token(node, parent, &mut frame);
         match node.kind() {
             // An inline module is part of the name; `mod x;` has no body
             // and names nothing here.
@@ -158,11 +192,92 @@ impl<'s> Walker<'s> {
         self.segments.truncate(segments);
         let scopes = self.scopes.len() - frame.scopes;
         self.scopes.truncate(scopes);
+        if frame.muted {
+            self.muted = false;
+        }
+    }
+
+    /// Record the normalized token `node` is, if any (design D5), and
+    /// mute the subtrees that produce none.
+    fn record_token(&mut self, node: Node<'_>, parent: Option<Node<'_>>, frame: &mut Frame) {
+        if self.muted {
+            return;
+        }
+        let kind = node.kind();
+        if produces_no_tokens(node, parent) {
+            self.mute(frame);
+        } else if LITERAL_KINDS.contains(&kind) || kind == "lifetime" {
+            // A lifetime is a name: `'a` and `'b` are the same code.
+            let text = if kind == "lifetime" { "$id" } else { "$lit" };
+            self.push_token(text.to_owned(), node);
+            self.mute(frame);
+        } else if node.child_count() == 0 && kind != ";" {
+            let text = self.text(node);
+            let text = if is_name(kind) && text != "Self" && !follows_path_or_dot(node) {
+                "$id".to_owned()
+            } else {
+                text
+            };
+            if !text.is_empty() {
+                self.push_token(text, node);
+            }
+        }
+    }
+
+    fn mute(&mut self, frame: &mut Frame) {
+        self.muted = true;
+        frame.muted = true;
+    }
+
+    fn push_token(&mut self, text: String, node: Node<'_>) {
+        self.tokens.push(Token {
+            text,
+            line: line_of(node),
+        });
     }
 
     fn text(&self, node: Node<'_>) -> String {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
     }
+}
+
+/// Subtrees that produce no tokens: those of [`NO_TOKEN_KINDS`], a module
+/// declared without a body, and the keyword and name of an inline module.
+fn produces_no_tokens(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
+    let kind = node.kind();
+    if NO_TOKEN_KINDS.contains(&kind) {
+        return true;
+    }
+    if kind == "mod_item" {
+        return node.child_by_field_name("body").is_none();
+    }
+    parent.is_some_and(|p| {
+        p.kind() == "mod_item"
+            && (kind == "mod"
+                || p.child_by_field_name("name")
+                    .is_some_and(|name| name.id() == node.id()))
+    })
+}
+
+/// Leaves that are names and become `$id`: identifiers, type, field and
+/// shorthand field names, and macro metavariables (`$e`).
+fn is_name(kind: &str) -> bool {
+    matches!(
+        kind,
+        "identifier"
+            | "type_identifier"
+            | "field_identifier"
+            | "shorthand_field_identifier"
+            | "metavariable"
+    )
+}
+
+/// Whether the node comes right after `.` or `::`: a field or method name,
+/// or a path segment, which keeps its text (design D5). Inside a macro
+/// call, where the grammar builds no paths, the previous token decides.
+fn follows_path_or_dot(node: Node<'_>) -> bool {
+    node.prev_sibling()
+        .is_some_and(|p| matches!(p.kind(), "." | "::"))
 }
 
 /// How much the node adds to the enclosing unit's complexity (design D3).
@@ -314,6 +429,139 @@ mod tests {
                 ("const_inside", 1),
             ])
         );
+    }
+
+    /// The normalized token texts of `source`.
+    fn tokens(source: &str) -> Vec<String> {
+        parse(source)
+            .expect("source parses")
+            .tokens
+            .into_iter()
+            .map(|t| t.text)
+            .collect()
+    }
+
+    fn texts(line: &str) -> Vec<String> {
+        if line.is_empty() {
+            return Vec::new();
+        }
+        line.split(' ').map(str::to_owned).collect()
+    }
+
+    // Requirement: Rust normalized tokens, "Renamed copy".
+    #[test]
+    fn a_renamed_copy_has_the_same_tokens() {
+        let a = "fn fmt_date(d: &Date) -> String { let y = d.year; format!(\"{y}-\") }";
+        let b = "fn format_order_date(when: &Date) -> String { let year = when.year; format!(\"{year}/\") }";
+        assert_eq!(tokens(a), tokens(b));
+        assert_eq!(
+            tokens(a),
+            texts("fn $id ( $id : & $id ) -> $id { let $id = $id . year $id ! ( $lit ) }")
+        );
+    }
+
+    // Requirement: Rust normalized tokens, "Different members and paths".
+    #[test]
+    fn members_and_path_segments_keep_their_text() {
+        let year = tokens("fn f(d: D) -> Vec<u32> { let v = Vec::new(); d.year }");
+        let month = tokens("fn f(d: D) -> Vec<u32> { let v = Vec::new(); d.month }");
+        let default = tokens("fn f(d: D) -> Vec<u32> { let v = Vec::default(); d.year }");
+        assert_ne!(year, month);
+        assert_ne!(year, default);
+        assert_eq!(
+            year,
+            texts("fn $id ( $id : $id ) -> $id < u32 > { let $id = $id :: new ( ) $id . year }")
+        );
+    }
+
+    #[test]
+    fn each_literal_is_one_placeholder() {
+        let source =
+            "fn f() { (b\"x\", br#\"y\"#, 'c', b'd', 1.5, 0x1F, \"e\\t\", r\"raw\", true, false) }";
+        assert_eq!(
+            tokens(source),
+            texts(
+                "fn $id ( ) { ( $lit , $lit , $lit , $lit , $lit , $lit , $lit , $lit , true , false ) }"
+            )
+        );
+    }
+
+    // Requirement: Rust normalized tokens: keywords, primitive types,
+    // lifetimes and raw identifiers.
+    #[test]
+    fn keywords_lifetimes_and_raw_identifiers() {
+        let source = "impl<'a> Parser<'a> { fn new(r#type: &'a str) -> Self { Self::make(crate::X, super::Y, self.z, r#type) } }";
+        assert_eq!(
+            tokens(source),
+            texts(
+                "impl < $id > $id < $id > { fn $id ( $id : & $id str ) -> Self { Self :: make ( crate :: X , super :: Y , self . z , $id ) } }"
+            )
+        );
+    }
+
+    // Requirement: Macros in Rust, "Copies inside macro calls".
+    #[test]
+    fn macro_calls_are_normalized_like_code() {
+        let a = tokens("fn a(x: u32) { println!(\"{} {}\", x, y.len()); }");
+        let b = tokens("fn b(n: u32) { println!(\"{}-{}\", n, m.len()); }");
+        assert_eq!(a, b);
+        assert_eq!(
+            a,
+            texts("fn $id ( $id : u32 ) { $id ! ( $lit , $id , $id . len ( ) ) }")
+        );
+        // A path inside a macro call keeps its segments, too.
+        assert_ne!(
+            tokens("fn f() { v!(Vec::new()) }"),
+            tokens("fn f() { v!(Vec::default()) }")
+        );
+    }
+
+    // Requirement: Macros in Rust: a definition keeps its tokens. The
+    // grammar reads `macro_rules!` as one token.
+    #[test]
+    fn macro_definitions_keep_their_tokens() {
+        assert_eq!(
+            tokens("macro_rules! twice { ($e:expr) => { $e + $e }; }"),
+            texts("macro_rules! $id { ( $id : expr ) => { $id + $id } }")
+        );
+    }
+
+    // Requirement: Rust code without tokens, "Imports and attributes are
+    // not compared".
+    #[test]
+    fn imports_attributes_and_comments_have_no_tokens() {
+        let source = "#![allow(dead_code)]\nuse std::fmt;\nuse super::*;\nextern crate alloc;\n\
+                      mod a;\npub mod b;\n/// doc\n#[derive(Debug, Clone)]\n// line\n/* block */\n\
+                      struct S;\nmod tests { use super::*; #[test] fn f() {} }\n";
+        assert_eq!(tokens(source), texts("struct $id { fn $id ( ) { } }"));
+        assert_eq!(
+            tokens("use std::fmt;\nuse crate::a::{b, c};\nmod x;\n#![deny(missing_docs)]\n"),
+            texts("")
+        );
+    }
+
+    // Requirement: Rust code without tokens, "Doc comments".
+    #[test]
+    fn doc_comments_have_no_tokens() {
+        assert_eq!(
+            tokens("/// Adds one.\n/** More. */\nfn f(x: u32) -> u32 { x + 1 }"),
+            tokens("/// Increments.\nfn f(x: u32) -> u32 { x + 1 }")
+        );
+    }
+
+    // Requirement: Rust files, "A file with a byte order mark".
+    #[test]
+    fn a_byte_order_mark_is_ignored() {
+        let model = parse("\u{feff}fn f(a: bool) { if a {} }").expect("parses");
+        assert_eq!(model.functions[0].cyclomatic, 2);
+        assert_eq!(model.tokens[0].text, "fn");
+    }
+
+    #[test]
+    fn tokens_carry_their_line() {
+        let model = parse("fn f()\n{\n    1\n}\n").expect("parses");
+        let lines: Vec<u32> = model.tokens.iter().map(|t| t.line).collect();
+        assert_eq!(lines, [1, 1, 1, 1, 2, 3, 4]);
     }
 
     // Requirement: Rust function units, "Declarations without a body".

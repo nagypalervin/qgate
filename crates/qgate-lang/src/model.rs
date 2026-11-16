@@ -27,9 +27,12 @@ pub struct FileModel {
 /// semicolons produce no tokens; in TypeScript neither do the shebang
 /// line, imports, `export ... from` and type-level code, and in C#
 /// neither do `using` directives, namespace declarations and preprocessor
-/// directives (code in an `#if` branch keeps its tokens). So two copies
-/// that differ only in names, values or layout have the same tokens; in
-/// TypeScript also those that differ only in types.
+/// directives (code in an `#if` branch keeps its tokens), and in Rust
+/// neither do `use` declarations, `extern crate`, module declarations,
+/// the keyword and name of an inline module and attributes; Rust
+/// lifetimes become `$id`. So two copies that differ only in names,
+/// values or layout have the same tokens; in TypeScript also those that
+/// differ only in types.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     /// The normalized text.
