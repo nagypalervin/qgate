@@ -13,7 +13,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use tree_sitter::Node;
 
-use crate::common::{line_of, parse_tree, unique_segment};
+use crate::common::{compact, line_of, parse_tree, unique_segment};
 use crate::{FileModel, Function, ParseError, Token, Using};
 
 /// Parse C# source into a [`FileModel`].
@@ -584,26 +584,6 @@ fn operator_in(node: Node<'_>, operators: &[&str]) -> bool {
         .is_some_and(|op| operators.contains(&op.kind()))
 }
 
-/// `text` without whitespace, except one space between two words:
-/// `Dictionary<string, int>` becomes `Dictionary<string,int>`, and
-/// `scoped Span<int>` stays as it is.
-fn compact(text: &str) -> String {
-    let word = |c: char| c.is_alphanumeric() || c == '_' || c == '@';
-    let mut out = String::with_capacity(text.len());
-    let mut space = false;
-    for c in text.chars() {
-        if c.is_whitespace() {
-            space = true;
-            continue;
-        }
-        if space && out.chars().next_back().is_some_and(word) && word(c) {
-            out.push(' ');
-        }
-        space = false;
-        out.push(c);
-    }
-    out
-}
 #[cfg(test)]
 mod tests {
     use super::*;
