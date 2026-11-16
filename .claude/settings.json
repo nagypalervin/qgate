@@ -1,5 +1,14 @@
 {
   "env": {
     "OPENSPEC_TELEMETRY": "0"
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "qgate hook claude-code --base main" }
+        ]
+      }
+    ]
   }
 }

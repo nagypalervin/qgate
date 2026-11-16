@@ -1204,6 +1204,18 @@ git config core.hooksPath .githooks
 
 `git commit --no-verify` skips it for a work-in-progress commit.
 
+qgate checks its own code:
+
+- **In pull requests,** the `qgate` job of the CI runs the released
+  action and comments; `qgate.toml` leaves the test fixtures out.
+- **While coding with Claude Code,** `.claude/settings.json` runs the
+  [Stop hook](#with-claude-code) with `--base main`, because work here is
+  committed within a turn, and `.mcp.json` offers the
+  [MCP server](#with-an-mcp-client). Both need a released `qgate` on the
+  `PATH` (see [Try it](#try-it)); without one, Claude Code reports a hook
+  error and goes on. Claude Code asks once before it starts the MCP
+  server of a repository.
+
 ## About
 
 A personal open source project by [Ervin Nagypál](https://nagypalervin.hu/),
