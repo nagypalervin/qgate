@@ -475,6 +475,44 @@ against the published release (with the arm64 target and a scratch
 directory instead of `~/.local/bin`), passed its checksum and installed
 `qgate 0.8.0`.
 
+## Azure Pipelines rehearsal (task 4.2, 2026-11-16)
+
+- **Setup:** in the rehearsal project `qgate-rehearsal`, pipeline 36, a
+  branch `hotspots-0.8.0` from `main`:
+  - its first commit makes `azure-pipelines.yml` the line `jobs:` and
+    the README's Linux job at 0.8.0, cut out unchanged;
+  - `src/grade.ts`, the only TypeScript file of `main` (one commit
+    there, 2026-11-10), changes in six commits on the branch;
+  - a seventh adds a decision point to `grade` (complexity 2 -> 3).
+
+  So `grade.ts` has 8 commits in the window and complexity 3, alone in
+  its family. Its hotspot status comes from the branch history that the
+  pull request's merge commit reaches, so `main` stays untouched, as D6
+  planned. The published 0.8.0 binary gave the same Warning locally.
+  Pull request 1362, abandoned afterwards, unmerged.
+- **Build 1344** on `ubuntu-latest` (image `ubuntu-26.04`, version
+  20261111.196.1), reason `pullRequest`, result `succeeded`:
+  - Install qgate (checksum OK), qgate report, qgate comment and qgate
+    check all succeeded;
+  - `qgate comment`: "created the qgate comment (1 finding, 0 at or
+    above error)";
+  - one warning build issue of code `complexity/cyclomatic-increase`
+    at `src/grade.ts` line 2: `grade: cyclomatic complexity 2 -> 3
+    (+1); hotspot: 8 commits in 6 months, complexity 3`;
+  - no shallow-history note: the job's `fetchDepth: 0` checkout has the
+    whole history.
+- **Thread 4565,** active, by "qgate-rehearsal Build Service
+  (<organization>)", read through the REST API: "1 finding, none at or
+  above `error`." and one row whose Finding cell ends with `; hotspot:
+  8 commits in 6 months, complexity 3` (with `->` escaped as `-\>`).
+- **A slip on the agent's side, without harm:** the first attempt at
+  this rehearsal ran `cd` into a scratch clone that no longer existed,
+  and the `;`-chained `git switch main; git reset --hard origin/main`
+  that followed ran in the qgate repository. `main` already equalled
+  `origin/main`, the tree was clean, and the PR 3 branch kept its
+  commit, so nothing changed. Commands against other repositories now
+  use `git -C <path>`.
+
 ## Risks / Trade-offs
 
 - **[`git log --find-renames` is slow on large windows]** It is O(changed
