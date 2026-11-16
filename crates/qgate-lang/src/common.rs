@@ -1,6 +1,6 @@
 //! Helpers that every tree-sitter adapter needs: building the tree and
-//! refusing a file with syntax errors, lines, and unique unit names
-//! (design D1 of `add-csharp-analysis`).
+//! refusing a file with syntax errors, lines, unique unit names (design
+//! D1 of `add-csharp-analysis`), and types written without whitespace.
 
 use std::collections::HashSet;
 
@@ -81,4 +81,25 @@ pub(crate) fn unique_segment(segments: &[String], taken: &HashSet<String>, name:
         n += 1;
     }
     segment
+}
+
+/// `text` without whitespace, except one space between two words:
+/// `Dictionary<string, int>` becomes `Dictionary<string,int>`, and
+/// `scoped Span<int>` stays as it is.
+pub(crate) fn compact(text: &str) -> String {
+    let word = |c: char| c.is_alphanumeric() || c == '_' || c == '@';
+    let mut out = String::with_capacity(text.len());
+    let mut space = false;
+    for c in text.chars() {
+        if c.is_whitespace() {
+            space = true;
+            continue;
+        }
+        if space && out.chars().next_back().is_some_and(word) && word(c) {
+            out.push(' ');
+        }
+        space = false;
+        out.push(c);
+    }
+    out
 }
