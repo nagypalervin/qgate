@@ -224,4 +224,91 @@ configuration changes. Rollback: `[files] exclude = ["**/*.rs"]`.
 
 ## Self-check results
 
-Filled in during apply (D8).
+Replay of task 2.4 (D8), 2026-11-16, with the build of
+`change/add-rust-analysis-2` at `aeb53f6` (version still 0.8.0), with
+the default configuration (this repository has no `qgate.toml`).
+
+**Scope.** 52 merges, not 51: PR #34 (PR 1 of this change) merged
+meanwhile. 36 of them change `.rs` files.
+
+**Run time.** 3.85 s for all 52, at most 0.23 s per run (the merge of
+add-hotspot-context, 14 Rust files, history ranked). No run failed, no
+Rust file was unparsable.
+
+**Findings.** 218 in all, in 32 merges. All 60 TypeScript and C#
+findings are in test fixtures.
+
+| Where | Findings | Errors | Of which duplication |
+|---|---|---|---|
+| Test fixtures (`*/fixtures/*`) | 62 | 3 | 38 |
+| Integration tests (`*/tests/*`) | 56 | 2 | 53 |
+| `#[cfg(test)]` modules in `src/` | 17 | 0 | 14 |
+| Source code | 83 | 6 | 20 |
+
+A gate with `fail-on: error` would have failed 7 of the 52 pull
+requests: one for fixtures alone, one for test support code, five for
+source code. 35 findings carried hotspot context, 34 of them in source
+code.
+
+**Hand check.** All 6 source Errors, all 20 source duplicates and all 57
+source complexity Warnings, classified as *useful* (a reviewer would want
+to see it), *debatable* or *noise*:
+
+- **Errors (6):**
+  - **Useful (5):** `main` 6 -> 11; `check_revisions` 12 -> 20 and
+    `duplication` 15 -> 21, both in the CLI's busiest file (hotspot, 38
+    commits); `parse_log` new at 21, a state machine. `Walker.enter`
+    8 -> 16 in the TypeScript adapter is useful too: the dispatcher
+    gained a nested special case.
+  - **Debatable (1):** `git_message` 4 -> 10: two new match arms, each
+    with a guard holding `&&`. Flat and easy to read, yet +6.
+- **Duplicates (20):**
+  - **Useful (19):** `github.rs` is a 611-token copy of `azure.rs`. The C#
+    adapter (add-csharp-analysis) copied the TypeScript adapter's walker
+    skeleton in 9 places (walk loop, unit opening, frames, tokens);
+    PR 1 of this change did the same with 9 more copies from the C# and
+    TypeScript adapters. Neither the reviewer subagent nor Ervin raised
+    it; qgate would have. A shared walker in `common.rs` is the obvious
+    follow-up.
+  - **Debatable (1):** a block that runs from the end of a function into
+    the test helpers.
+- **Complexity Warnings (57):**
+  - **Noise (12): a new enum variant.** Every exhaustive `match` over
+    the enum gets a new arm, which rustc demands:
+    `Language.from_extension`, `Language.family` and `parse` for a new
+    language, `Format.name` and `Format.render` for a new format,
+    `<GitError as fmt::Display>.fmt` for a new error. In one of them
+    (`typescript.rs` `parse`) the new variant joined an existing arm,
+    `Language::CSharp | Language::Rust`; the `|` counts as much as a
+    separate arm would, so the rule is consistent.
+  - **Useful or debatable (20): new functions of 11 to 20.** Parsers,
+    walkers and dispatchers (`record_token`, `produces_no_tokens`,
+    `Server.dispatch`, `decision_points`). True and informative; whether
+    a reviewer acts on them is a matter of taste.
+  - **Useful (25): growth of existing functions,** most of them in the
+    CLI's `main.rs`, which grew from complexity 49 to 179 over the
+    history, every step of it a hotspot.
+
+**Test code.** 73 findings (33%) are in test code, 67 of them
+duplication. The integration-test copies are mostly the `Repo` helper,
+which exists both in `qgate-git`'s `test_support.rs` and in the CLI's
+`tests/support`, and repeated test set-ups. Only 17 findings are in
+`#[cfg(test)]` modules, so skipping those (D6) would change little;
+`[files] exclude` for fixtures and integration tests would.
+
+## Decisions after the replay
+
+Put to Ervin before the release (task 2.4); both on 2026-11-16:
+
+- **D3 stays.** A new enum variant adds one to every exhaustive `match`
+  over it: a real new path, counted as TypeScript's `case` and C#'s
+  `case` are. The README says so. If it disturbs the CI gate, a
+  language-neutral change can treat it later (a threshold for `+1`, say).
+- **D6 stays,** and this repository's `qgate.toml` excludes the
+  fixtures, `[files] exclude = ["**/fixtures/**"]` (task 4.2). Skipping
+  `#[cfg(test)]` modules would remove 17 findings; the 56 of the
+  integration tests stay visible, because some of them are real (the
+  `Repo` helper lives in two crates).
+- **Follow-ups for Ervin to order** (journal entry, task 4.4): a shared
+  walker for the three adapters (19 duplicates); the `Repo` test helper
+  in one place; the unused `qgate-core` dependency of `qgate-lang`.
