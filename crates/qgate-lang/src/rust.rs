@@ -63,9 +63,14 @@ impl<'s> Walker<'s> {
     fn walk(&mut self, root: Node<'_>) {
         let mut cursor = root.walk();
         let mut frames = Vec::new();
+        // The ancestors of the current node, so no node has to ask
+        // tree-sitter for its parent.
+        let mut ancestors: Vec<Node<'_>> = Vec::new();
         loop {
-            frames.push(self.enter(cursor.node()));
+            let node = cursor.node();
+            frames.push(self.enter(node, ancestors.last().copied()));
             if cursor.goto_first_child() {
+                ancestors.push(node);
                 continue;
             }
             loop {
@@ -78,11 +83,12 @@ impl<'s> Walker<'s> {
                 if !cursor.goto_parent() {
                     return;
                 }
+                ancestors.pop();
             }
         }
     }
 
-    fn enter(&mut self, node: Node<'_>) -> Frame {
+    fn enter(&mut self, node: Node<'_>, parent: Option<Node<'_>>) -> Frame {
         let mut frame = Frame::default();
         match node.kind() {
             // An inline module is part of the name; `mod x;` has no body
@@ -112,7 +118,12 @@ impl<'s> Walker<'s> {
                 }
             }
             kind if UNMEASURED_KINDS.contains(&kind) => self.push_scope(None, &mut frame),
-            _ => {}
+            _ => {
+                let points = decision_points(node, parent);
+                if let (Some(Some(index)), 1..) = (self.scopes.last(), points) {
+                    self.functions[*index].cyclomatic += points;
+                }
+            }
         }
         frame
     }
@@ -151,6 +162,37 @@ impl<'s> Walker<'s> {
 
     fn text(&self, node: Node<'_>) -> String {
         node.utf8_text(self.source).unwrap_or_default().to_owned()
+    }
+}
+
+/// How much the node adds to the enclosing unit's complexity (design D3).
+/// Macro arguments are token trees, not expressions, so nothing in them
+/// counts (D4).
+fn decision_points(node: Node<'_>, parent: Option<Node<'_>>) -> u32 {
+    let parent_kind = parent.map(|p| p.kind());
+    match node.kind() {
+        // `if let` and `while let` are these too, with a let condition.
+        "if_expression" | "while_expression" | "for_expression" => 1,
+        "let_declaration" => u32::from(node.child_by_field_name("alternative").is_some()),
+        // An arm counts unless its pattern is the wildcard `_`, which the
+        // grammar gives no named node; its guard is not its pattern.
+        "match_pattern" => {
+            let condition = node.child_by_field_name("condition").map(|c| c.id());
+            let mut cursor = node.walk();
+            let pattern = node
+                .named_children(&mut cursor)
+                .any(|c| Some(c.id()) != condition && !c.is_extra());
+            u32::from(pattern) + u32::from(condition.is_some())
+        }
+        "binary_expression" => u32::from(
+            node.child_by_field_name("operator")
+                .is_some_and(|op| matches!(op.kind(), "&&" | "||")),
+        ),
+        // The `&&` of a let chain is no binary expression.
+        "&&" => u32::from(parent_kind == Some("let_chain")),
+        // A `|` between two alternatives; a leading `|` separates nothing.
+        "|" => u32::from(parent_kind == Some("or_pattern") && node.prev_sibling().is_some()),
+        _ => 0,
     }
 }
 
@@ -209,6 +251,67 @@ mod tests {
                 // `macro_rules!` is not a unit
                 ("tests.adds_two", 134),
                 ("tests.deeper.helper", 137),
+            ])
+        );
+    }
+
+    /// Parse a Rust fixture and return `(name, cyclomatic)` pairs.
+    fn complexities(source: &str) -> Vec<(String, u32)> {
+        parse(source)
+            .expect("fixture parses")
+            .functions
+            .into_iter()
+            .map(|f| (f.name, f.cyclomatic))
+            .collect()
+    }
+
+    // Requirements: Rust decision points, Macros in Rust, Rust closures
+    // count towards their named ancestor.
+    #[test]
+    fn decision_points() {
+        assert_eq!(
+            complexities(include_str!("../fixtures/rust/decision_points.rs")),
+            pairs(&[
+                // scenario "A plain source file"
+                ("plain", 2),
+                // two `if`; `else` does not count
+                ("if_else_if", 3),
+                ("if_let", 2),
+                ("while_loops", 3),
+                ("for_loop", 2),
+                ("let_else", 2),
+                // scenario "Match": two arms and a guard, not the `_` arm
+                ("arms", 4),
+                // a binding arm counts
+                ("binding_arm", 3),
+                // a guard on `_` counts, the `_` arm does not
+                ("wildcard_guard", 2),
+                // scenario "Alternatives in a pattern"
+                ("alternatives", 3),
+                // a leading `|` separates nothing
+                ("leading_vert", 4),
+                ("nested_alternatives", 3),
+                ("and_or", 3),
+                // `if`, and two `&&` of a let chain
+                ("let_chain", 4),
+                // scenario "The question mark does not count"
+                ("question_mark", 1),
+                // `loop`, `break` and `continue` do not count
+                ("loops_without_conditions", 1),
+                // scenario "Let else and loops"
+                ("let_else_and_loops", 4),
+                // scenario "An iterator chain in a function"
+                ("paid", 2),
+                // a closure's `if` counts towards its function; an empty
+                // closure's `||` is not an operator
+                ("closures", 2),
+                ("outer", 2),
+                ("outer.inner", 2),
+                // scenario "A condition inside an assertion": macro
+                // arguments are not code
+                ("in_macros", 1),
+                // a `const` initializer is not measured
+                ("const_inside", 1),
             ])
         );
     }
