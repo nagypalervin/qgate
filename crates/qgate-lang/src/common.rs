@@ -103,3 +103,52 @@ pub(crate) fn compact(text: &str) -> String {
     }
     out
 }
+
+/// What an adapter does on its way through a syntax tree (design D1 of
+/// `share-adapter-walker`): [`walk`] calls `enter` on every node, walks
+/// its children if `descend` allows, and then calls `leave` with what
+/// `enter` returned, so each node can undo what it set up.
+pub(crate) trait Visit {
+    /// What entering a node pushed, so leaving it can pop the same.
+    type Frame;
+
+    /// Called on entering `node`; `ancestors` end with its parent.
+    fn enter(&mut self, node: Node<'_>, ancestors: &[Node<'_>]) -> Self::Frame;
+
+    /// Called after the node and everything below it.
+    fn leave(&mut self, frame: Self::Frame);
+
+    /// Whether to walk into the node's children; called after `enter`.
+    fn descend(&mut self, _node: Node<'_>) -> bool {
+        true
+    }
+}
+
+/// Walk the tree below `root` depth first, without recursion, so deeply
+/// nested code cannot overflow the stack. The ancestors are kept on the
+/// way, so no node has to ask tree-sitter for its parent.
+pub(crate) fn walk<V: Visit>(root: Node<'_>, visitor: &mut V) {
+    let mut cursor = root.walk();
+    let mut frames = Vec::new();
+    let mut ancestors: Vec<Node<'_>> = Vec::new();
+    loop {
+        let node = cursor.node();
+        frames.push(visitor.enter(node, &ancestors));
+        if visitor.descend(node) && cursor.goto_first_child() {
+            ancestors.push(node);
+            continue;
+        }
+        loop {
+            if let Some(frame) = frames.pop() {
+                visitor.leave(frame);
+            }
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return;
+            }
+            ancestors.pop();
+        }
+    }
+}

@@ -13,14 +13,14 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use tree_sitter::Node;
 
-use crate::common::{compact, line_of, parse_tree, unique_segment};
+use crate::common::{Visit, compact, line_of, parse_tree, unique_segment, walk};
 use crate::{FileModel, Function, ParseError, Token};
 
 /// Parse Rust source into a [`FileModel`].
 pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
     let tree = parse_tree(&tree_sitter_rust::LANGUAGE.into(), source)?;
     let mut walker = Walker::new(source.as_bytes());
-    walker.walk(tree.root_node());
+    walk(tree.root_node(), &mut walker);
     for (function, hasher) in walker.functions.iter_mut().zip(&walker.hashers) {
         function.fingerprint = hasher.finish();
     }
@@ -97,38 +97,13 @@ impl<'s> Walker<'s> {
             muted: false,
         }
     }
+}
 
-    /// Depth-first walk without recursion, so deeply nested code cannot
-    /// overflow the stack.
-    fn walk(&mut self, root: Node<'_>) {
-        let mut cursor = root.walk();
-        let mut frames = Vec::new();
-        // The ancestors of the current node, so no node has to ask
-        // tree-sitter for its parent.
-        let mut ancestors: Vec<Node<'_>> = Vec::new();
-        loop {
-            let node = cursor.node();
-            frames.push(self.enter(node, ancestors.last().copied()));
-            if cursor.goto_first_child() {
-                ancestors.push(node);
-                continue;
-            }
-            loop {
-                if let Some(frame) = frames.pop() {
-                    self.leave(&frame);
-                }
-                if cursor.goto_next_sibling() {
-                    break;
-                }
-                if !cursor.goto_parent() {
-                    return;
-                }
-                ancestors.pop();
-            }
-        }
-    }
+impl Visit for Walker<'_> {
+    type Frame = Frame;
 
-    fn enter(&mut self, node: Node<'_>, parent: Option<Node<'_>>) -> Frame {
+    fn enter(&mut self, node: Node<'_>, ancestors: &[Node<'_>]) -> Frame {
+        let parent = ancestors.last().copied();
         let mut frame = Frame::default();
         self.record_token(node, parent, &mut frame);
         self.record_code(node, &mut frame);
@@ -169,6 +144,21 @@ impl<'s> Walker<'s> {
         frame
     }
 
+    fn leave(&mut self, frame: Frame) {
+        let segments = self.segments.len() - frame.segments;
+        self.segments.truncate(segments);
+        let scopes = self.scopes.len() - frame.scopes;
+        self.scopes.truncate(scopes);
+        if frame.muted {
+            self.muted = false;
+        }
+        if frame.comment {
+            self.in_comment = false;
+        }
+    }
+}
+
+impl Walker<'_> {
     fn push_segment(&mut self, segment: String, frame: &mut Frame) {
         self.segments.push(segment);
         frame.segments += 1;
@@ -193,19 +183,6 @@ impl<'s> Walker<'s> {
         });
         self.hashers.push(DefaultHasher::new());
         self.push_scope(Some(self.functions.len() - 1), frame);
-    }
-
-    fn leave(&mut self, frame: &Frame) {
-        let segments = self.segments.len() - frame.segments;
-        self.segments.truncate(segments);
-        let scopes = self.scopes.len() - frame.scopes;
-        self.scopes.truncate(scopes);
-        if frame.muted {
-            self.muted = false;
-        }
-        if frame.comment {
-            self.in_comment = false;
-        }
     }
 
     /// Add a leaf to the fingerprint of the unit it belongs to (design D1
