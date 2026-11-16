@@ -236,6 +236,13 @@ impl<S: UnitScope> Units<S> {
         unique_segment(&self.segments, &self.taken, name)
     }
 
+    /// The qualified name `segment` would have as the last segment.
+    pub(crate) fn qualify(&self, segment: &str) -> String {
+        let mut parts = self.segments.clone();
+        parts.push(segment.to_owned());
+        parts.join(".")
+    }
+
     /// Record the unit `qualified` and return its index; it opens no
     /// segment or scope.
     pub(crate) fn add(&mut self, qualified: String, line: u32) -> usize {

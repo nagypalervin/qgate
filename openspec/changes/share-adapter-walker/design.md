@@ -89,6 +89,15 @@ source order. If `Units` needs a second entry point for that
 `#2` suffix would change, TypeScript keeps its own bookkeeping and the
 decision is recorded here. The test of D5 decides, not taste.
 
+**Outcome (task 2.4):** TypeScript fits `Units<Scope>` fully. A named
+function is `open`; a bound call takes `unique_segment`, `qualify` and
+`add`, in the same order as before, so units stay in source order. Its
+frame keeps a flag for the bound-call stack and the TypeScript-only
+`not_code` state, and the `Mark` for segments and scopes; the
+`struct_excessive_bools` exception it needed is gone. `descend` skips
+type-level subtrees and records their imports. The tests pass
+unchanged; the replay (task 3.1) is the final word.
+
 ### D4. The token sink
 
 `Tokens` holds the tokens, the muted state and the text run:
