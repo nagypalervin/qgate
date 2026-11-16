@@ -6,7 +6,7 @@
 //! `docs/adr/0001-rust-and-tree-sitter.md`. This crate does no I/O: callers
 //! read files and pick the [`Language`].
 //!
-//! Supported: TypeScript, TSX and C#. The model holds one [`Function`] per
+//! Supported: TypeScript, TSX, C# and Rust. The model holds one [`Function`] per
 //! named function unit with its qualified name, line, cyclomatic
 //! complexity and a fingerprint of its code, which tells whether the unit
 //! changed between two versions. Anonymous functions count towards their
@@ -47,6 +47,7 @@ mod common;
 mod csharp;
 mod generated;
 mod model;
+mod rust;
 mod typescript;
 
 pub use generated::{csharp_generated_header, csharp_generated_name};
@@ -62,6 +63,7 @@ pub fn parse(language: Language, source: &str) -> Result<FileModel, ParseError> 
     match language {
         Language::TypeScript | Language::Tsx => typescript::parse(language, source),
         Language::CSharp => csharp::parse(source),
+        Language::Rust => rust::parse(source),
     }
 }
 
@@ -75,6 +77,8 @@ pub enum Language {
     Tsx,
     /// C# (`.cs`).
     CSharp,
+    /// Rust (`.rs`).
+    Rust,
 }
 
 /// Languages whose code can be compared with each other: unit names can
@@ -85,6 +89,13 @@ pub enum Family {
     TypeScript,
     /// C#.
     CSharp,
+    /// Rust.
+    Rust,
+}
+
+impl Family {
+    /// Every family, each once (design D1 of `add-rust-analysis`).
+    pub const ALL: [Self; 3] = [Self::TypeScript, Self::CSharp, Self::Rust];
 }
 
 impl Language {
@@ -95,6 +106,7 @@ impl Language {
             "ts" | "mts" | "cts" => Some(Self::TypeScript),
             "tsx" => Some(Self::Tsx),
             "cs" => Some(Self::CSharp),
+            "rs" => Some(Self::Rust),
             _ => None,
         }
     }
@@ -105,6 +117,7 @@ impl Language {
         match self {
             Self::TypeScript | Self::Tsx => Family::TypeScript,
             Self::CSharp => Family::CSharp,
+            Self::Rust => Family::Rust,
         }
     }
 }
@@ -139,15 +152,43 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_rust() {
+        assert_eq!(Language::from_extension("rs"), Some(Language::Rust));
+        assert_eq!(Language::from_extension("rlib"), None);
+    }
+
+    #[test]
     fn families() {
         assert_eq!(Language::TypeScript.family(), Family::TypeScript);
         assert_eq!(Language::Tsx.family(), Family::TypeScript);
         assert_eq!(Language::CSharp.family(), Family::CSharp);
+        assert_eq!(Language::Rust.family(), Family::Rust);
+    }
+
+    // Design D1 of `add-rust-analysis`: every family once, so a loop over
+    // the families cannot miss one.
+    #[test]
+    fn all_families() {
+        for language in [
+            Language::TypeScript,
+            Language::Tsx,
+            Language::CSharp,
+            Language::Rust,
+        ] {
+            assert!(Family::ALL.contains(&language.family()));
+        }
+        let unique: std::collections::HashSet<_> = Family::ALL.iter().collect();
+        assert_eq!(unique.len(), Family::ALL.len());
     }
 
     #[test]
     fn the_csharp_grammar_loads() {
         assert_eq!(parse(Language::CSharp, ""), Ok(FileModel::default()));
+    }
+
+    #[test]
+    fn the_rust_grammar_loads() {
+        assert_eq!(parse(Language::Rust, ""), Ok(FileModel::default()));
     }
 
     #[test]

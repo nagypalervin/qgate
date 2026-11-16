@@ -22,9 +22,9 @@ pub(crate) fn parse(language: Language, source: &str) -> Result<FileModel, Parse
         Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
         Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX,
         // `lib.rs` sends only TypeScript and TSX here.
-        Language::CSharp => {
+        Language::CSharp | Language::Rust => {
             return Err(ParseError::Parser {
-                message: "the TypeScript adapter was given C#".to_owned(),
+                message: format!("the TypeScript adapter was given {language:?}"),
             });
         }
     };
