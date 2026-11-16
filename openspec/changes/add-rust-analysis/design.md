@@ -196,6 +196,15 @@ Additive: `.rs` files were ignored before, so a repository with Rust
 code gets new findings after upgrading, only for changed Rust files. No
 configuration changes. Rollback: `[files] exclude = ["**/*.rs"]`.
 
+## Measurements
+
+- **Binary size** (task 1.5, `cargo build --release -p qgate-cli` on
+  aarch64-unknown-linux-gnu, 2026-11-16): 11,605,688 bytes before the
+  grammar, 12,719,800 after: +1,088 KiB (+9.6%).
+- **Grammar detail found in task 1.4:** `macro_rules!` is one token,
+  not `macro_rules` and `!`; it changes nothing for copies, since every
+  definition starts the same way.
+
 ## Self-check results
 
 Filled in during apply (D8).

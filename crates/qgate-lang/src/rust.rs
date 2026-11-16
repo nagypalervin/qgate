@@ -9,6 +9,7 @@
 //! token trees: they add tokens, but no units and no decision points (D4).
 
 use std::collections::HashSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use tree_sitter::Node;
 
@@ -20,6 +21,9 @@ pub(crate) fn parse(source: &str) -> Result<FileModel, ParseError> {
     let tree = parse_tree(&tree_sitter_rust::LANGUAGE.into(), source)?;
     let mut walker = Walker::new(source.as_bytes());
     walker.walk(tree.root_node());
+    for (function, hasher) in walker.functions.iter_mut().zip(&walker.hashers) {
+        function.fingerprint = hasher.finish();
+    }
     Ok(FileModel {
         functions: walker.functions,
         tokens: walker.tokens,
@@ -58,6 +62,7 @@ struct Frame {
     segments: usize,
     scopes: usize,
     muted: bool,
+    comment: bool,
 }
 
 struct Walker<'s> {
@@ -71,6 +76,10 @@ struct Walker<'s> {
     scopes: Vec<Option<usize>>,
     /// Units in source order.
     functions: Vec<Function>,
+    /// The fingerprint of each unit in `functions` so far.
+    hashers: Vec<DefaultHasher>,
+    /// Whether the walk is inside a comment, which is not code of a unit.
+    in_comment: bool,
     /// Normalized tokens in source order.
     tokens: Vec<Token>,
     /// Whether the walk is inside a subtree that produces no tokens; the
@@ -86,6 +95,8 @@ impl<'s> Walker<'s> {
             taken: HashSet::new(),
             scopes: Vec::new(),
             functions: Vec::new(),
+            hashers: Vec::new(),
+            in_comment: false,
             tokens: Vec::new(),
             muted: false,
         }
@@ -124,6 +135,7 @@ impl<'s> Walker<'s> {
     fn enter(&mut self, node: Node<'_>, parent: Option<Node<'_>>) -> Frame {
         let mut frame = Frame::default();
         self.record_token(node, parent, &mut frame);
+        self.record_code(node, &mut frame);
         match node.kind() {
             // An inline module is part of the name; `mod x;` has no body
             // and names nothing here.
@@ -184,6 +196,7 @@ impl<'s> Walker<'s> {
             cyclomatic: 1,
             fingerprint: 0,
         });
+        self.hashers.push(DefaultHasher::new());
         self.push_scope(Some(self.functions.len() - 1), frame);
     }
 
@@ -194,6 +207,26 @@ impl<'s> Walker<'s> {
         self.scopes.truncate(scopes);
         if frame.muted {
             self.muted = false;
+        }
+        if frame.comment {
+            self.in_comment = false;
+        }
+    }
+
+    /// Add a leaf to the fingerprint of the unit it belongs to (design D1
+    /// of `add-test-gap-analysis`): all code but comments, doc comments
+    /// included, and semicolons. A doc comment is a subtree of its own.
+    fn record_code(&mut self, node: Node<'_>, frame: &mut Frame) {
+        if matches!(node.kind(), "line_comment" | "block_comment") && !self.in_comment {
+            self.in_comment = true;
+            frame.comment = true;
+        }
+        let Some(Some(unit)) = self.scopes.last() else {
+            return;
+        };
+        let code = &self.source[node.byte_range()];
+        if node.child_count() == 0 && !code.is_empty() && !self.in_comment && node.kind() != ";" {
+            code.hash(&mut self.hashers[*unit]);
         }
     }
 
@@ -562,6 +595,52 @@ mod tests {
         let model = parse("fn f()\n{\n    1\n}\n").expect("parses");
         let lines: Vec<u32> = model.tokens.iter().map(|t| t.line).collect();
         assert_eq!(lines, [1, 1, 1, 1, 2, 3, 4]);
+    }
+
+    // Design D1 of `add-test-gap-analysis`: layout and comments (doc
+    // comments too) are not changes; literals, names, types, closures and
+    // macro arguments are; a nested function's change is its own, and an
+    // attribute before a function or a static's initializer belongs to no
+    // unit.
+    #[test]
+    fn fingerprints_tell_changed_code() {
+        let fingerprints = |source: &str| -> Vec<(String, u64)> {
+            parse(source)
+                .expect("fixture parses")
+                .functions
+                .into_iter()
+                .map(|f| (f.name, f.fingerprint))
+                .collect()
+        };
+        let before = fingerprints(include_str!("../fixtures/rust/fingerprints/before.rs"));
+        let after = fingerprints(include_str!("../fixtures/rust/fingerprints/after.rs"));
+        let names = |units: &[(String, u64)]| units.iter().map(|u| u.0.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&before), names(&after), "the same units");
+        let changed: Vec<String> = before
+            .into_iter()
+            .zip(after)
+            .filter(|(b, a)| b.1 != a.1)
+            .map(|(b, _)| b.0)
+            .collect();
+        assert_eq!(
+            changed,
+            [
+                "literal",
+                "renamed",
+                "typed",
+                "outer.inner",
+                "closure",
+                "in_macro",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_syntax_error_names_its_line() {
+        assert_eq!(
+            parse("fn f() {\n    let x = ;\n}\n"),
+            Err(ParseError::Syntax { line: 2 })
+        );
     }
 
     // Requirement: Rust function units, "Declarations without a body".
