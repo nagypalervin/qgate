@@ -116,3 +116,22 @@ jobs:
           $configuration.Run.Exit = $true
           $configuration.Output.Verbosity = 'Detailed'
           Invoke-Pester -Configuration $configuration
+
+  qgate:
+    # qgate checks its own pull requests (design D9 of add-rust-analysis):
+    # the released action, not `uses: ./`, because a release pull request
+    # bumps QGATE_VERSION before the binaries exist. Bump the pin after
+    # each release. `qgate.toml` leaves the test fixtures out.
+    name: qgate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: nagypalervin/qgate@v0.9.0
+        with:
+          fail-on: error
