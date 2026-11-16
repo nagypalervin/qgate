@@ -6,7 +6,7 @@ messages and the PR body are written to files first.
 
 ## 1. Baseline
 
-- [ ] 1.1 Build the release binary from `main` and run the replay (design D5, check 2) over all merges of `main`; keep the reports without run times as the baseline in the scratchpad. Run check 3 on `main` and record the number of duplicates among the adapters in `design.md`.
+- [x] 1.1 Build the release binary from `main` and run the replay (design D5, check 2) over all merges of `main`; keep the reports without run times as the baseline in the scratchpad. Run check 3 on `main` and record the number of duplicates among the adapters in `design.md`.
 
 ## 2. The shared skeleton
 

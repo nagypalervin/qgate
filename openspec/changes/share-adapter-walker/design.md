@@ -115,6 +115,14 @@ Three checks, recorded in "Verification" below:
    HEAD~1` lists the duplicates among the adapters. On `main` that is
    the walker copies; on this branch none of them, and no new one.
 
+### D7. Generic node helpers move too
+
+Check 3 on `main` (task 1.1) also lists small helpers the C# adapter
+copied from the TypeScript one: whether a node has a child of some
+kinds, and whether a node's operator is one of some. They hold no
+language rule, so they move to `common.rs` with the walker. Found
+during apply; within the change's aim, recorded here.
+
 ### D6. One pull request, no release
 
 Everything is in `qgate-lang` and checked mechanically, so one pull
@@ -140,4 +148,12 @@ configuration.
 
 ## Verification
 
-Filled in during apply (D5).
+**Baseline (task 1.1, `main` at `59f5ea2`):**
+
+- **Replay:** 54 merges of `main` (#35 and #36 merged since the replay
+  of `add-rust-analysis`), 229 findings; the reports without run times
+  are the baseline.
+- **Check 3:** 30 duplicates among the adapters. 12 are between test
+  modules (out of scope). 18 are in source code: 15 copies of the walker
+  skeleton (the parse entry, `new`, `walk`, `open_unit`, `leave`, the
+  token push) and 3 of generic node helpers (D7).
