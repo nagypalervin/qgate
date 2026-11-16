@@ -20,7 +20,7 @@ messages and PR bodies are written to files first.
 - [x] 2.3 CLI, two-file form: `.rs` accepted, Rust with another family rejected, the unsupported-type message names `.rs`. Failing CLI tests first for the scenarios of "Supported input files".
 - [x] 2.4 Replay (D8) over the 51 merges of `main`: script in the scratchpad, per pull request the findings by rule and severity, unparsable files, hotspot context and run time; every Error and at least 20 Warnings classified as useful, debatable or noise. Results in "Self-check results" of `design.md`. Stop and ask Ervin if the numbers argue for changing D3 to D6 before the release.
 - [x] 2.5 README: Rust in the status line, the checks it gets, its decision points and names, macros and `?`, the two-file form; the roadmap row "Languages" names Rust. Check every sentence against a test or the replay.
-- [ ] 2.6 Version 0.9.0 in `Cargo.toml` (with `Cargo.lock`) and every `QGATE_VERSION` of `action.yml`; both release checks pass locally for `v0.9.0`.
+- [x] 2.6 Version 0.9.0 in `Cargo.toml` (with `Cargo.lock`) and every `QGATE_VERSION` of `action.yml`; both release checks pass locally for `v0.9.0`.
 
 ## 3. Release 0.9.0 (between PR 2 and PR 3)
 
