@@ -386,6 +386,21 @@ Fixed:
 - `an_unparsable_hotspot` says that the filter is pinned by a unit
   test, and two test comments are corrected.
 
+## Review of PR 3
+
+The reviewer found no blocker and checked the tag, both runs, the
+published release and its notes, every archive size, the arm64 binary,
+an equivalent hotspot repository and every README version. Fixed:
+- coverage had no home once M5 was done; Ervin chose the "Later" row
+  (see "README at 0.8.0");
+- the slip record now says the checkout moved and was restored;
+- the rehearsal record names the Warning row and the REST API reads;
+- task 4.1 says what was built beyond its text;
+- the journal entry matches the record on the PR 2 review (one test
+  that could not fail, two edges no test pinned) and on the effort
+  (three calendar days);
+- the "How it works" diagram shows the hotspot step.
+
 ## Release notes for 0.8.0 (draft, task 2.4)
 
 To go above GitHub's generated list when the release is published:
@@ -432,6 +447,95 @@ repositories. Fixed:
 - the proposal's example names `Cart.Total()`;
 - `day()` is arithmetic, merges share a `merge_at` helper, and
   `parse_log` has tests on synthetic input (copies, merges, errors).
+
+## Release 0.8.0 (task 3.1)
+
+- PR #32 merged as 1ab25be. Ervin confirmed the merge, the CI run of
+  `main` (43857772041) passed, and then the agent pushed the annotated
+  tag `v0.8.0` ("qgate 0.8.0") after `check-version.sh` and
+  `check-action-version.sh` accepted it.
+- Release run 43858735458: all nine jobs green.
+- The draft held six archives and `SHA256SUMS`; `sha256sum --check`
+  passed for all six. The Linux arm64 archive's binary (11,342,912
+  bytes) printed `qgate 0.8.0`, and its `qgate-pr-comment.ps1` is byte
+  for byte the one on `main`. In a throwaway repository where
+  `src/cart.ts` changed in six dated commits, an uncommitted edit of
+  `total` gave `warning src/cart.ts:2  total: cyclomatic complexity 3
+  -> 4 (+1); hotspot: 6 commits in 6 months, complexity 4
+  [complexity/cyclomatic-increase]`, exit code 0.
+- Archive sizes in bytes against 0.7.0:
+
+  | Archive | 0.7.0 | 0.8.0 |
+  |---|---|---|
+  | `x86_64-unknown-linux-musl.tar.gz` | 2,182,364 | 2,211,193 |
+  | `aarch64-unknown-linux-musl.tar.gz` | 1,982,046 | 2,006,768 |
+  | `aarch64-apple-darwin.tar.gz` | 1,981,135 | 2,005,504 |
+  | `x86_64-apple-darwin.tar.gz` | 2,013,757 | 2,042,543 |
+  | `x86_64-pc-windows-msvc.zip` | 1,969,096 | 1,995,280 |
+  | `aarch64-pc-windows-msvc.zip` | 1,861,251 | 1,886,174 |
+
+- The agent put the drafted release notes above the generated list in
+  the draft (Ervin asked why he should), and Ervin published it on
+  2026-11-16 (11:43 UTC). `releases/latest` is `v0.8.0`.
+
+## README at 0.8.0 (task 4.1)
+
+Every install block, both `uses:` lines and the pinned commit
+(`1ab25beb08eeb8d78c903d1aa627811792cbd815`, `v0.8.0^{commit}`) name
+0.8.0. `grep` finds one `0.7.0`, on purpose: the M5 row dates the tests
+analyzer. The M5 row is done, with both halves dated.
+
+**Coverage moves to "Later" (decided in the review of PR 3,
+2026-11-16, Ervin).** The coverage-drop check was never in the M5 row,
+but "How it works" and the crate docs of `qgate-analyzers` tied it to
+M5 as planned. With M5 done it needed a home: Ervin chose the roadmap's
+"Later" row, which now names it, and the crate docs and "How it works"
+point there. The "How it works" diagram also gained the hotspot step. The Linux install block, run as written
+against the published release (with the arm64 target and a scratch
+directory instead of `~/.local/bin`), passed its checksum and installed
+`qgate 0.8.0`.
+
+## Azure Pipelines rehearsal (task 4.2, 2026-11-16)
+
+- **Setup:** in the rehearsal project `qgate-rehearsal`, pipeline 36, a
+  branch `hotspots-0.8.0` from `main`:
+  - its first commit makes `azure-pipelines.yml` the line `jobs:` and
+    the README's Linux job at 0.8.0, cut out unchanged;
+  - `src/grade.ts`, the only TypeScript file of `main` (one commit
+    there, 2026-11-10), changes in six commits on the branch;
+  - a seventh adds a decision point to `grade` (complexity 2 -> 3).
+
+  So `grade.ts` has 8 commits in the window and complexity 3, alone in
+  its family. Its hotspot status comes from the branch history that the
+  pull request's merge commit reaches, so `main` stays untouched, as D6
+  planned. The published 0.8.0 binary gave the same Warning locally.
+  Pull request 1362, abandoned afterwards, unmerged.
+- **Build 1344** on `ubuntu-latest` (image `ubuntu-26.04`, version
+  20261111.196.1), reason `pullRequest`, result `succeeded`:
+  - Install qgate (checksum OK), qgate report, qgate comment and qgate
+    check all succeeded;
+  - `qgate comment`: "created the qgate comment (1 finding, 0 at or
+    above error)";
+  - one warning build issue of code `complexity/cyclomatic-increase`
+    at `src/grade.ts` line 2, read from the build timeline through the
+    REST API: `grade: cyclomatic complexity 2 -> 3 (+1); hotspot: 8
+    commits in 6 months, complexity 3`;
+  - no shallow-history note: the job's `fetchDepth: 0` checkout has the
+    whole history.
+- **Thread 4565,** active, by "qgate-rehearsal Build Service
+  (<organization>)", read through the REST API: "1 finding, none at or
+  above `error`." and one Warning row whose Finding cell ends with `;
+  hotspot: 8 commits in 6 months, complexity 3` (with `->` escaped as
+  `-\>`).
+- **A slip on the agent's side, without harm:** the first attempt at
+  this rehearsal ran `cd` into a scratch clone that no longer existed,
+  and the `;`-chained `git switch main; git reset --hard origin/main`
+  that followed ran in the qgate repository. The checkout moved from the
+  PR 3 branch to `main`, and was switched back. The reset changed
+  nothing, since `main` already equalled `origin/main`; the tree was
+  clean, and the PR 3 branch kept its commit (checked in the reflog), so
+  nothing was lost. Commands against other repositories now use `git -C
+  <path>`.
 
 ## Risks / Trade-offs
 

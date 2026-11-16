@@ -163,7 +163,9 @@ approves the design (Gate 2).
 ### Modified Capabilities
 
 - `report-formats`: a finding may carry a `hotspot` key in the JSON
-  report ("Finding fields").
+  report. (At the archive this became its own requirement, "Hotspot in
+  the JSON report", instead of a longer "Finding fields", which would
+  have passed the 500 characters `openspec validate --strict` accepts.)
 
 ## Impact
 
