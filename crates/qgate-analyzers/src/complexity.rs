@@ -190,7 +190,7 @@ fn own_name(name: &str) -> &str {
         if c == '.' && depth == 0 {
             start = i + 1;
         }
-        depth = bracket(c, name[..i].ends_with('-')).apply(depth);
+        depth = bracket(c, &name[..i]).apply(depth);
     }
     &name[start..]
 }
@@ -212,12 +212,19 @@ impl Bracket {
     }
 }
 
-/// `c` as a bracket; the `>` of a `->` (`after_dash`) is none.
-fn bracket(c: char, after_dash: bool) -> Bracket {
+/// `c`, which follows `before` in a name, as a bracket. The `>` of a
+/// `->`, and the `<` and `>` of a C# operator such as `operator <=` or
+/// `operator >>`, are none.
+fn bracket(c: char, before: &str) -> Bracket {
+    let in_operator = || {
+        let operator = before.trim_end_matches(['<', '>']);
+        operator.ends_with("operator ") && before.len() - operator.len() < 3
+    };
     match c {
-        '(' | '<' | '[' => Bracket::Open,
+        '(' | '[' => Bracket::Open,
         ')' | ']' => Bracket::Close,
-        '>' if !after_dash => Bracket::Close,
+        '<' if !in_operator() => Bracket::Open,
+        '>' if !before.ends_with('-') && !in_operator() => Bracket::Close,
         _ => Bracket::Other,
     }
 }
@@ -586,6 +593,54 @@ mod tests {
         assert_eq!(findings, vec![]);
     }
 
+    // complexity-analysis: "Moved functions", a larger group: `C.load`
+    // has the code of `A.load` (12), `D.load` that of `B.load` (13), so
+    // both pair up and nothing is reported; swapped, `D.load` would be
+    // 12 -> 13. Design D2: the result does not depend on file order.
+    #[test]
+    fn a_group_forms_two_pairs_in_any_order() {
+        let mut files = vec![
+            ("src/a.ts", Some(moved!("pairs", "before/a.ts")), None),
+            ("src/b.ts", Some(moved!("pairs", "before/b.ts")), None),
+            ("src/c.ts", None, Some(moved!("pairs", "after/c.ts"))),
+            ("src/d.ts", None, Some(moved!("pairs", "after/d.ts"))),
+        ];
+        assert_eq!(run_files(Language::TypeScript, &files), vec![]);
+        files.reverse();
+        assert_eq!(run_files(Language::TypeScript, &files), vec![]);
+    }
+
+    // complexity-analysis: "Moved functions", "when neither has another
+    // such partner": `C.load` and `D.load` both have the code of the one
+    // removed `A.load`, so neither is matched, and a unit is matched at
+    // most once (design D2).
+    #[test]
+    fn two_claimants_of_one_removed_unit_are_new() {
+        let mut files = vec![
+            ("src/a.ts", Some(moved!("claimants", "before/a.ts")), None),
+            ("src/c.ts", None, Some(moved!("claimants", "after/c.ts"))),
+            ("src/d.ts", None, Some(moved!("claimants", "after/d.ts"))),
+        ];
+        let at = |path: &str| {
+            let mut finding = new(Severity::Warning, "", 2, 12);
+            finding.location.path = path.into();
+            finding.message = format!(
+                "{}.load: new function, cyclomatic complexity 12",
+                if path == "src/c.ts" { "C" } else { "D" }
+            );
+            finding
+        };
+        assert_eq!(
+            run_files(Language::TypeScript, &files),
+            vec![at("src/c.ts"), at("src/d.ts")]
+        );
+        files.reverse();
+        assert_eq!(
+            run_files(Language::TypeScript, &files),
+            vec![at("src/d.ts"), at("src/c.ts")]
+        );
+    }
+
     // Design D2: the split at the last `.` outside brackets.
     #[test]
     fn own_names() {
@@ -595,6 +650,18 @@ mod tests {
         assert_eq!(own_name("Cart.get size"), "get size");
         assert_eq!(own_name("o.[a.b]"), "[a.b]");
         assert_eq!(own_name("A.create#2"), "create#2");
+        // C# operators: their `<` and `>` are no brackets.
+        assert_eq!(
+            own_name("Cart.operator <(Cart, Cart).Local(int)"),
+            "Local(int)"
+        );
+        assert_eq!(own_name("Cart.operator <<(Cart, int).Local()"), "Local()");
+        assert_eq!(own_name("Cart.operator >>>(Cart, int).Local()"), "Local()");
+        assert_eq!(
+            own_name("Cart.operator <=(Cart, Cart)"),
+            "operator <=(Cart, Cart)"
+        );
+        assert_eq!(own_name("Box<dyn Fn() -> u8>.call"), "call");
         assert_eq!(own_name("total"), "total");
     }
 
