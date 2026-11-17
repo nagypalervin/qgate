@@ -59,13 +59,16 @@ refactoring of `added`, and its existing tests (`added_code`,
 `added_code_has_a_limit`) cover it.
 
 *Why the middle (Ervin, 2026-11-17):* a limit on the whole units, like
-that of `evidence`, would leave every moved and edited unit above about
-5,800 own tokens unmatched. Because of the twofold size check, about
-5,800 tokens is where the product first passes 2^26. Such a unit then
-counts as new, and a large unit is likely to be reported as a false
-Error. A move usually changes a few places, often near the signature, so
-the middle stays short. With the cut, the limit bites only when the two
-units differ along almost all of a long body.
+that of `evidence`, would leave a moved and edited unit unmatched from
+somewhere between about 5,800 own tokens (beside a namesake twice as
+long; the twofold size check allows no more) and 8,192 (beside one of
+the same size). Such a unit then counts as new, and a large unit is
+likely to be reported as a false Error. A move usually changes a few
+places, often near the signature, so the middle stays short. With the
+cut, the limit bites only when the first and the last difference of two
+long units lie far apart, so that the middles multiply to more than
+2^26. Two changed tokens can be enough: one near the start and one near
+the end of a long body (the test of "both ends" changes two operators).
 
 *Alternative:* the whole-unit limit. It needs fewer lines but gives the
 false Errors above. Another alternative is a faster subsequence
@@ -125,11 +128,17 @@ for a decision.
   twofold are skipped. → A known risk, left for later. The replay shows
   the run times.
 - [A long unit changed at both ends] It is no longer matched, so it is
-  reported as new: a Warning, or an Error above 20. → Its two versions
-  differ over more than 8,192 tokens each, so a reader sees a large
-  change anyway. No such unit is in the 150 pull requests. This is the
-  cautious side for time. It is not the cautious side for severity, and
-  the proposal records that trade.
+  reported as new: a Warning, or an Error above 20. The change can be
+  small: a modifier near the signature (the SV19 kind of edit) and one
+  line near the end of a body whose middle passes 2^26 pairs, for
+  example about 8,200 own tokens on both sides, or 6,000 beside 12,000.
+  A reader then sees a false "new function" for a two-line edit. → No
+  unit of the 150 pull requests comes near this size (the slowest run
+  is 7.0 s). The limit is the cautious side for time, not for severity.
+  A diff algorithm whose cost grows with the number of differences
+  (Myers, O((N+M)·D)) would match such a unit in time and bound the
+  cost by the differences instead. That would be a later change, if a
+  real case shows up (reviewer, 2026-11-17).
 - [The cut is greedy] For two lists that share only one long common
   start, the cut does all the work and the middle is empty. That is the
   intended case, not a risk.
@@ -152,6 +161,17 @@ to `shares_half` and reverted; every one fails a test:
   `a_long_moved_function_changed_in_one_place`,
   `evidence_is_half_of_both_units_tokens_in_order`,
   `method_moved_to_another_file` and `moved_and_inlined` fail.
+
+After the review (task 3.1), the "one place" tests change one token near
+the start and one near the end, so each cut is pinned by a test of the
+move as well as by those of `added`:
+
+- without the cut of the common start: `added_code`,
+  `added_code_has_a_limit`, `move_evidence_has_a_limit` and
+  `a_long_moved_function_changed_in_one_place` fail;
+- without the cut of the common end: `added_code_has_a_limit`,
+  `move_evidence_has_a_limit` and
+  `a_long_moved_function_changed_in_one_place` fail.
 
 **Re-measurement (task 2.1), 2026-11-17.** The tools of
 `change/evaluate-angular-dotnet` (identical to those of the PR 42

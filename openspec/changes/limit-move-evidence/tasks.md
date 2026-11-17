@@ -16,8 +16,8 @@ One pull request on `change/limit-move-evidence`, no release.
 
 ## 3. Review and journal
 
-- [ ] 3.1 Run the `reviewer` subagent on the branch and fix its findings. Verify that the checks of 1.5 pass again.
-- [ ] 3.2 Add `docs/journal/2026-11-17-limit-move-evidence.md` (dated on the day of the work), following `docs/journal/README.md`. Verify that it names the decision on the cut and the replay result.
+- [x] 3.1 Run the `reviewer` subagent on the branch and fix its findings. Verify that the checks of 1.5 pass again.
+- [x] 3.2 Add `docs/journal/2026-11-17-limit-move-evidence.md` (dated on the day of the work), following `docs/journal/README.md`. Verify that it names the decision on the cut and the replay result.
 
 ## Workflow follow-up
 

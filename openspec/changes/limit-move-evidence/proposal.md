@@ -58,9 +58,12 @@ the same limit here.
 - One small change, one pull request, no release (Ervin, 2026-11-17).
 - The limit applies to the middle that is left after the common start
   and end are cut off, not to the units as a whole. A whole-unit limit
-  would make every moved and edited unit above about 5,800 own tokens
-  new, and such a unit would likely be reported as a false Error
+  would make a moved and edited unit new from somewhere between about
+  5,800 and 8,192 own tokens, depending on its namesake's size, and such
+  a unit would likely be reported as a false Error
   `complexity/cyclomatic-new` (Ervin, 2026-11-17, at proposal time).
+  With the cut, a long unit changed near both its start and its end can
+  still exceed the limit and count as new (design, Risks).
 
 ## Capabilities
 

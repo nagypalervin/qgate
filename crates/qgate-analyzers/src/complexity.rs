@@ -272,10 +272,10 @@ fn added(before: &[usize], after: &[usize]) -> Option<Vec<usize>> {
     Some(outside(before, after, &skip))
 }
 
-/// The middles of `a` and `b`: what is left of each when their common
-/// start and then, of the rest, their common end are cut off, after the
-/// number of tokens cut from each. A longest common subsequence of `a`
-/// and `b` is the cut tokens plus one of the middles.
+/// The number of tokens cut from each of `a` and `b`, and their middles:
+/// what is left of each when their common start and then, of the rest,
+/// their common end are cut off. A longest common subsequence of `a` and
+/// `b` is the cut tokens plus a longest common subsequence of the middles.
 fn middles<'t>(a: &'t [usize], b: &'t [usize]) -> (usize, &'t [usize], &'t [usize]) {
     let start = a.iter().zip(b).take_while(|(x, y)| x == y).count();
     let (a, b) = (&a[start..], &b[start..]);
@@ -365,8 +365,8 @@ impl<'a> Unit<'a> {
 /// Pair unmatched after units with removed units of the same own name
 /// (design D2), in two passes over each group: first units with the same
 /// code (fingerprint), then, among the rest, units with code evidence
-/// ([`shares_half`], which has a limit, so two long units that differ
-/// almost throughout are matched only by the same code).
+/// ([`shares_half`], which has a limit, so two long units whose first
+/// and last differences lie far apart are matched only by the same code).
 fn moves<'a, K: Copy>(unmatched: &[(K, Unit<'a>)], removed: &[Unit<'a>]) -> Vec<(K, Unit<'a>)> {
     let mut groups: BTreeMap<&str, Group<'a, K>> = BTreeMap::new();
     for &(key, unit) in unmatched {
@@ -449,9 +449,10 @@ fn settle<'a, K: Copy>(
 /// least half of each one's length: the evidence of a move (design D2).
 /// A unit without tokens is no evidence, nor is one more than twice as
 /// long as the other, which is checked before the subsequence. The
-/// subsequence is the common start and end plus one of the [`middles`];
-/// when those form more than [`ALIGNED_PAIRS`] pairs, they are not
-/// compared and there is no evidence (design D1 of `limit-move-evidence`).
+/// subsequence is the common start and end plus a longest common
+/// subsequence of the [`middles`]; when the middles form more than
+/// [`ALIGNED_PAIRS`] pairs, they are not compared and there is no
+/// evidence (design D1 of `limit-move-evidence`).
 fn shares_half(a: &[usize], b: &[usize]) -> bool {
     let (shorter, longer) = if a.len() <= b.len() { (a, b) } else { (b, a) };
     if shorter.is_empty() || 2 * shorter.len() < longer.len() {
@@ -931,7 +932,7 @@ mod tests {
     // Design D1 of `limit-move-evidence`: two units whose middles, without
     // the common start and end, form more than 2^26 pairs are no partners,
     // though they share almost all their tokens; a change in one place
-    // leaves a middle of one token.
+    // leaves a middle of one token, near the start or near the end.
     #[test]
     fn move_evidence_has_a_limit() {
         let long: Vec<usize> = (0..9000).collect();
@@ -939,9 +940,11 @@ mod tests {
         ends[0] = usize::MAX;
         ends[8999] = usize::MAX;
         assert!(!shares_half(&long, &ends));
-        let mut one = long.clone();
-        one[4500] = usize::MAX;
-        assert!(shares_half(&long, &one));
+        for place in [10, 8989] {
+            let mut one = long.clone();
+            one[place] = usize::MAX;
+            assert!(shares_half(&long, &one), "changed at {place}");
+        }
     }
 
     /// A C# class `class` whose method `Run(int)`, on line 5, has
@@ -975,8 +978,9 @@ mod tests {
     }
 
     // complexity-analysis: "A long moved function changed at both ends".
-    // The two versions differ over more than 8,192 tokens each, so they
-    // are not compared, and `Helpers.Run(int)` is new.
+    // Only two operators change, but one is near the start and one near
+    // the end, so the middles between them have more than 8,192 tokens
+    // each. They are not compared, and `Helpers.Run(int)` is new.
     #[test]
     fn a_long_moved_function_changed_at_both_ends() {
         let findings = moved_run(
@@ -990,14 +994,17 @@ mod tests {
 
     // complexity-analysis: "A long moved function changed in one place".
     // The fingerprints differ; the common start and end leave a middle
-    // of one token, so the code evidence matches the two.
+    // of one token, so the code evidence matches the two. Once near the
+    // start and once near the end, so each cut is needed.
     #[test]
     fn a_long_moved_function_changed_in_one_place() {
-        let findings = moved_run(
-            &long_run("Tests", "d += 1", "d += 2"),
-            &long_run("Helpers", "d -= 1", "d += 2"),
-        );
-        assert_eq!(findings, vec![]);
+        let before = long_run("Tests", "d += 1", "d += 2");
+        for after in [
+            long_run("Helpers", "d -= 1", "d += 2"),
+            long_run("Helpers", "d += 1", "d -= 2"),
+        ] {
+            assert_eq!(moved_run(&before, &after), vec![]);
+        }
     }
 
     // complexity-analysis: "A long function moved unchanged". The same
