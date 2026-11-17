@@ -248,3 +248,8 @@ appear. No configuration changes.
   The end-to-end test of the CLI's wiring (task 4.4) comes in PR 2,
   where the analyzer reads the lines. The trace still stores both
   parities of diagonals; halving it is left out.
+- **qgate on itself.** It reported two Warnings: `myers` as a new
+  function of complexity 18, and the test oracle of the diff as a copy
+  of complexity's `common_in_order`. The search is now split in two,
+  and `common_in_order` moved into `diff`, generic, for both. After
+  that, no finding.

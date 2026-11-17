@@ -22,7 +22,7 @@ show`, and `compare.py` from the archived `complexity-of-moved-code`.
 - [x] 3.1 Add `before_lines` and `after_lines` to `ChangedSource` (design D4) and fill them in `crates/qgate-cli/src/main.rs` and in the duplication tests' helpers. The analyzer does not read them yet. Verify that `cargo test --workspace` passes unchanged.
 - [x] 3.2 Run `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`. Verify that all three pass.
 - [x] 3.3 Build the release binary and replay the 150 pull requests. Verify that every finding is identical to the baseline and that the slowest run does not grow noticeably. Record the result in design.md under a new "Verification" section.
-- [ ] 3.4 Run the `reviewer` subagent on PR 1's commits and fix its findings. Verify that the checks of 3.2 pass again. Then open PR 1. The human merges it.
+- [x] 3.4 Run the `reviewer` subagent on PR 1's commits and fix its findings. Verify that the checks of 3.2 pass again. Then open PR 1. The human merges it.
 
 ## 4. Written lines in the duplication analyzer (PR 2)
 
