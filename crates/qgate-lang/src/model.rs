@@ -39,6 +39,10 @@ pub struct Token {
     pub text: String,
     /// 1-based line of the token.
     pub line: u32,
+    /// The index, in [`FileModel::functions`], of the unit whose own code
+    /// the token is: the code its fingerprint covers, without the code of
+    /// nested named units. `None` outside every unit.
+    pub unit: Option<u32>,
 }
 
 /// One import of another module: an `import` or `export ... from`

@@ -512,6 +512,7 @@ mod tests {
             .map(|(i, text)| Token {
                 text: text.clone(),
                 line: u32::try_from(i).expect("small") + 1,
+                unit: None,
             })
             .collect()
     }

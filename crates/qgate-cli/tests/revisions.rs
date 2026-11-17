@@ -5,6 +5,7 @@
 
 mod support;
 
+use std::fmt::Write as _;
 use std::process::{Command, Output};
 use std::time::{Duration, SystemTime};
 
@@ -218,6 +219,43 @@ fn renamed_from_javascript_has_no_earlier_functions() {
     assert_eq!(
         stdout(&out),
         "warning src/util.ts:1  big: new function, cyclomatic complexity 12  \
+         [complexity/cyclomatic-new]\n",
+        "{}",
+        stderr(&out)
+    );
+}
+
+// complexity-analysis: Moved functions, "Moved out of a deleted
+// JavaScript file". JavaScript is not analyzed for complexity, so its
+// functions are no move partners (design D1 of `complexity-of-moved-code`);
+// the code still counts for duplication, so the move is no new copy.
+#[test]
+fn a_function_moved_out_of_a_deleted_javascript_file_is_new() {
+    let ifs = |indent: &str| {
+        (0..14).fold(String::new(), |mut text, i| {
+            let _ = writeln!(text, "{indent}if (c[{i}]) {{ return {i}; }}");
+            text
+        })
+    };
+    let repo = Repo::new();
+    repo.write(
+        "src/legacy.js",
+        format!("function load(c) {{\n{}  return -1;\n}}\n", ifs("  ")),
+    );
+    repo.commit("base");
+    repo.remove("src/legacy.js");
+    repo.write(
+        "src/store.ts",
+        format!(
+            "export class Store {{\n  load(c: boolean[]): number {{\n{}    return -1;\n  }}\n}}\n",
+            ifs("    ")
+        ),
+    );
+    repo.commit("head");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(
+        stdout(&out),
+        "warning src/store.ts:2  Store.load: new function, cyclomatic complexity 15  \
          [complexity/cyclomatic-new]\n",
         "{}",
         stderr(&out)

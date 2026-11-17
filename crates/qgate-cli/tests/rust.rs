@@ -248,3 +248,28 @@ fn rust_files_get_no_test_findings() {
         stderr(&out)
     );
 }
+
+// complexity-analysis: "Another language family": a TypeScript function
+// removed and a Rust function of the same name added are not a move.
+#[test]
+fn a_function_of_another_family_is_not_a_move() {
+    let repo = Repo::new();
+    repo.write("src/run.ts", support::function("run", 11));
+    repo.commit("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.remove("src/run.ts");
+    let ifs = "    if c[0] {\n        return 0;\n    }\n".repeat(11);
+    repo.write(
+        "src/run.rs",
+        format!("pub fn run(c: &[bool]) -> i32 {{\n{ifs}    -1\n}}\n"),
+    );
+    repo.commit("rewrite run in Rust");
+    let out = repo.qgate(&["--base", "main", "--fail-on", "never"]);
+    assert_eq!(
+        stdout(&out),
+        "warning src/run.rs:1  run: new function, cyclomatic complexity 12  \
+         [complexity/cyclomatic-new]\n",
+        "{}",
+        stderr(&out)
+    );
+}
