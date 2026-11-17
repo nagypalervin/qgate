@@ -10,6 +10,13 @@
 - **The replay as a safety net again.** 56 merges, 234 findings before
   and after. 16 messages changed, all only by a lifetime leaving a name.
   Nothing else moved.
+- **qgate reviewed its own fix.** Run on the branch, it flagged the new
+  `left_out_of_name` at complexity 13: a match whose `|` alternatives
+  and inline closures held two rules of their own. Two named helpers
+  brought it below the threshold of 11. It also flagged two test
+  passages (a throwaway repo, two commits, a run, an assert) as copies
+  of other CLI tests: the idiom the shared `Repo` follow-up is about,
+  left as it is.
 
 **Had to step in:** These were the human's calls:
 - choosing this follow-up first;
@@ -26,7 +33,7 @@
   `higher_ranked_trait_bound` with ordinary `type_parameters`. Probing
   the tree before writing the rule found both.
 
-**Effort:** about an hour; 1 PR, 5 commits, the replay run twice.
+**Effort:** about an hour; 1 PR, 6 commits, the replay run twice.
 
 **Follow-ups for Ervin to order:**
 - the `Repo` test helper in one place (still open from

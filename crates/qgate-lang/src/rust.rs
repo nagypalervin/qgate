@@ -248,23 +248,30 @@ fn left_out_of_name(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
         "lifetime" | "lifetime_parameter" | "for_lifetimes" => true,
         _ if node.is_extra() => true,
         "type_arguments" | "type_parameters" => only_lifetimes(node),
-        // A lifetime takes the separator after it, or the one before it
-        // if it is the last in its list.
-        "," | "+" => {
-            sibling(node, Node::prev_sibling).is_some_and(is_lifetime)
-                || sibling(node, Node::next_sibling).is_some_and(|next| {
-                    is_lifetime(next)
-                        && !sibling(next, Node::next_sibling)
-                            .is_some_and(|after| matches!(after.kind(), "," | "+"))
-                })
-        }
-        "for" => parent.is_some_and(|p| {
-            p.kind() == "higher_ranked_trait_bound"
-                && p.child_by_field_name("type_parameters")
-                    .is_some_and(only_lifetimes)
-        }),
+        "," | "+" => separates_a_lifetime(node),
+        "for" => parent.is_some_and(binds_only_lifetimes),
         _ => false,
     }
+}
+
+/// Whether `node` is a higher-ranked bound whose `for<...>` holds only
+/// lifetimes, so its `for` keyword leaves with them.
+fn binds_only_lifetimes(node: Node<'_>) -> bool {
+    node.kind() == "higher_ranked_trait_bound"
+        && node
+            .child_by_field_name("type_parameters")
+            .is_some_and(only_lifetimes)
+}
+
+/// Whether the separator `node` leaves with a lifetime: a lifetime takes
+/// the separator after it, or the one before it if it is the last in its
+/// list.
+fn separates_a_lifetime(node: Node<'_>) -> bool {
+    let is_separator = |n: Node<'_>| matches!(n.kind(), "," | "+");
+    sibling(node, Node::prev_sibling).is_some_and(is_lifetime)
+        || sibling(node, Node::next_sibling).is_some_and(|next| {
+            is_lifetime(next) && !sibling(next, Node::next_sibling).is_some_and(is_separator)
+        })
 }
 
 fn is_lifetime(node: Node<'_>) -> bool {
