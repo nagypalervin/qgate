@@ -5,8 +5,6 @@
 /// The most inserted plus deleted elements [`kept`] looks for. The trace
 /// of a script with `d` edits has about `d²` entries, so at the limit it
 /// takes about 32 MB, and the time grows with `(n + m) · d`.
-// The duplication analyzer uses it from PR 2 of `duplication-of-new-code`.
-#[allow(dead_code)]
 pub(crate) const MAX_EDITS: usize = 1 << 11;
 
 /// The number of elements cut from the start of each of `a` and `b`, the
@@ -55,9 +53,10 @@ pub(crate) fn common_in_order<T: PartialEq>(a: &[T], b: &[T]) -> usize {
 /// subsequence of a shortest edit script from `a` to `b`. The common
 /// start and end are kept; between them, the search for a script gives
 /// up after [`MAX_EDITS`] edits, and then every element there counts as
-/// changed.
-// The duplication analyzer uses it from PR 2 of `duplication-of-new-code`.
-#[allow(dead_code)]
+/// changed. Each run of changed elements then slides down as far as equal
+/// elements allow, as git's diff does in the common case (git also slides
+/// up to join runs, and its indent heuristic may stop earlier), so a copy
+/// added after the code it copies is added, not the end of that code.
 pub(crate) fn kept<T: PartialEq>(a: &[T], b: &[T]) -> (Vec<bool>, Vec<bool>) {
     let (start, end, a_middle, b_middle) = middles(a, b);
     let mut kept_a = vec![true; a.len()];
@@ -70,7 +69,32 @@ pub(crate) fn kept<T: PartialEq>(a: &[T], b: &[T]) -> (Vec<bool>, Vec<bool>) {
             kept_b[start + y] = true;
         }
     }
+    slide_down(a, &mut kept_a);
+    slide_down(b, &mut kept_b);
     (kept_a, kept_b)
+}
+
+/// Slide each run of changed (not `kept`) elements of `seq` down while the
+/// element after it equals its first: that one becomes changed, the first
+/// kept. The kept elements stay equal and in the same order, so they stay
+/// a common subsequence of the same length. A run that reaches the next
+/// run joins it.
+fn slide_down<T: PartialEq>(seq: &[T], kept: &mut [bool]) {
+    let mut start = 0;
+    while start < seq.len() {
+        if kept[start] {
+            start += 1;
+            continue;
+        }
+        let mut end = start + kept[start..].iter().take_while(|k| !**k).count();
+        while end < seq.len() && seq[start] == seq[end] {
+            kept[start] = true;
+            kept[end] = false;
+            start += 1;
+            end += 1 + kept[end + 1..].iter().take_while(|k| !**k).count();
+        }
+        start = end;
+    }
 }
 
 /// The pairs `(x, y)` with `a[x] == b[y]` of a shortest edit script from
@@ -225,6 +249,32 @@ mod tests {
         // The start is cut first: of `aa` and `a`, nothing is left for
         // the end.
         assert_eq!(middles(b"aa", b"a"), (1, 0, &b"a"[..], &b""[..]));
+    }
+
+    #[test]
+    fn a_copy_added_after_the_code_it_copies_is_added_last() {
+        // `t` ends like the test before it, `abcd`. The common end aligns
+        // `t`'s end with the old test's; sliding makes all of `t` added,
+        // as git shows it.
+        let (before, after) = (&b"Xabcd"[..], &b"Yabcdtbcd"[..]);
+        let (old, new) = (vec![false, true, true, true, true], {
+            let mut new = vec![true; 9];
+            new[0] = false;
+            new[5..].fill(false);
+            new
+        });
+        assert_eq!(kept(before, after), (old.clone(), new.clone()));
+        // Removed lines slide the same way.
+        assert_eq!(kept(after, before), (new, old));
+    }
+
+    #[test]
+    fn a_run_that_slides_into_the_next_joins_it() {
+        // `-a a -b a`: the first run slides onto `-b`, and together they
+        // slide on past the last `a`.
+        let mut kept = [false, true, false, true];
+        slide_down(b"aaba", &mut kept);
+        assert_eq!(kept, [true, true, false, false]);
     }
 
     /// `a` and `b` around one common element `c`, with `in_a` and `in_b`

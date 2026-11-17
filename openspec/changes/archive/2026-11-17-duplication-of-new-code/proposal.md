@@ -42,6 +42,10 @@ low enough that a reviewer reads the Warnings.
 
   So a helper that a split copies into two files counts once as moved
   and once as written (D2, D3).
+- **A file the block only moved to is no new copy.** When a new holder
+  of a block has none of its tokens on written lines, it is not
+  reported, and it is the original (design D1, decided during the
+  apply).
 - **The threshold stays 50.** At least 50 of a block's tokens must be new
   code. Today's other conditions stay (more files hold the block, at most
   as many as the change added; not code the file already shared).
@@ -98,6 +102,18 @@ below:
    - Any judged finding that differs from this needs an explanation
      before merge.
 
+Decided by Ervin during the apply, on 2026-11-17:
+
+7. **A file the block only moved to is no new copy** (design D1). The
+   written-line condition alone would let a moved copy, first by path,
+   hide a written one when an unchanged file also holds the block.
+8. **The line diff slides changes down, like git's diff** (design D5). Without
+   it, a test appended after a similar test lost its written tokens, and
+   the replay lost SV20.
+9. **SV23 stays and SV8 goes, the reverse of item 6** (design
+   "Verification"). Both have the spike's written lines; the spike
+   estimated their tokens, and qgate counts 40 for SV8 and 55 for SV23.
+
 ## Capabilities
 
 ### New Capabilities
@@ -109,9 +125,9 @@ None.
 - `duplication-analysis`:
   - "Only new duplication is reported" counts only tokens on lines the
     change wrote;
-  - a new requirement, "Code the change wrote", defines added, moved and
-    written lines, with scenarios for P1, P2 and a helper copied into
-    two files.
+  - two new requirements, "Lines the change wrote" and "Moved lines",
+    define added, moved and written lines, with scenarios for P1, P2
+    and a helper copied into two files.
 
 ## Impact
 

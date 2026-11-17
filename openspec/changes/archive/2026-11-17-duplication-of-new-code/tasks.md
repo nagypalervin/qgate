@@ -26,26 +26,26 @@ show`, and `compare.py` from the archived `complexity-of-moved-code`.
 
 ## 4. Written lines in the duplication analyzer (PR 2)
 
-- [ ] 4.1 Add the failing fixture tests first in `crates/qgate-analyzers/src/duplication.rs`, one per new spec scenario: "The same small edit in existing copies", "A copy completed by a few written lines", "A new copy in an edited file", "A split file", "A helper copied into two files", "Moved within a file and copied", "Moved and renamed". Verify that the ones the rule changes fail on the result, and that the others pass already.
-- [ ] 4.2 Pair moved lines in `DuplicationIndex::new` (design D3): diff each changed file, build removed and added runs of three with at least one non-empty line, pair them one to one with the own-file pass first and then the other files in path and line order, and keep `written` per changed file and line. Verify with a unit test of the pairing, covering the own-file pass, consumption and the empty-run rule.
-- [ ] 4.3 Count only tokens on written lines in `blocks()` (design D1) and update the module and function doc comments. Verify that the tests of 4.1 and every existing duplication test pass.
-- [ ] 4.4 Add an end-to-end test in `crates/qgate-cli/tests/` (a git repository built like the existing ones): a file split into two new files and deleted, and a JavaScript file renamed to TypeScript with a moved block, as review finding 2 of PR 1 asked. Verify that no duplication finding is reported, and that swapping `before_lines` and `after_lines` in the CLI, or leaving them empty, fails the test.
-- [ ] 4.5 Run the mutation check of design D6 (no own-file pass, no consumption, runs of one line, empty runs allowed, untrimmed hashes, no written-line condition), each by hand and reverted. Verify that each fails a test, and record the result in design.md "Verification".
-- [ ] 4.6 Update the README's "Duplicated code" section: only code the change wrote counts, and moved lines are matched by their trimmed text in runs of three, also when repetition within one file becomes repetition across files. Verify that the text matches the spec delta.
-- [ ] 4.7 Run the checks of 3.2. Verify that all three pass.
+- [x] 4.1 Add the failing fixture tests first in `crates/qgate-analyzers/src/duplication.rs`, one per new spec scenario: "The same small edit in existing copies", "A copy completed by a few written lines", "A new copy in an edited file", "A split file", "A helper copied into two files", "Moved within a file and copied", "Moved and renamed". Verify that the ones the rule changes fail on the result, and that the others pass already.
+- [x] 4.2 Pair moved lines in `DuplicationIndex::new` (design D3): diff each changed file, build removed and added runs of three with at least one non-empty line, pair them one to one with the own-file pass first and then the other files in path and line order, and keep `written` per changed file and line. Verify with a unit test of the pairing, covering the own-file pass, consumption and the empty-run rule.
+- [x] 4.3 Count only tokens on written lines in `blocks()` (design D1) and update the module and function doc comments. Verify that the tests of 4.1 and every existing duplication test pass.
+- [x] 4.4 Add an end-to-end test in `crates/qgate-cli/tests/` (a git repository built like the existing ones): a file split into two new files and deleted, and a JavaScript file renamed to TypeScript with a moved block, as review finding 2 of PR 1 asked. Verify that no duplication finding is reported, and that swapping `before_lines` and `after_lines` in the CLI, or leaving them empty, fails the test.
+- [x] 4.5 Run the mutation check of design D6 (no own-file pass, no consumption, runs of one line, empty runs allowed, untrimmed hashes, no written-line condition), each by hand and reverted. Verify that each fails a test, and record the result in design.md "Verification".
+- [x] 4.6 Update the README's "Duplicated code" section: only code the change wrote counts, and moved lines are matched by their trimmed text in runs of three, also when repetition within one file becomes repetition across files. Verify that the text matches the spec delta.
+- [x] 4.7 Run the checks of 3.2. Verify that all three pass.
 
 ## 5. Re-measurement and review (PR 2)
 
-- [ ] 5.1 Build the release binary and replay the 150 pull requests. Verify:
-  - the judged duplication findings meet the proposal's bar: 6 of 6 useful and 12 of 13 defensible stay, with only SV30 gone; 20 of 22 noise go, with SV8 and SV27 staying;
+- [x] 5.1 Build the release binary and replay the 150 pull requests. Verify:
+  - the judged duplication findings meet the proposal's bar: 6 of 6 useful and 12 of 13 defensible stay, with only SV30 gone; 20 of 22 noise go, with SV8 and SV27 staying (SV23 instead of SV8, explained in design.md and accepted by Ervin);
   - duplication falls from 279 to about 136;
   - every finding of another rule is identical;
   - the slowest run does not grow noticeably.
 
   Record the result in design.md "Verification". If a judged finding differs, stop and ask.
-- [ ] 5.2 Run `qgate check` on the branch itself (the MCP `check` tool). Verify that its findings are fixed or explained in the pull request.
-- [ ] 5.3 Run the `reviewer` subagent on the branch and fix its findings. Verify that the checks of 3.2 pass again.
-- [ ] 5.4 Add `docs/journal/<date>-duplication-of-new-code.md`, dated on the day of the work, following `docs/journal/README.md`. Verify that it names Ervin's four decisions and the replay result.
+- [x] 5.2 Run `qgate check` on the branch itself (the MCP `check` tool). Verify that its findings are fixed or explained in the pull request.
+- [x] 5.3 Run the `reviewer` subagent on the branch and fix its findings. Verify that the checks of 3.2 pass again.
+- [x] 5.4 Add `docs/journal/<date>-duplication-of-new-code.md`, dated on the day of the work, following `docs/journal/README.md`. Verify that it names Ervin's decisions (proposal items 1 to 9) and the replay result.
 
 ## Workflow follow-up
 
