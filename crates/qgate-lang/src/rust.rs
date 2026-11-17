@@ -164,11 +164,12 @@ impl<'s> Walker<'s> {
             return;
         }
         let kind = node.kind();
+        let unit = self.units.unit();
         if produces_no_tokens(node, parent) {
             self.tokens.mute(&mut frame.muted);
         } else if kind == "integer_literal" && follows_path_or_dot(node) {
             // A tuple field, `.0`, is a field name (review of PR 1).
-            self.tokens.push(self.text(node), node, false);
+            self.tokens.push(self.text(node), node, unit, false);
         } else if LITERAL_KINDS.contains(&kind) || matches!(kind, "lifetime" | "label") {
             // A lifetime or a loop label is a name: `'a` and `'b` are the
             // same code.
@@ -177,7 +178,7 @@ impl<'s> Walker<'s> {
             } else {
                 "$id"
             };
-            self.tokens.push(text.to_owned(), node, false);
+            self.tokens.push(text.to_owned(), node, unit, false);
             self.tokens.mute(&mut frame.muted);
         } else if node.child_count() == 0 && kind != ";" {
             let text = self.text(node);
@@ -187,7 +188,7 @@ impl<'s> Walker<'s> {
                 text
             };
             if !text.is_empty() {
-                self.tokens.push(text, node, false);
+                self.tokens.push(text, node, unit, false);
             }
         }
     }
@@ -724,6 +725,33 @@ mod tests {
         let model = parse("fn f()\n{\n    1\n}\n").expect("parses");
         let lines: Vec<u32> = model.tokens.iter().map(|t| t.line).collect();
         assert_eq!(lines, [1, 1, 1, 1, 2, 3, 4]);
+    }
+
+    // Design D3 of `complexity-of-moved-code`: a token carries the unit
+    // whose fingerprint covers it; a nested function's tokens are its
+    // own, and a static's initializer belongs to no unit.
+    #[test]
+    fn tokens_carry_their_unit() {
+        let model = parse(
+            "static S: u32 = 3;\nimpl Cart {\n    fn total(&self) -> u32 {\n        let x = 1;\n        fn twice(y: u32) -> u32 { y * 2 }\n        twice(x)\n    }\n}\n",
+        )
+        .expect("parses");
+        crate::common::assert_unit_runs(
+            &model,
+            &[
+                (None, "static $id : u32 = $lit impl $id {"),
+                (
+                    Some("Cart.total"),
+                    "fn $id ( & self ) -> u32 { let $id = $lit",
+                ),
+                (
+                    Some("Cart.total.twice"),
+                    "fn $id ( $id : u32 ) -> u32 { $id * $lit }",
+                ),
+                (Some("Cart.total"), "$id ( $id ) }"),
+                (None, "}"),
+            ],
+        );
     }
 
     // Design D1 of `add-test-gap-analysis`: layout and comments (doc

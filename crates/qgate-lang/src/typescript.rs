@@ -409,18 +409,22 @@ impl<'s> Walker<'s> {
             frame.not_code = true;
             return;
         }
-        // The code of a bound call around the functions that pass through
-        // it (`withAuth`, its options) is code of their unit.
-        let unit = match self.units.scope() {
-            Some(Scope::Unit(unit)) => unit,
-            None | Some(Scope::ClassBody) => match self.bound.last().and_then(|b| b.unit) {
-                Some(unit) => unit,
-                None => return,
-            },
-            Some(Scope::Opaque) => return,
+        let Some(unit) = self.code_unit() else {
+            return;
         };
         if node.child_count() == 0 {
             self.hash_leaf(node, unit);
+        }
+    }
+
+    /// The unit whose own code the current node is, for its fingerprint
+    /// and its tokens. The code of a bound call around the functions that
+    /// pass through it (`withAuth`, its options) is code of their unit.
+    fn code_unit(&self) -> Option<usize> {
+        match self.units.scope() {
+            Some(Scope::Unit(unit)) => Some(unit),
+            None | Some(Scope::ClassBody) => self.bound.last().and_then(|b| b.unit),
+            Some(Scope::Opaque) => None,
         }
     }
 
@@ -489,21 +493,19 @@ impl<'s> Walker<'s> {
             self.tokens.mute(&mut frame.muted);
             return;
         }
+        let unit = self.code_unit();
         let kind = node.kind();
         // `is_named`: the keywords of `predefined_type` are also called
         // `string` and `number`. They only occur in type positions, which
         // are muted or never entered, so this is a guard, not a known case.
         if node.is_named() && LITERAL_KINDS.contains(&kind) {
             // One `$lit` per literal, without entering it.
-            self.tokens.push("$lit".to_owned(), node, false);
-            if node.child_count() > 0 {
-                self.tokens.mute(&mut frame.muted);
-            }
+            self.tokens.push_literal(node, unit, &mut frame.muted);
         } else if node.is_named() && TEXT_PART_KINDS.contains(&kind) {
             // A run of text parts is one literal: `\n` in a template or
             // `&amp;` in JSX text does not add tokens.
             if !self.tokens.in_text_run() {
-                self.tokens.push("$lit".to_owned(), node, true);
+                self.tokens.push("$lit".to_owned(), node, unit, true);
             }
         } else if node.child_count() == 0 && !SKIPPED_LEAF_KINDS.contains(&kind) {
             let text =
@@ -513,7 +515,7 @@ impl<'s> Walker<'s> {
                     self.text(node)
                 };
             if !text.is_empty() {
-                self.tokens.push(text, node, false);
+                self.tokens.push(text, node, unit, false);
             }
         }
     }
@@ -1203,6 +1205,28 @@ mod tests {
                 ("$lit", 13),
                 ("}", 14),
             ]
+        );
+    }
+
+    // Design D3 of `complexity-of-moved-code`: a token carries the unit
+    // whose fingerprint covers it; a nested named function's tokens are
+    // its own, and top-level code and a class body belong to no unit.
+    #[test]
+    fn tokens_carry_their_unit() {
+        let model = parse(
+            Language::TypeScript,
+            "const top = 1;\nclass Cart {\n  total(items) {\n    const sum = (a) => a + 1;\n    return sum(items);\n  }\n}\n",
+        )
+        .expect("parses");
+        crate::common::assert_unit_runs(
+            &model,
+            &[
+                (None, "const $id = $lit class $id {"),
+                (Some("Cart.total"), "total ( $id ) { const $id ="),
+                (Some("Cart.total.sum"), "( $id ) => $id + $lit"),
+                (Some("Cart.total"), "return $id ( $id ) }"),
+                (None, "}"),
+            ],
         );
     }
 

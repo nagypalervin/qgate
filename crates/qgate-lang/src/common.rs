@@ -356,14 +356,31 @@ impl Tokens {
         self.in_text_run
     }
 
-    /// Record `text` at the line of `node`; `text_part` says whether it is
-    /// a part of a literal's text.
-    pub(crate) fn push(&mut self, text: String, node: Node<'_>, text_part: bool) {
+    /// Record `text` at the line of `node`, as own code of `unit`;
+    /// `text_part` says whether it is a part of a literal's text.
+    pub(crate) fn push(
+        &mut self,
+        text: String,
+        node: Node<'_>,
+        unit: Option<usize>,
+        text_part: bool,
+    ) {
         self.list.push(Token {
             text,
             line: line_of(node),
+            // A file has far fewer than 2^32 units.
+            unit: unit.and_then(|u| u32::try_from(u).ok()),
         });
         self.in_text_run = text_part;
+    }
+
+    /// Record the literal `node` as one `$lit` of `unit`, and mute its
+    /// parts, if it has any, noting it in `muted` as [`Self::mute`] does.
+    pub(crate) fn push_literal(&mut self, node: Node<'_>, unit: Option<usize>, muted: &mut bool) {
+        self.push("$lit".to_owned(), node, unit, false);
+        if node.child_count() > 0 {
+            self.mute(muted);
+        }
     }
 
     /// The tokens in source order.
@@ -383,6 +400,34 @@ pub(crate) fn has_child(node: Node<'_>, kinds: &[&str]) -> bool {
 pub(crate) fn operator_in(node: Node<'_>, operators: &[&str]) -> bool {
     node.child_by_field_name("operator")
         .is_some_and(|op| operators.contains(&op.kind()))
+}
+
+/// Assert that the tokens of `model` come in `expected` runs of one unit
+/// each: the unit's qualified name (`None` outside units) and its token
+/// texts, joined by spaces.
+#[cfg(test)]
+pub(crate) fn assert_unit_runs(model: &crate::FileModel, expected: &[(Option<&str>, &str)]) {
+    let runs = unit_runs(model);
+    let runs: Vec<(Option<&str>, &str)> = runs.iter().map(|(u, t)| (*u, t.as_str())).collect();
+    assert_eq!(runs, expected);
+}
+
+#[cfg(test)]
+fn unit_runs(model: &crate::FileModel) -> Vec<(Option<&str>, String)> {
+    let mut runs: Vec<(Option<&str>, String)> = Vec::new();
+    for token in &model.tokens {
+        let unit = token
+            .unit
+            .map(|u| model.functions[u as usize].name.as_str());
+        match runs.last_mut() {
+            Some((last, text)) if *last == unit => {
+                text.push(' ');
+                text.push_str(&token.text);
+            }
+            _ => runs.push((unit, token.text.clone())),
+        }
+    }
+    runs
 }
 
 #[cfg(test)]
@@ -494,9 +539,9 @@ mod tests {
         assert!(tokens.muted() && muted);
         tokens.unmute();
         assert!(!tokens.muted());
-        tokens.push("$lit".to_owned(), second, true);
+        tokens.push("$lit".to_owned(), second, None, true);
         assert!(tokens.in_text_run());
-        tokens.push("x".to_owned(), second, false);
+        tokens.push("x".to_owned(), second, None, false);
         assert!(!tokens.in_text_run());
         let pushed: Vec<(String, u32)> = tokens
             .finish()

@@ -56,16 +56,17 @@ impl Analyzer for ComplexityAnalyzer {
 ///
 /// An after unit is matched with the unit of the same qualified name in
 /// its file's before version. What is left on both sides is matched by
-/// own name, the last segment of the qualified name, across all files
-/// (design D2): a unit moved to another class or file is compared with
-/// its old version, and its finding says where it came from. Findings
+/// own name, the last segment of the qualified name, across all files,
+/// when the two have the same code or code evidence (design D2): a unit
+/// moved to another class or file is compared with its old version, and
+/// its finding says where it came from. Findings
 /// come in the order of `changes`, then of each file's after units.
 #[must_use]
 pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
     // The before version of each after unit, by change and unit index.
     let mut origins: Vec<Vec<Option<Origin<'_>>>> = Vec::with_capacity(changes.len());
-    let mut unmatched: Vec<(usize, usize)> = Vec::new();
-    let mut removed: Vec<&Function> = Vec::new();
+    let mut unmatched: Vec<((usize, usize), Unit<'_>)> = Vec::new();
+    let mut removed: Vec<Unit<'_>> = Vec::new();
     for (c, change) in changes.iter().enumerate() {
         let before: HashMap<&str, u32> = change
             .before
@@ -86,7 +87,7 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
                 .get(after.name.as_str())
                 .map(|&old| Origin::Same(old));
             if origin.is_none() {
-                unmatched.push((c, u));
+                unmatched.push(((c, u), Unit::new(&change.after, u)));
             }
             file.push(origin);
         }
@@ -98,18 +99,18 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
             .map(|f| f.name.as_str())
             .collect();
         removed.extend(
-            change
-                .before
-                .functions
-                .iter()
-                .filter(|f| !names.contains(f.name.as_str())),
+            (0..change.before.functions.len())
+                .map(|u| Unit::new(&change.before, u))
+                .filter(|unit| !names.contains(unit.function().name.as_str())),
         );
     }
-    removed.extend(gone.iter().flat_map(|model| &model.functions));
+    removed.extend(
+        gone.iter()
+            .flat_map(|&model| (0..model.functions.len()).map(move |u| Unit::new(model, u))),
+    );
 
-    let after = |(c, u): (usize, usize)| &changes[c].after.functions[u];
-    for ((c, u), old) in moves(&unmatched, &removed, after) {
-        origins[c][u] = Some(Origin::Moved(old));
+    for ((c, u), old) in moves(&unmatched, &removed) {
+        origins[c][u] = Some(Origin::Moved(old.function()));
     }
 
     let mut findings = Vec::new();
@@ -134,49 +135,144 @@ enum Origin<'a> {
     Moved(&'a Function),
 }
 
-/// Pair unmatched after units with removed units by own name (design D2):
-/// a group of one of each is a pair; in a larger group, two units with
-/// the same fingerprint are, when neither has another such partner.
-fn moves<'a, K: Copy>(
-    unmatched: &[K],
-    removed: &[&'a Function],
-    after: impl Fn(K) -> &'a Function,
-) -> Vec<(K, &'a Function)> {
-    let mut groups: BTreeMap<&str, (Vec<K>, Vec<&Function>)> = BTreeMap::new();
-    for &key in unmatched {
+/// One unit of a file version: its function and, through the file's
+/// tokens, its own code.
+#[derive(Clone, Copy)]
+struct Unit<'a> {
+    model: &'a FileModel,
+    index: usize,
+}
+
+impl<'a> Unit<'a> {
+    fn new(model: &'a FileModel, index: usize) -> Self {
+        Self { model, index }
+    }
+
+    fn function(self) -> &'a Function {
+        &self.model.functions[self.index]
+    }
+
+    /// The unit's own tokens, as ids of `interner`.
+    fn tokens(self, interner: &mut HashMap<&'a str, usize>) -> Vec<usize> {
+        self.model
+            .tokens
+            .iter()
+            .filter(|token| token.unit.and_then(|u| usize::try_from(u).ok()) == Some(self.index))
+            .map(|token| {
+                let next = interner.len();
+                *interner.entry(token.text.as_str()).or_insert(next)
+            })
+            .collect()
+    }
+}
+
+/// Pair unmatched after units with removed units of the same own name
+/// (design D2), in two passes over each group: first units with the same
+/// code (fingerprint), then, among the rest, units with code evidence
+/// ([`has_evidence`]).
+fn moves<'a, K: Copy>(unmatched: &[(K, Unit<'a>)], removed: &[Unit<'a>]) -> Vec<(K, Unit<'a>)> {
+    let mut groups: BTreeMap<&str, Group<'a, K>> = BTreeMap::new();
+    for &(key, unit) in unmatched {
         groups
-            .entry(own_name(&after(key).name))
+            .entry(own_name(&unit.function().name))
             .or_default()
             .0
-            .push(key);
+            .push((key, unit));
     }
     for &old in removed {
-        if let Some(group) = groups.get_mut(own_name(&old.name)) {
+        if let Some(group) = groups.get_mut(own_name(&old.function().name)) {
             group.1.push(old);
         }
     }
+    let mut interner = HashMap::new();
     let mut pairs = Vec::new();
-    for (new, old) in groups.into_values() {
-        if let ([key], [old]) = (new.as_slice(), old.as_slice()) {
-            pairs.push((*key, *old));
+    for (mut new, mut old) in groups.into_values() {
+        if old.is_empty() {
             continue;
         }
-        for &key in &new {
-            let fingerprint = after(key).fingerprint;
-            let mut partners = old.iter().filter(|o| o.fingerprint == fingerprint);
-            let (Some(&partner), None) = (partners.next(), partners.next()) else {
-                continue;
-            };
-            let claimants = new
-                .iter()
-                .filter(|&&k| after(k).fingerprint == fingerprint)
-                .count();
-            if claimants == 1 {
-                pairs.push((key, partner));
-            }
+        let new_code: Vec<u64> = new.iter().map(|n| n.1.function().fingerprint).collect();
+        let old_code: Vec<u64> = old.iter().map(|o| o.function().fingerprint).collect();
+        settle(
+            &mut new,
+            &mut old,
+            |i, j| new_code[i] == old_code[j],
+            &mut pairs,
+        );
+        if new.is_empty() || old.is_empty() {
+            continue;
         }
+        let new_tokens: Vec<Vec<usize>> = new.iter().map(|n| n.1.tokens(&mut interner)).collect();
+        let old_tokens: Vec<Vec<usize>> = old.iter().map(|o| o.tokens(&mut interner)).collect();
+        settle(
+            &mut new,
+            &mut old,
+            |i, j| has_evidence(&old_tokens[j], &new_tokens[i]),
+            &mut pairs,
+        );
     }
     pairs
+}
+
+/// The unmatched after units (with their keys) and the removed units of
+/// one own name.
+type Group<'a, K> = (Vec<(K, Unit<'a>)>, Vec<Unit<'a>>);
+
+/// Pair `new[i]` with `old[j]` where `partners(i, j)` holds and neither
+/// has another partner, add the pairs to `pairs`, and take the paired
+/// units out of `new` and `old`.
+fn settle<'a, K: Copy>(
+    new: &mut Vec<(K, Unit<'a>)>,
+    old: &mut Vec<Unit<'a>>,
+    partners: impl Fn(usize, usize) -> bool,
+    pairs: &mut Vec<(K, Unit<'a>)>,
+) {
+    let matrix: Vec<Vec<bool>> = (0..new.len())
+        .map(|i| (0..old.len()).map(|j| partners(i, j)).collect())
+        .collect();
+    let mut paired_new = vec![false; new.len()];
+    let mut paired_old = vec![false; old.len()];
+    for (i, row) in matrix.iter().enumerate() {
+        let mut found = row.iter().enumerate().filter(|&(_, &p)| p).map(|(j, _)| j);
+        let (Some(j), None) = (found.next(), found.next()) else {
+            continue;
+        };
+        if matrix.iter().filter(|row| row[j]).count() == 1 {
+            pairs.push((new[i].0, old[j]));
+            paired_new[i] = true;
+            paired_old[j] = true;
+        }
+    }
+    let mut keep = paired_new.iter().map(|&p| !p);
+    new.retain(|_| keep.next().unwrap_or(true));
+    let mut keep = paired_old.iter().map(|&p| !p);
+    old.retain(|_| keep.next().unwrap_or(true));
+}
+
+/// Whether at least half of the `removed` unit's tokens appear in order
+/// in the `after` unit's (design D2): the length of their longest common
+/// subsequence, by one row of dynamic programming, in O(|removed|·|after|)
+/// time. A unit without tokens is no evidence.
+fn has_evidence(removed: &[usize], after: &[usize]) -> bool {
+    if removed.is_empty() || 2 * after.len() < removed.len() {
+        return false;
+    }
+    // row[j]: the longest common subsequence of the removed tokens so far
+    // and after[..j].
+    let mut row = vec![0usize; after.len() + 1];
+    for &token in removed {
+        // The previous row's row[j], while row[j] is being overwritten.
+        let mut diagonal = 0;
+        for (j, &other) in after.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = if token == other {
+                diagonal + 1
+            } else {
+                above.max(row[j])
+            };
+            diagonal = above;
+        }
+    }
+    2 * row[after.len()] >= removed.len()
 }
 
 /// The own name of a unit: the last segment of its qualified name, after
@@ -561,6 +657,44 @@ mod tests {
             vec![]
         );
         assert_eq!(run(before, after), vec![]);
+    }
+
+    // complexity-analysis: "Same own name, different code". The one
+    // removed and the one added `ngOnInit` share less than half of the
+    // removed one's tokens, so they are no move (design D2).
+    #[test]
+    fn same_own_name_with_different_code_is_new() {
+        let findings = run_files(
+            Language::TypeScript,
+            &[
+                (
+                    "src/a.component.ts",
+                    Some(moved!("different", "before/a.component.ts")),
+                    None,
+                ),
+                (
+                    "src/b.component.ts",
+                    None,
+                    Some(moved!("different", "after/b.component.ts")),
+                ),
+            ],
+        );
+        let mut expected = new(Severity::Warning, "BComponent.ngOnInit", 2, 14);
+        expected.location.path = "src/b.component.ts".into();
+        assert_eq!(findings, vec![expected]);
+    }
+
+    // Design D2: the evidence of a move, at least half of the removed
+    // unit's tokens in order in the after unit.
+    #[test]
+    fn evidence_is_half_of_the_removed_tokens_in_order() {
+        assert!(has_evidence(&[1, 2, 3, 4], &[9, 1, 9, 2, 9]));
+        assert!(has_evidence(&[1, 2, 3], &[1, 2]));
+        assert!(has_evidence(&[1, 2, 3, 4], &[1, 2, 3, 4, 5, 6, 7, 8, 9]));
+        assert!(!has_evidence(&[1, 2, 3, 4], &[4, 3, 2, 1]));
+        assert!(!has_evidence(&[1, 2, 3], &[3, 9, 9]));
+        assert!(!has_evidence(&[], &[1, 2]));
+        assert!(!has_evidence(&[1, 2], &[]));
     }
 
     // complexity-analysis: "Ambiguous own name".

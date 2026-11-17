@@ -221,19 +221,17 @@ impl<'s> Walker<'s> {
         }
         let kind = node.kind();
         let parent = ancestors.last().copied();
+        let unit = self.units.unit();
         if produces_no_tokens(node, parent) {
             self.tokens.mute(&mut frame.muted);
         } else if node.is_named() && LITERAL_KINDS.contains(&kind) {
-            self.tokens.push("$lit".to_owned(), node, false);
-            if node.child_count() > 0 {
-                self.tokens.mute(&mut frame.muted);
-            }
+            self.tokens.push_literal(node, unit, &mut frame.muted);
         } else if node.is_named()
             && TEXT_PART_KINDS.contains(&kind)
             && parent.is_some_and(|p| p.kind() == "interpolated_string_expression")
         {
             if !self.tokens.in_text_run() {
-                self.tokens.push("$lit".to_owned(), node, true);
+                self.tokens.push("$lit".to_owned(), node, unit, true);
             }
         } else if kind == "identifier" {
             // An identifier is one token even when the grammar puts a
@@ -243,14 +241,14 @@ impl<'s> Walker<'s> {
             } else {
                 "$id".to_owned()
             };
-            self.tokens.push(text, node, false);
+            self.tokens.push(text, node, unit, false);
             if node.child_count() > 0 {
                 self.tokens.mute(&mut frame.muted);
             }
         } else if node.child_count() == 0 && kind != ";" && !kind.starts_with('#') {
             let text = self.text(node);
             if !text.is_empty() {
-                self.tokens.push(text, node, false);
+                self.tokens.push(text, node, unit, false);
             }
         }
     }
@@ -829,6 +827,27 @@ mod tests {
         let model = parse("class A\n{\n    int F() => 1;\n}\n").expect("parses");
         let lines: Vec<u32> = model.tokens.iter().map(|t| t.line).collect();
         assert_eq!(lines, [1, 1, 2, 3, 3, 3, 3, 3, 3, 4]);
+    }
+
+    // Design D3 of `complexity-of-moved-code`: a token carries the unit
+    // whose fingerprint covers it; a local function's tokens are its own,
+    // and a field's initializer belongs to no unit.
+    #[test]
+    fn tokens_carry_their_unit() {
+        let model = parse(
+            "class A\n{\n    int x = 1;\n    public int F(int a)\n    {\n        int G() => a;\n        return G();\n    }\n}\n",
+        )
+        .expect("parses");
+        crate::common::assert_unit_runs(
+            &model,
+            &[
+                (None, "class $id { int $id = $lit"),
+                (Some("A.F(int)"), "public int $id ( int $id ) {"),
+                (Some("A.F(int).G()"), "int $id ( ) => $id"),
+                (Some("A.F(int)"), "return $id ( ) }"),
+                (None, "}"),
+            ],
+        );
     }
 
     // Requirement: Conditional compilation, "Branches that open blocks".

@@ -17,17 +17,27 @@ PR bodies are written to files first.
 - [x] 1.4 Add a CLI test in `crates/qgate-cli/tests/` for a C# method of complexity 12 that moves from one class into a new class in a new file, while its old file is deleted. Verified when `qgate check --base` reports no finding, and the test fails if 1.3 is reverted. Also "Another language family", in `tests/rust.rs`.
 - [x] 1.5 Re-measure with the branch's release binary (see 3.1 for the method). Verified when SV19 is gone, every other difference from the baseline is a moved unit, and the slowest run stays within 30 s. Record the result in "Verification" of `design.md`.
 
+From the review of PR 1 (Ervin's decisions of 2026-11-17, D1 and D2):
+
+- [x] 1.6 Failing tests first:
+  - in `qgate-lang`, every adapter's tokens carry the unit of their own code, and `None` outside units; a nested named unit's tokens carry its own unit, not the enclosing one;
+  - in `complexity.rs`, a fixture for "Same own name, different code", and a unit test of the in-order share;
+  - a CLI test for "Moved out of a deleted JavaScript file".
+
+  Verified when the new tests fail and no other test does.
+- [x] 1.7 Add `Token::unit`, recorded by `Tokens::push` from the unit each adapter passes to the fingerprint (D3). Verified when the `qgate-lang` tests pass, and the duplication tests pass unchanged.
+- [x] 1.8 Settle each own-name group in two passes, same code then code evidence (D2), and leave the units of deleted JavaScript files out of complexity (D1). Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
+- [x] 1.9 Re-measure as in 1.5. Verified when the result is the same as 1.5's, or every difference is explained, and the slowest run stays within 30 s.
+
 ## 2. Inlined functions (PR 2)
 
 - [ ] 2.1 Failing tests first:
-  - in `qgate-lang`, every adapter's tokens carry the unit of their own code, and `None` outside units; a nested named unit's tokens carry its own unit, not the enclosing one;
   - in `complexity.rs`, fixtures for "Inlined behind a feature flag", "Inlined and grown beyond it", "Inlined function message" and "Removed but not inlined";
   - a case where one removed unit qualifies for two grown units, which credits only the larger share (D3).
 
   Verified when the new tests fail and no other test does.
-- [ ] 2.2 Add `Token::unit`, recorded by `Tokens::push` from the unit each adapter passes to the fingerprint (D3). Verified when the `qgate-lang` tests pass, and the duplication tests pass unchanged.
-- [ ] 2.3 Credit inlined units in `complexity::analyze` (D3) and add the "beyond the inlined" message (D4). Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
-- [ ] 2.4 Describe moved and inlined functions in the README's complexity section, with the two message forms. Verified by reading it against the spec delta.
+- [ ] 2.2 Credit inlined units in `complexity::analyze` (D3) and add the "beyond the inlined" message (D4). Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
+- [ ] 2.3 Describe moved and inlined functions in the README's complexity section, with the two message forms. Verified by reading it against the spec delta.
 
 ## 3. Proof
 

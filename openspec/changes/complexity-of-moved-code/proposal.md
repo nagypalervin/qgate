@@ -33,9 +33,12 @@ be fixed first.
   in the head that has no match by qualified name is compared with a
   function that the change removed somewhere else, when both have the
   same *own name* (the last segment of the qualified name; for C# it
-  includes the parameter types). If several removed functions have that
-  name, the one with the same fingerprint wins; if that does not settle
-  it, nothing is matched and the function counts as new, as today (D2).
+  includes the parameter types). They are matched when they have the
+  same fingerprint, or else when at least half of the removed function's
+  tokens appear in order in the new one, and only when neither has
+  another such partner. Otherwise nothing is matched and the function
+  counts as new, as today (D2). Functions of a deleted JavaScript file
+  are not matched (D1).
   A moved function that got more complex is reported under
   `complexity/cyclomatic-increase`, and its message names where it came
   from:
@@ -49,7 +52,8 @@ be fixed first.
 - **A token knows its unit.** `qgate-lang`'s `Token` records which unit's
   own code it is: the same code that unit's fingerprint covers, in all
   three adapters. That way the analyzer can compare a removed unit's code
-  with a grown one's (D3). Token text, and so duplication, does not change.
+  with a moved or grown one's (D2, D3). Token text, and so duplication,
+  does not change.
 
 ### Out of scope
 
@@ -86,6 +90,11 @@ Approved by Ervin on 2026-11-17 with all four recommendations.
    of the 150 pull requests, and the archive. A release, 0.10.0, follows
    once the duplication fix is merged too, at your call. *Recommended:
    yes.*
+
+On the review of PR 1, Ervin decided two more points on 2026-11-17:
+a move needs the same code or code evidence, also when the own name is
+unique, so `Token::unit` moves into PR 1 (D2, D5); and functions of a
+deleted JavaScript file stay out of the matching (D1).
 
 ## Capabilities
 

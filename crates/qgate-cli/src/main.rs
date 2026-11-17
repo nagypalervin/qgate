@@ -875,6 +875,10 @@ struct Gone {
     path: String,
     family: Family,
     model: FileModel,
+    /// Whether its units are move partners for complexity: not for
+    /// JavaScript, which is not analyzed for complexity (design D1 of
+    /// `complexity-of-moved-code`).
+    measured: bool,
 }
 
 /// Read and parse the base versions of the files in `left`, once, for
@@ -889,10 +893,11 @@ fn gone_files(
 ) -> Result<Vec<Gone>, String> {
     let mut gone = Vec::new();
     for (path, id) in left {
-        // A deleted JavaScript file's code counts too, like a renamed one's.
-        let language = match selection.language_of(path) {
-            Some(language) => language,
-            None if selection.is_javascript(path) => Language::Tsx,
+        // A deleted JavaScript file's code counts too, like a renamed
+        // one's, for duplication.
+        let (language, measured) = match selection.language_of(path) {
+            Some(language) => (language, true),
+            None if selection.is_javascript(path) => (Language::Tsx, false),
             None => continue,
         };
         let model = match read_source(reader, id)? {
@@ -904,6 +909,7 @@ fn gone_files(
             path: path.clone(),
             family: language.family(),
             model,
+            measured,
         });
     }
     Ok(gone)
@@ -911,7 +917,8 @@ fn gone_files(
 
 /// The complexity findings of the analyzed changes, one language family
 /// at a time (`families` holds each change's), with the units of that
-/// family's gone files (design D1 of `complexity-of-moved-code`).
+/// family's gone files but JavaScript ones (design D1 of
+/// `complexity-of-moved-code`).
 fn complexity_findings(changes: &[FileChange], families: &[Family], gone: &[Gone]) -> Vec<Finding> {
     let mut findings = Vec::new();
     for family in Family::ALL {
@@ -926,7 +933,7 @@ fn complexity_findings(changes: &[FileChange], families: &[Family], gone: &[Gone
         }
         let models: Vec<&FileModel> = gone
             .iter()
-            .filter(|gone| gone.family == family)
+            .filter(|gone| gone.family == family && gone.measured)
             .map(|gone| &gone.model)
             .collect();
         findings.extend(complexity::analyze(&of_family, &models));

@@ -51,11 +51,11 @@ An increase with inlined units SHALL write the parenthesis as
 
 Units without a match by qualified name SHALL be grouped by own name,
 the last segment of the qualified name (for C#, with its parameter
-types): the after units of every changed file, and the removed units of
-every changed or deleted file, of one language family. A group of one
-after unit and one removed unit SHALL be matched. In a larger group, an
-after unit and a removed unit with the same code SHALL be matched when
-neither has another such partner.
+types), across one language family's changed and deleted files; units
+of a deleted JavaScript file are left out. An after unit and a removed
+unit of a group SHALL be matched when they have the same code, or else
+when at least half of the removed unit's tokens appear in order in the
+after unit, provided neither has another such partner.
 
 #### Scenario: Method moved to a class in another file
 
@@ -75,16 +75,28 @@ neither has another such partner.
 - **WHEN** the head revision deletes the file and has `Store.load` with the same code in `src/store.ts`
 - **THEN** no finding is reported for `Store.load`
 
+#### Scenario: Moved out of a deleted JavaScript file
+
+- **GIVEN** `src/legacy.js` has a function `load` with complexity 15 at the base revision
+- **WHEN** the head revision deletes the file and has `Store.load` with the same code in `src/store.ts`
+- **THEN** `Store.load` is new, and a Warning `complexity/cyclomatic-new` finding with complexity 15 is reported for it
+
 #### Scenario: Moved to another class in the same file
 
 - **GIVEN** `Cart.total` with complexity 11 in `src/cart.ts`
 - **WHEN** the head revision moves it unchanged into a class `Pricing` in the same file
 - **THEN** no finding is reported for `Pricing.total`
 
+#### Scenario: Same own name, different code
+
+- **GIVEN** the base revision has `AComponent.ngOnInit` with complexity 15, and the head revision removes it
+- **WHEN** the head revision adds `BComponent.ngOnInit` with complexity 14, in which less than half of the tokens of `AComponent.ngOnInit` appear in order
+- **THEN** `BComponent.ngOnInit` is new, and a Warning `complexity/cyclomatic-new` finding is reported for it
+
 #### Scenario: Ambiguous own name
 
 - **GIVEN** the base revision has `A.load` and `B.load`, each with complexity 12, and the head revision removes both
-- **WHEN** the head revision adds `C.load` with complexity 12, whose code differs from both
+- **WHEN** the head revision adds `C.load` with complexity 12, whose code differs from both by one operator
 - **THEN** `C.load` is new, and a Warning `complexity/cyclomatic-new` finding is reported for it
 
 #### Scenario: Same code settles an ambiguous own name
