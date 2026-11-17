@@ -21,7 +21,9 @@
 **Had to step in:** These were the human's calls:
 - choosing this follow-up first;
 - Gate 1, approving the three recommendations: lifetimes only, every
-  lifetime, one pull request without a release.
+  lifetime, one pull request without a release;
+- accepting the two test-idiom copies qgate reported in the pull request
+  (the throwaway-repo setup of the CLI tests), and merging.
 
 **Surprise:**
 - **The history had nothing to show.** The rename that motivated the
