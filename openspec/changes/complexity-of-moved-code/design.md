@@ -181,6 +181,26 @@ largest share of `R`. Ties go to the first `U` by path, then by line.
 only when the after value exceeds the credited before. Its severity
 comes from that growth: 1 to 4 is a Warning, 5 or more an Error.
 
+*As built (PR 2):*
+- `inlined` in `complexity.rs` runs after the move pairs are settled,
+  on the removed units no pair took. `grown` lists the matched units
+  whose after value exceeds their before (`Origin::before`: the same
+  name's value, or the moved-from unit's), sorted by path and line, so
+  the tie rule holds whatever the order of the files. `host` picks the
+  unit with the longest `common_in_order`; a later one wins only with a
+  longer one. A unit with fewer than half as many tokens as `R` is
+  skipped without the test.
+- `increase` takes the credited units: growth is the real delta minus
+  the sum of their (complexity − 1). No growth, no finding. The names
+  come in the order of the removed units, by file, then by position.
+- Tests: CL11's shape behind a feature flag (no finding), the same with
+  growth beyond it (a Warning of +2 beyond), a removed unit that was
+  not inlined (the increase stays an Error), one removed unit credited
+  only once although two units share it, and the tie by path in both
+  file orders. Crediting every qualifying unit, dropping the half
+  threshold, crediting units without decision points or dropping the
+  sort each fail a test.
+
 *Why half, in order:* an inlined body keeps its order but loses or gains
 a few lines (CL11 renamed a log message, and removed V1 and the ternary
 around both). Half rules out a function whose code merely resembles the

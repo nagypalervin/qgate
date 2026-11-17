@@ -117,6 +117,26 @@ qgate reports:
 | `duplication/duplicate-block` | `--base` mode only: a change adds a copy of a block of at least 50 tokens that exists elsewhere in the repository (see below) | always | - |
 | `input/unparsable` | `--base` mode only: a changed file has a syntax error, syntax the parser does not support yet, or is not UTF-8; it is skipped | always | - |
 
+Code that a change only moves does not count as new or more complex:
+
+- **A moved function** keeps its old version. A function moved to another
+  class or file, also out of a deleted file, is matched with the removed
+  one of the same own name (the last part of its name; in C# with the
+  parameter types), when the two have the same code or share at least half
+  of each one's tokens in order. It is reported only if it got more
+  complex, and the message says where it came from:
+  `Helpers.Run(int): cyclomatic complexity 12 -> 14 (+2), moved from Tests.Run(int)`.
+- **An inlined function** is credited. When a function grows by the code of
+  one the change removed (at least half of its tokens, in order), the
+  removed one's decision points are added to the old value, and only the
+  growth beyond them counts for the severity:
+  `CipherService.decryptMany: cyclomatic complexity 4 -> 15 (+11, +2 beyond the inlined CipherService.decryptManyV2)`.
+  Nothing beyond them, no finding.
+
+Functions of the same language family are matched (TypeScript and
+JavaScript, C#, Rust); those of a deleted JavaScript file are not, since
+JavaScript is not analyzed for complexity.
+
 Exit codes:
 
 - `0`: the analysis ran and no finding reached the `--fail-on` level;

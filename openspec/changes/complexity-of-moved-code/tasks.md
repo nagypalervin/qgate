@@ -37,13 +37,13 @@ From the second review of PR 1 (Ervin's decision of 2026-11-17, D2):
 
 ## 2. Inlined functions (PR 2)
 
-- [ ] 2.1 Failing tests first:
+- [x] 2.1 Failing tests first:
   - in `complexity.rs`, fixtures for "Inlined behind a feature flag", "Inlined and grown beyond it", "Inlined function message" and "Removed but not inlined";
   - a case where one removed unit qualifies for two grown units, which credits only the larger share (D3).
 
   Verified when the new tests fail and no other test does.
-- [ ] 2.2 Credit inlined units in `complexity::analyze` (D3) and add the "beyond the inlined" message (D4). Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
-- [ ] 2.3 Describe moved and inlined functions in the README's complexity section, with the two message forms. Verified by reading it against the spec delta.
+- [x] 2.2 Credit inlined units in `complexity::analyze` (D3) and add the "beyond the inlined" message (D4). Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
+- [x] 2.3 Describe moved and inlined functions in the README's complexity section, with the two message forms. Verified by reading it against the spec delta.
 
 ## 3. Proof
 

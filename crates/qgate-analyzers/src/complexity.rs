@@ -109,21 +109,96 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
             .flat_map(|&model| (0..model.functions.len()).map(move |u| Unit::new(model, u))),
     );
 
-    for ((c, u), old) in moves(&unmatched, &removed) {
+    let pairs = moves(&unmatched, &removed);
+    removed.retain(|old| !pairs.iter().any(|(_, moved)| moved.is(*old)));
+    for ((c, u), old) in pairs {
         origins[c][u] = Some(Origin::Moved(old.function()));
     }
+    let credits = inlined(changes, &origins, &removed);
 
     let mut findings = Vec::new();
-    for (change, file) in changes.iter().zip(&origins) {
-        for (unit, origin) in change.after.functions.iter().zip(file) {
+    for (c, (change, file)) in changes.iter().zip(&origins).enumerate() {
+        for (u, (unit, origin)) in change.after.functions.iter().zip(file).enumerate() {
+            let inlined = credits.get(&(c, u)).map_or(&[][..], Vec::as_slice);
             findings.extend(match origin {
-                Some(Origin::Same(old)) => increase(change, unit, *old, None),
-                Some(Origin::Moved(old)) => increase(change, unit, old.cyclomatic, Some(&old.name)),
+                Some(Origin::Same(old)) => increase(change, unit, *old, None, inlined),
+                Some(Origin::Moved(old)) => {
+                    increase(change, unit, old.cyclomatic, Some(&old.name), inlined)
+                }
                 None => new_function(change, unit),
             });
         }
     }
     findings
+}
+
+/// The units each matched unit that got more complex inlined, by change
+/// and unit index (design D3): a removed unit with decision points counts
+/// as inlined into the grown unit whose after version holds the largest
+/// share of its own tokens in order, if that share is at least half. Ties
+/// go to the first by path, then by line. The units come in the order of
+/// `removed`.
+fn inlined<'a>(
+    changes: &[&'a FileChange],
+    origins: &[Vec<Option<Origin<'a>>>],
+    removed: &[Unit<'a>],
+) -> HashMap<(usize, usize), Vec<&'a Function>> {
+    let mut credits: HashMap<(usize, usize), Vec<&Function>> = HashMap::new();
+    let grown = grown(changes, origins);
+    if grown.is_empty() {
+        return credits;
+    }
+    let mut interner = HashMap::new();
+    let grown: Vec<((usize, usize), Vec<usize>)> = grown
+        .into_iter()
+        .map(|(key, unit)| (key, unit.tokens(&mut interner)))
+        .collect();
+    for &old in removed.iter().filter(|old| old.function().cyclomatic > 1) {
+        let tokens = old.tokens(&mut interner);
+        if let Some(key) = host(&tokens, &grown) {
+            credits.entry(key).or_default().push(old.function());
+        }
+    }
+    credits
+}
+
+/// The matched units that got more complex, by change and unit index,
+/// first by path, then by line.
+fn grown<'a>(
+    changes: &[&'a FileChange],
+    origins: &[Vec<Option<Origin<'a>>>],
+) -> Vec<((usize, usize), Unit<'a>)> {
+    let mut grown = Vec::new();
+    for (c, (change, file)) in changes.iter().zip(origins).enumerate() {
+        for (u, (unit, origin)) in change.after.functions.iter().zip(file).enumerate() {
+            if origin.is_some_and(|origin| unit.cyclomatic > origin.before()) {
+                grown.push(((c, u), Unit::new(&change.after, u)));
+            }
+        }
+    }
+    grown.sort_by_key(|&((c, _), unit)| (&changes[c].path, unit.function().line));
+    grown
+}
+
+/// The grown unit a removed one with these own tokens was inlined into:
+/// the one holding the largest share of them in order, if at least half.
+/// The largest common subsequence is the largest share, as the removed
+/// tokens are the same; a later unit wins only with a larger one.
+fn host(tokens: &[usize], grown: &[((usize, usize), Vec<usize>)]) -> Option<(usize, usize)> {
+    if tokens.is_empty() {
+        return None;
+    }
+    let mut best: Option<(usize, (usize, usize))> = None;
+    for (key, after) in grown {
+        if 2 * after.len() < tokens.len() {
+            continue;
+        }
+        let common = common_in_order(tokens, after);
+        if 2 * common >= tokens.len() && best.is_none_or(|(most, _)| common > most) {
+            best = Some((common, *key));
+        }
+    }
+    best.map(|(_, key)| key)
 }
 
 /// Where an after unit's before version is.
@@ -133,6 +208,16 @@ enum Origin<'a> {
     Same(u32),
     /// A removed unit elsewhere: the unit moved.
     Moved(&'a Function),
+}
+
+impl Origin<'_> {
+    /// The complexity of the before version.
+    fn before(self) -> u32 {
+        match self {
+            Self::Same(before) => before,
+            Self::Moved(old) => old.cyclomatic,
+        }
+    }
 }
 
 /// One unit of a file version: its function and, through the file's
@@ -150,6 +235,11 @@ impl<'a> Unit<'a> {
 
     fn function(self) -> &'a Function {
         &self.model.functions[self.index]
+    }
+
+    /// Whether `self` and `other` are the same unit of the same version.
+    fn is(self, other: Self) -> bool {
+        std::ptr::eq(self.model, other.model) && self.index == other.index
     }
 
     /// The unit's own tokens, as ids of `interner`.
@@ -331,24 +421,37 @@ fn bracket(c: char, before: &str) -> Bracket {
     }
 }
 
-/// Finding for a matched function, if it got more complex; `moved_from`
-/// names its old version when it moved.
+/// Finding for a matched function, if it got more complex beyond the
+/// units it `inlined` (design D3); `moved_from` names its old version
+/// when it moved. The severity comes from the growth beyond the inlined
+/// units, the metric keeps the real values (design D4).
 fn increase(
     change: &FileChange,
     after: &Function,
     before: u32,
     moved_from: Option<&str>,
+    inlined: &[&Function],
 ) -> Option<Finding> {
     let delta = after.cyclomatic.checked_sub(before).filter(|&d| d > 0)?;
-    let severity = if delta >= INCREASE_ERROR_DELTA {
+    let credit: u32 = inlined.iter().map(|f| f.cyclomatic - 1).sum();
+    let growth = delta.checked_sub(credit).filter(|&g| g > 0)?;
+    let severity = if growth >= INCREASE_ERROR_DELTA {
         Severity::Error
     } else {
         Severity::Warning
     };
     let mut message = format!(
-        "{}: cyclomatic complexity {before} -> {} (+{delta})",
+        "{}: cyclomatic complexity {before} -> {} (+{delta}",
         after.name, after.cyclomatic
     );
+    if !inlined.is_empty() {
+        let names: Vec<&str> = inlined.iter().map(|f| f.name.as_str()).collect();
+        message.push_str(", +");
+        message.push_str(&growth.to_string());
+        message.push_str(" beyond the inlined ");
+        message.push_str(&names.join(", "));
+    }
+    message.push(')');
     if let Some(old) = moved_from {
         message.push_str(", moved from ");
         message.push_str(old);
@@ -401,6 +504,7 @@ fn location(change: &FileChange, after: &Function) -> Location {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
     use std::path::PathBuf;
 
     use qgate_core::{Location, Metric, Severity};
@@ -826,6 +930,94 @@ mod tests {
             run_files(Language::TypeScript, &files),
             vec![at("src/d.ts"), at("src/c.ts")]
         );
+    }
+
+    macro_rules! inlined {
+        ($file:literal) => {
+            include_str!(concat!("../fixtures/complexity/inlined/", $file))
+        };
+    }
+
+    // complexity-analysis: "Inlined behind a feature flag".
+    // `decryptMany` (4) holds the code of the removed `decryptManyV2`
+    // (10) and no more: 12 does not exceed 4 + 9.
+    #[test]
+    fn inlined_behind_a_feature_flag() {
+        assert_eq!(
+            run(inlined!("before.ts"), inlined!("after_flag.ts")),
+            vec![]
+        );
+    }
+
+    // complexity-analysis: "Inlined and grown beyond it" and "Inlined
+    // function message". Three more `if` statements: 15 is 2 beyond
+    // 4 + 9, a Warning, while the metric keeps 4 and 15.
+    #[test]
+    fn inlined_and_grown_beyond_it() {
+        let mut expected = increase(Severity::Warning, "CipherService.decryptMany", 2, 4, 15);
+        expected.message = "CipherService.decryptMany: cyclomatic complexity 4 -> 15 \
+                            (+11, +2 beyond the inlined CipherService.decryptManyV2)"
+            .to_owned();
+        assert_eq!(
+            run(inlined!("before.ts"), inlined!("after_grown.ts")),
+            vec![expected]
+        );
+    }
+
+    // complexity-analysis: "Removed but not inlined". `legacy` is gone,
+    // but `process` grew by other code.
+    #[test]
+    fn removed_but_not_inlined() {
+        assert_eq!(
+            run(
+                inlined!("not_inlined_before.ts"),
+                inlined!("not_inlined_after.ts")
+            ),
+            vec![increase(Severity::Error, "process", 1, 3, 8)]
+        );
+    }
+
+    // Design D3: a removed unit counts as inlined into one unit, the one
+    // with the larger share. `a` holds all of `helper` (6), `b` three of
+    // its five checks, so only `a` is credited.
+    #[test]
+    fn a_removed_unit_is_credited_once() {
+        assert_eq!(
+            run(inlined!("two_before.ts"), inlined!("two_after.ts")),
+            vec![increase(Severity::Warning, "b", 12, 2, 5)]
+        );
+    }
+
+    // Design D3: when two grown units hold the same share of a removed
+    // one, the first by path is credited, whatever the order of files.
+    #[test]
+    fn a_tie_goes_to_the_first_path() {
+        let checks = (0..5).fold(String::new(), |mut checks, i| {
+            let _ = writeln!(checks, "  if (input.flag{i}) {{ out.push('flag {i}'); }}");
+            checks
+        });
+        let run_fn = |body: &str| {
+            format!(
+                "export function run(input: Input): string[] {{\n  const out: string[] = [];\n  if (input.empty) {{ return out; }}\n{body}  return out;\n}}\n"
+            )
+        };
+        let helper = format!(
+            "export function helper(input: Input): string[] {{\n  const out: string[] = [];\n{checks}  return out;\n}}\n"
+        );
+        let (before, after) = (run_fn(""), run_fn(&checks));
+        let mut files = vec![
+            ("src/a.ts", Some(before.as_str()), Some(after.as_str())),
+            ("src/b.ts", Some(before.as_str()), Some(after.as_str())),
+            ("src/c.ts", Some(helper.as_str()), None),
+        ];
+        let mut expected = increase(Severity::Error, "run", 1, 2, 7);
+        expected.location.path = "src/b.ts".into();
+        assert_eq!(
+            run_files(Language::TypeScript, &files),
+            vec![expected.clone()]
+        );
+        files.reverse();
+        assert_eq!(run_files(Language::TypeScript, &files), vec![expected]);
     }
 
     // Design D2: the split at the last `.` outside brackets.
