@@ -21,9 +21,8 @@ an unnamed default export), and use the message
 `<name>: cyclomatic complexity <before> -> <after> (+<delta>)` for an
 increase and `<name>: new function, cyclomatic complexity <after>` for a new
 unit. An increase of a moved unit SHALL append `, moved from <old name>`.
-An increase with inlined units SHALL write the parenthesis as
-`(+<delta>, +<growth> beyond the inlined <names>)`, the names joined by
-`, ` in their order in the before version.
+An increase with an inlined unit SHALL write the parenthesis as
+`(+<delta>, +<growth> beyond the inlined <name of the inlined unit>)`.
 
 #### Scenario: Increase message
 
@@ -124,7 +123,8 @@ A removed unit that counts as inlined into a matched unit that got more
 complex SHALL have its complexity minus 1 added to that unit's before
 value for the severity. When the after value does not exceed that sum,
 no finding SHALL be reported. A removed unit SHALL count as inlined into
-at most one unit.
+at most one unit, and at most one removed unit SHALL count as inlined
+into a unit; the pairs with the longest shared code are taken first.
 
 #### Scenario: Inlined behind a feature flag
 
@@ -137,6 +137,12 @@ at most one unit.
 - **GIVEN** the same base revision
 - **WHEN** `decryptMany` holds the code of `decryptManyV2` plus three more `if` statements, with complexity 15
 - **THEN** a Warning `complexity/cyclomatic-increase` finding is reported for `decryptMany`, for the growth of 2
+
+#### Scenario: Alike removed units
+
+- **GIVEN** `process` with complexity 2, and `checkA` and `checkB` with the same code and complexity 6, in the base revision
+- **WHEN** the head revision removes both, and `process` now holds that code once and one more condition with five decision points, with complexity 12
+- **THEN** an Error `complexity/cyclomatic-increase` finding is reported for `process`, from 2 to 12, for the growth of 5 beyond the inlined `checkA`
 
 ### Requirement: Evidence of inlining
 
@@ -165,3 +171,16 @@ before version.
 - **GIVEN** `process` with complexity 3 and `helper` with complexity 7 in the base revision
 - **WHEN** the head revision removes `helper`, and `process` now holds `helper`'s code and three more `if` statements of other code, which make up more than a third of the code added to `process`, with complexity 12
 - **THEN** an Error `complexity/cyclomatic-increase` finding is reported for `process`, from 3 to 12 (+9)
+
+### Requirement: Limit of the added code
+
+A matched unit whose before and after own tokens, without their common
+start and end, form more than 2^26 pairs SHALL NOT be credited with an
+inlined unit, so the time and memory of finding its added code stay
+bounded.
+
+#### Scenario: A long function changed at both ends
+
+- **GIVEN** a matched unit whose before and after versions differ from their first changed token to their last over more than 8,192 tokens each
+- **WHEN** the head revision also removes a unit whose code it gained
+- **THEN** nothing is credited, and the unit's increase is reported in full

@@ -5,7 +5,7 @@ export function a(input: Input): string[] {
   if (input.flag1) { out.push('flag 1'); }
   if (input.flag2) { out.push('flag 2'); }
   if (input.flag3) { out.push('flag 3'); }
-  if (input.flag4) { out.push('flag 4'); }
+  if (input.flag4) { out.push(input.name); }
   return out;
 }
 
@@ -16,6 +16,6 @@ export function b(input: Input): string[] {
   if (input.flag1) { out.push('flag 1'); }
   if (input.flag2) { out.push('flag 2'); }
   if (input.flag3) { out.push('flag 3'); }
-  if (input.flag4) { out.push(input.name); }
+  if (input.flag4) { out.push('flag 4'); }
   return out;
 }

@@ -49,6 +49,10 @@ From the re-measurement of PR 2 (Ervin's decision of 2026-11-17, D3):
 
 - [x] 2.4 Make the evidence of inlining two thirds of both the removed unit's own tokens and the code the change added to the grown unit (D3), with tests for removed code that was already there and for a removed unit among much new code. Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`, and the re-measurement of 3.1 is repeated.
 
+From the review of PR 2 (Ervin's decision of 2026-11-17, D3):
+
+- [x] 2.5 Pair inlined units one to one, the longest common subsequence first, and give no credit above 2^26 pairs of tokens in the alignment of the added code (D3). Tests: two grown units inlining one helper, one grown unit with two alike removed units, a moved unit that also inlined code, a moved unit not taken as inlined, the ties and the limit of `added`. Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`, and the re-measurement of 3.1 is repeated.
+
 ## 3. Proof
 
 - [x] 3.1 Re-measure the 150 pull requests of `evaluate-angular-dotnet` with the branch's release binary:
@@ -64,7 +68,7 @@ From the re-measurement of PR 2 (Ervin's decision of 2026-11-17, D3):
   - the slowest run stays within 30 s, also for server 8854, 8856 and 8859.
 
   The counts go into "Verification" of `design.md`.
-- [x] 3.3 Check D3's threshold of half on CL11 and on every inlining that 3.2 found. Verified by recording the share each one reached. If a share lies between 40% and 60%, stop and ask whether the threshold holds.
+- [x] 3.3 Check D3's threshold on CL11 and on every candidate pair near it. Verified by recording both shares of each pair that reaches 0.4 in its smaller one. The first rule (half) failed 3.2, so Ervin set two thirds both ways on the added code; the shares are recorded in "Verification".
 - [x] 3.4 The journal entry for the change.
 
 ## Workflow follow-up

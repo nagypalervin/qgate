@@ -130,7 +130,9 @@ Code that a change only moves does not count as new or more complex:
   one the change removed (the tokens they share in order are at least two
   thirds of the removed function's and of the code the change added), the
   removed one's decision points are added to the old value, and only the
-  growth beyond them counts for the severity:
+  growth beyond them counts for the severity. Each function is credited
+  with at most one removed function, and each removed function counts
+  once:
   `CipherService.decryptMany: cyclomatic complexity 4 -> 15 (+11, +2 beyond the inlined CipherService.decryptManyV2)`.
   Nothing beyond them, no finding.
 

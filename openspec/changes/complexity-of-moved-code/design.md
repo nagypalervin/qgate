@@ -178,12 +178,15 @@ one row of dynamic programming, so it takes O(|R|·|A|) time and O(|A|)
 memory. The added code needs the alignment itself: after the common
 start and end are cut off, one bit per pair of the middle's tokens
 records the choice, so the middle of a function of 3,000 tokens with as
-many before takes about a megabyte.
+many before takes about a megabyte. Above 2^26 pairs (8 MiB of bits)
+the unit gets no credit at all.
 
-Each `R` is credited to one `U`: the one whose subsequence covers the
-largest share of `R`. Ties go to the first `U` by path, then by line.
-`U`'s *credited before* is its before value plus the sum of
-(complexity − 1) over the units credited to it. A finding is reported
+Pairing is one to one: a grown unit takes at most one removed unit, and
+a removed unit goes to at most one grown unit. Of all the pairs that
+pass the test, the one with the longest common subsequence is taken
+first; ties go to the first `U` by path, then by line, then to the first
+`R` in the same order. `U`'s *credited before* is its before value plus
+(complexity − 1) of the unit credited to it. A finding is reported
 only when the after value exceeds the credited before. Its severity
 comes from that growth: 1 to 4 is a Warning, 5 or more an Error.
 
@@ -194,23 +197,37 @@ comes from that growth: 1 to 4 is a Warning, 5 or more an Error.
   matched units whose after value exceeds their before one, with both
   versions, sorted by path and line, so the tie rule holds whatever the
   order of the files. `added` gives the code the change added to each.
-  `host` picks the unit with the longest `common_in_order`; a later one
-  wins only with a longer one. A pair whose sizes differ by more than a
-  factor of 3/2 cannot reach two thirds of both and is skipped without
-  the test.
-- `increase` takes the credited units: growth is the real delta minus
-  the sum of their (complexity − 1). No growth, no finding. The names
-  come in the order of the removed units, by file, then by position.
+  `evidence` tests one pair and returns the length of its common
+  subsequence. A pair whose sizes differ by more than a factor of 3/2
+  cannot reach two thirds of both and is skipped without the
+  subsequence, and so is a grown unit that gained more than 3/2 of the
+  largest removed unit's tokens. `candidates` lists the passing pairs;
+  `inlined` sorts them by (longer common subsequence first, grown unit,
+  removed unit) and takes them greedily, each side once.
+- `added` cuts off the common start and end, then aligns the middle. On
+  a tie it keeps the after token in the alignment and drops the before
+  one, so the added tokens are the latest ones that could be; `outside`
+  traces the alignment back. It returns nothing above 2^26 pairs.
+- `increase` takes the credited unit: growth is the real delta minus
+  its (complexity − 1). No growth, no finding.
 - Tests: CL11's shape behind a feature flag (no finding), the same with
   growth beyond it (a Warning of +2 beyond), a removed unit that was
   not inlined (the increase stays an Error), removed code that was
   already in the grown unit, a removed unit among much new code, one
   removed unit credited only once although two units qualify, the tie
   by path in both file orders, a removed unit without decision points
-  (no name in the message), and `added` on its own. Matching against
-  the whole after version, the removed side alone, half both ways,
-  crediting every qualifying unit, crediting units without decision
-  points and dropping the sort each fail a test.
+  (no name in the message), two grown units inlining one helper, one
+  grown unit with two alike removed units (only one is credited), a
+  moved unit that also inlined code, a moved unit that is not taken as
+  inlined, `added` on its own with its ties, and its limit. Matching
+  against the whole after version, the removed side alone, half both
+  ways, crediting every qualifying unit, crediting several units to one
+  grown unit, crediting one removed unit to several, taking a pair other
+  than the longest first, crediting units without decision points, no
+  limit and dropping the sort each fail a test. Two mutants survive and
+  are equivalent: without the skip of a grown unit by size (the pair
+  test rejects the same pairs) and with the sort by removed unit before
+  grown unit (the fixtures have no such tie).
 - A short removed function rarely qualifies: its signature and the
   lines around its body are own tokens that do not come along when it
   is inlined. That is the cautious side too.
@@ -233,13 +250,25 @@ everywhere. Measured with diagnostic builds (task 3.3):
 |---|---|---|
 | half of `R`, in `U`'s after version | 0.99 | 0.96 (server 8812) |
 | half of `R`, in the added code | 0.86 | 0.69 (server 8812, SV3 milder) |
-| both ways, in the added code | 0.86 and 1.00 | 0.53 and 0.55 (server 8812) |
+| both ways, in the added code | 0.86 and 1.00 | 0.55 and 0.56 (server 8812) |
 
 Half both ways still credited three false pairs in server 8812, one of
-them making SV3 (useful) milder. Two thirds lies between 0.55 and 0.86
+them making SV3 (useful) milder. Two thirds lies between 0.56 and 0.86
 with room on both sides. Its cost: when `U` gains as much code of its
 own as it inlines, nothing is credited and the whole growth is reported,
 the cautious side.
+
+*Why one to one, and why a limit (Ervin's decision on the PR 2 review,
+2026-11-17):* the first version credited each `R` to the one `U` with
+the most of it, but let one `U` take any number of `R`s. Two alike
+helpers (`checkA`, `checkB`) removed next to one grown unit that inlined
+only one of them were both credited, and the growth from the second
+went silent. One to one credits only what one body can hold, and the
+longest pair first keeps CL11 credited when `decryptManyV1` also comes
+close. The reviewer timed a function of 12,000 lines changed at both
+ends: 33.6 s for the alignment alone, over the 30-second budget. With
+the limit such a unit is reported in full, the cautious side; no
+function of the 150 pull requests comes near it.
 
 *Why own tokens:* complexity is counted on own code, so the evidence
 should be the same code. With an end line, nested named units would get
@@ -254,9 +283,10 @@ adds logic elsewhere would go silent.
 - Moved: `<name>: cyclomatic complexity <before> -> <after> (+<delta>), moved from <old name>`.
   The old qualified name tells where the unit came from; its file is not
   in the message.
-- Inlined: `(+<delta>, +<growth> beyond the inlined <names>)` in place
-  of `(+<delta>)`, with the names in their order in the before version.
-  A moved unit that also inlined code gets both forms.
+- Inlined: `(+<delta>, +<growth> beyond the inlined <name>)` in place
+  of `(+<delta>)`, with the qualified name of the one credited unit.
+  A moved unit that also inlined code gets both forms, the inlined part
+  first.
 - The metric keeps the real before and after values. `<delta>` is the
   real delta, and only the severity and `<growth>` use the credited
   before. Report formats that print the metric stay true.

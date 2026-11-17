@@ -106,7 +106,12 @@ functions to functions that had grown by logic of their own, one of
 them a finding judged defensible. Ervin decided on 2026-11-17 that it
 counts both ways and on the added code only: the shared tokens are two
 thirds of the removed function's and two thirds of the code the change
-added to the grown function (D3).
+added to the grown function (D3). On the review of PR 2, he decided that
+inlining pairs one to one, the pair with the most shared code first, so
+a grown function is credited with at most one removed function and a
+removed function goes to at most one; and that a function whose two
+versions are too long to align (more than 2^26 pairs of tokens in their
+changed middle) gets no credit (D3).
 
 ## Capabilities
 
