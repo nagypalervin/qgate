@@ -1039,10 +1039,10 @@ fn file_change(
     let before = match (&file.before, old_language) {
         // Renamed from JavaScript (a JS-to-TS migration): its functions are
         // new, but the imports and the code it already had are not. If the
-        // JavaScript cannot be read, the head's own imports and tokens
-        // stand in, at the head's path, so neither an import nor a copy of
-        // the file counts as new wherever it moved; complexity is as for
-        // any added file.
+        // JavaScript cannot be read, the head's own imports, tokens and
+        // line hashes stand in, at the head's path, so neither an import
+        // nor a copy of the file counts as new wherever it moved;
+        // complexity is as for any added file.
         (Some(id), None)
             if language.family() == Family::TypeScript
                 && file
@@ -1051,8 +1051,8 @@ fn file_change(
                     .is_some_and(|old| selection.is_javascript(old)) =>
         {
             let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
-            // The code it already had is not new either: its tokens count
-            // as the base version for duplication.
+            // The code it already had is not new either: its tokens and
+            // lines count as the base version for duplication.
             let (imports, mut tokens, lines) = if let Ok(model) = parse_blob(Language::Tsx, bytes)?
             {
                 (model.imports, model.tokens, model.lines)

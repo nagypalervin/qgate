@@ -42,11 +42,11 @@ SHALL count as the original.
 
 A line the change wrote SHALL be a line of a changed file's head version
 that the change added and that did not move. Added and removed lines
-SHALL come from a line diff of the file's two versions. Every line of an
-added file SHALL be added, every line of a deleted file removed, and a
-renamed file's two versions SHALL be diffed like an edited file's. Lines
-SHALL be compared by their text without leading and trailing white
-space.
+SHALL come from a line diff of the file's two versions, the base being
+what counts as before. Every line of a file without one SHALL be added,
+every line of a deleted file removed, and a renamed file SHALL be
+diffed like an edited one. Lines SHALL be compared by their text
+without leading and trailing white space.
 
 #### Scenario: The same small edit in existing copies
 

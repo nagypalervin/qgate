@@ -62,7 +62,8 @@ written next to shared code") rest on. Rejected.
 
 `qgate_lang::parse` sets a new field, `FileModel::lines: Vec<u64>`.
 Element `i` holds the 64-bit FNV-1a hash of line `i + 1` without leading
-and trailing white space, and 0 for an empty line, so the pairing of
+and trailing white space (and a byte order mark, which editors add and
+drop), and 0 for an empty line, so the pairing of
 D3 can tell empty lines without the text. Lines are split by
 `str::lines`, so `\r\n` works too. This happens once for all three adapters, after the adapter
 returns. The field covers every line, comment and empty lines included.
@@ -142,8 +143,11 @@ holds; a deleted file has no `after_lines`. `DuplicationIndex::add`
   - Beyond the limit, every line of both middles counts as removed and
     added. The pairing of D3 then matches the file's unchanged runs with
     its own removed runs in the first pass, so the middle mostly counts
-    as moved. Lines next to an edit become written, which can only
-    report more, as today, never less than a real diff would.
+    as moved. Lines next to an edit become written. Per key, the first
+    pass pairs as many runs as a real diff would keep, but in line order
+    it may pair another occurrence of the same run, so which of the
+    file's lines count as written can shift. The replay is the check
+    for both.
 
 *Alternatives:*
 
@@ -229,3 +233,18 @@ appear. No configuration changes.
   PR 8812, took 9.1 s in the batch against 7.0 s before. Timed alone,
   three times each, both binaries take 7.2 to 7.4 s on it, so the batch
   difference was the machine's load.
+- **Review.** The `reviewer` subagent ran one round. It found no
+  blocker and confirmed the trace arithmetic of Myers with its own
+  mutants. Fixed after it:
+  - the limit tests now pin it exactly: `MAX_EDITS + 1` and one more
+    step each fail a test;
+  - the line hashes are pinned to FNV-1a, to lines ending at `\n` only,
+    and to every token's line; a byte order mark is trimmed too;
+  - `ChangedSource` documents the line hashes, and the test helper fills
+    them;
+  - the design and the spec delta describe the fallback and the base
+    version more precisely.
+
+  The end-to-end test of the CLI's wiring (task 4.4) comes in PR 2,
+  where the analyzer reads the lines. The trace still stores both
+  parities of diagonals; halving it is left out.

@@ -31,8 +31,8 @@ pub(crate) fn middles<'t, T: PartialEq>(
 
 /// Per element of `a` and of `b`, whether it is kept: part of the common
 /// subsequence of a shortest edit script from `a` to `b`. The common
-/// start and end are kept; between them, a script needing more than
-/// [`MAX_EDITS`] edits is not searched, and every element there counts as
+/// start and end are kept; between them, the search for a script gives
+/// up after [`MAX_EDITS`] edits, and then every element there counts as
 /// changed.
 // The duplication analyzer uses it from PR 2 of `duplication-of-new-code`.
 #[allow(dead_code)]
@@ -216,19 +216,19 @@ mod tests {
         assert_eq!(middles(b"aa", b"a"), (1, 0, &b"a"[..], &b""[..]));
     }
 
-    /// `a` and `b` around one common element `c`, each with `distinct`
+    /// `a` and `b` around one common element `c`, with `in_a` and `in_b`
     /// elements no other has, and a common first and last element: the
-    /// middles need `2 · distinct` edits.
-    fn around(distinct: u32) -> (Vec<u32>, Vec<u32>) {
+    /// middles need `in_a + in_b` edits.
+    fn around(in_a: usize, in_b: usize) -> (Vec<usize>, Vec<usize>) {
         let (first, c, last) = (0, 1, 2);
-        let a: Vec<u32> = [first]
+        let a: Vec<usize> = [first]
             .into_iter()
-            .chain((0..distinct).map(|i| 10 + i))
+            .chain((0..in_a).map(|i| 10 + i))
             .chain([c, last])
             .collect();
-        let b: Vec<u32> = [first, c]
+        let b: Vec<usize> = [first, c]
             .into_iter()
-            .chain((0..distinct).map(|i| 10 + distinct + i))
+            .chain((0..in_b).map(|i| 10 + in_a + i))
             .chain([last])
             .collect();
         (a, b)
@@ -236,8 +236,7 @@ mod tests {
 
     #[test]
     fn edits_up_to_the_limit_are_searched() {
-        let distinct = u32::try_from(MAX_EDITS / 2).expect("small");
-        let (a, b) = around(distinct);
+        let (a, b) = around(MAX_EDITS / 2, MAX_EDITS / 2);
         let (kept_a, kept_b) = kept(&a, &b);
         assert_eq!(kept_a.iter().filter(|k| **k).count(), 3);
         assert!(kept_a[a.len() - 2] && kept_b[1]);
@@ -245,8 +244,8 @@ mod tests {
 
     #[test]
     fn beyond_the_limit_only_the_common_start_and_end_are_kept() {
-        let distinct = u32::try_from(MAX_EDITS / 2 + 1).expect("small");
-        let (a, b) = around(distinct);
+        // One edit past the limit.
+        let (a, b) = around(MAX_EDITS / 2 + 1, MAX_EDITS / 2);
         let (kept_a, kept_b) = kept(&a, &b);
         let only_ends = |kept: &[bool]| {
             kept.iter()

@@ -73,12 +73,14 @@ pub(crate) fn line_of(node: Node<'_>) -> u32 {
 
 /// One hash per line of `source`, for [`FileModel::lines`]: FNV-1a of the
 /// trimmed text, 0 for an empty line. Lines end at `\n`, like the rows
-/// of tree-sitter, and a `\r` before it is dropped.
+/// of tree-sitter, and a `\r` before it is dropped. Trimming removes
+/// Unicode white space and a byte order mark, which editors add or drop
+/// without a change to the code.
 pub(crate) fn line_hashes(source: &str) -> Vec<u64> {
     source
         .lines()
         .map(|line| {
-            let line = line.trim();
+            let line = line.trim_matches(|c: char| c.is_whitespace() || u32::from(c) == 0xFEFF);
             if line.is_empty() {
                 return 0;
             }

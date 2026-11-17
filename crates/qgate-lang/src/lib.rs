@@ -235,6 +235,58 @@ mod tests {
     }
 
     #[test]
+    fn a_line_is_hashed_by_fnv_1a() {
+        assert_eq!(lines(Language::TypeScript, "a"), [0xaf63_dc4c_8601_ec8c]);
+    }
+
+    #[test]
+    fn lines_end_at_newlines_only() {
+        // An empty last line counts; a lone carriage return ends no line,
+        // as for tree-sitter.
+        let hashes = lines(Language::TypeScript, "a\n\n");
+        assert_eq!(hashes.len(), 2);
+        assert_eq!(hashes[1], 0);
+        assert_eq!(lines(Language::TypeScript, "const s = `a\rb`;").len(), 1);
+    }
+
+    #[test]
+    fn a_byte_order_mark_and_unicode_spaces_are_trimmed() {
+        let bom = char::from_u32(0xFEFF).expect("a char");
+        let nbsp = char::from_u32(0xA0).expect("a char");
+        let plain = lines(Language::CSharp, "class A {}\nclass B {}");
+        let marked = lines(
+            Language::CSharp,
+            &format!("{bom}class A {{}}\n{nbsp}class B {{}}{nbsp}"),
+        );
+        assert_eq!(marked, plain);
+    }
+
+    #[test]
+    fn every_token_is_on_a_line_with_code() {
+        for (language, source) in [
+            (
+                Language::TypeScript,
+                "// c\r\nconst s = `a\r\nb`;\r\n\r\nf(s);",
+            ),
+            (
+                Language::CSharp,
+                "class A {\n  // c\n  string s = @\"a\nb\";\n\n  int F() => 1;\n}",
+            ),
+            (
+                Language::Rust,
+                "// c\nfn f() -> &'static str {\n    r\"a\nb\"\n}\n",
+            ),
+        ] {
+            let model = parse(language, source).expect("valid source");
+            assert_ne!(model.tokens.len(), 0, "{language:?}");
+            for token in &model.tokens {
+                let line = usize::try_from(token.line).expect("small") - 1;
+                assert_ne!(model.lines[line], 0, "{language:?} {token:?}");
+            }
+        }
+    }
+
+    #[test]
     fn a_file_without_code_has_its_lines() {
         assert_eq!(lines(Language::TypeScript, "// a\n// b\n").len(), 2);
         assert_eq!(lines(Language::TypeScript, ""), Vec::<u64>::new());

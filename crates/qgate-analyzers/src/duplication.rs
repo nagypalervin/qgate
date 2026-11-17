@@ -28,8 +28,9 @@ pub const RULE: &str = "duplication/duplicate-block";
 /// The smallest duplicate block, in normalized tokens.
 pub const MIN_TOKENS: usize = 50;
 
-/// One changed file: its path and the tokens of both versions (empty
-/// before for an added file, empty after for a file the change removed).
+/// One changed file: its path, and the tokens and line hashes of both
+/// versions (empty before for an added file, empty after for a file the
+/// change removed).
 #[derive(Debug, Clone, Copy)]
 pub struct ChangedSource<'a> {
     /// Path in the head revision, as findings report it (the old path for
@@ -39,11 +40,14 @@ pub struct ChangedSource<'a> {
     pub before: &'a [Token],
     /// Tokens of the head version.
     pub after: &'a [Token],
-    /// Line hashes of the base version ([`FileModel::lines`]).
+    /// Line hashes of the base version, as [`FileModel::lines`]: at
+    /// index `line - 1`, so they cover the line of every token in
+    /// `before`.
     ///
     /// [`FileModel::lines`]: qgate_lang::FileModel::lines
     pub before_lines: &'a [u64],
-    /// Line hashes of the head version.
+    /// Line hashes of the head version, covering the line of every token
+    /// in `after`.
     pub after_lines: &'a [u64],
 }
 
@@ -536,21 +540,42 @@ mod tests {
         run_with(changes, others, fnv1a)
     }
 
+    /// Line hashes for `tokens`: per line up to the last token's, the hash
+    /// of the texts of its tokens, 0 for a line without any.
+    fn lines_of(tokens: &[Token]) -> Vec<u64> {
+        let count = tokens.last().map_or(0, |t| t.line as usize);
+        let mut texts = vec![String::new(); count];
+        for token in tokens {
+            texts[token.line as usize - 1].push_str(&token.text);
+        }
+        texts
+            .iter()
+            .map(|text| if text.is_empty() { 0 } else { fnv1a(text) })
+            .collect()
+    }
+
     /// The findings themselves, for what `run` leaves out.
     fn findings_with(
         changes: &[(&str, Vec<Token>, Vec<Token>)],
         others: &[(&str, Vec<Token>)],
         hash: fn(&str) -> u64,
     ) -> Vec<Finding> {
+        let lines: Vec<(Vec<u64>, Vec<u64>)> = changes
+            .iter()
+            .map(|(_, before, after)| (lines_of(before), lines_of(after)))
+            .collect();
         let sources: Vec<ChangedSource<'_>> = changes
             .iter()
-            .map(|(path, before, after)| ChangedSource {
-                path,
-                before,
-                after,
-                before_lines: &[],
-                after_lines: &[],
-            })
+            .zip(&lines)
+            .map(
+                |((path, before, after), (before_lines, after_lines))| ChangedSource {
+                    path,
+                    before,
+                    after,
+                    before_lines,
+                    after_lines,
+                },
+            )
             .collect();
         let mut index = DuplicationIndex::with_token_hash(&sources, hash);
         for (path, tokens) in others {
