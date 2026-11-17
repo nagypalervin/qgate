@@ -231,7 +231,8 @@ fn grown<'a>(
 }
 
 /// The largest number of token pairs [`added`] aligns (2^26 bits, 8 MiB)
-/// and [`evidence`] compares (design D3).
+/// and [`evidence`] compares (design D3), and that [`shares_half`]
+/// compares for a move (design D2 of `limit-move-evidence`).
 const ALIGNED_PAIRS: usize = 1 << 26;
 
 /// The tokens of `after` outside a longest common subsequence with
@@ -241,15 +242,7 @@ const ALIGNED_PAIRS: usize = 1 << 26;
 /// the `after` token, so within the middle added tokens come as late as
 /// they can. `None` when the middle has more than [`ALIGNED_PAIRS`] pairs.
 fn added(before: &[usize], after: &[usize]) -> Option<Vec<usize>> {
-    let start = before.iter().zip(after).take_while(|(b, a)| b == a).count();
-    let (before, after) = (&before[start..], &after[start..]);
-    let end = before
-        .iter()
-        .rev()
-        .zip(after.iter().rev())
-        .take_while(|(b, a)| b == a)
-        .count();
-    let (before, after) = (&before[..before.len() - end], &after[..after.len() - end]);
+    let (_, before, after) = middles(before, after);
     let (n, m) = (before.len(), after.len());
     if n.saturating_mul(m) > ALIGNED_PAIRS {
         return None;
@@ -277,6 +270,22 @@ fn added(before: &[usize], after: &[usize]) -> Option<Vec<usize>> {
         std::mem::swap(&mut row, &mut below);
     }
     Some(outside(before, after, &skip))
+}
+
+/// The number of tokens cut from each of `a` and `b`, and their middles:
+/// what is left of each when their common start and then, of the rest,
+/// their common end are cut off. A longest common subsequence of `a` and
+/// `b` is the cut tokens plus a longest common subsequence of the middles.
+fn middles<'t>(a: &'t [usize], b: &'t [usize]) -> (usize, &'t [usize], &'t [usize]) {
+    let start = a.iter().zip(b).take_while(|(x, y)| x == y).count();
+    let (a, b) = (&a[start..], &b[start..]);
+    let end = a
+        .iter()
+        .rev()
+        .zip(b.iter().rev())
+        .take_while(|(x, y)| x == y)
+        .count();
+    (start + end, &a[..a.len() - end], &b[..b.len() - end])
 }
 
 /// The tokens of `after` outside the common subsequence with `before`
@@ -356,7 +365,8 @@ impl<'a> Unit<'a> {
 /// Pair unmatched after units with removed units of the same own name
 /// (design D2), in two passes over each group: first units with the same
 /// code (fingerprint), then, among the rest, units with code evidence
-/// ([`shares_half`]).
+/// ([`shares_half`], which has a limit, so two long units whose first
+/// and last differences lie far apart are matched only by the same code).
 fn moves<'a, K: Copy>(unmatched: &[(K, Unit<'a>)], removed: &[Unit<'a>]) -> Vec<(K, Unit<'a>)> {
     let mut groups: BTreeMap<&str, Group<'a, K>> = BTreeMap::new();
     for &(key, unit) in unmatched {
@@ -438,12 +448,21 @@ fn settle<'a, K: Copy>(
 /// Whether the tokens of `a` and `b` have a common subsequence of at
 /// least half of each one's length: the evidence of a move (design D2).
 /// A unit without tokens is no evidence, nor is one more than twice as
-/// long as the other, which is checked before the subsequence.
+/// long as the other, which is checked before the subsequence. The
+/// subsequence is the common start and end plus a longest common
+/// subsequence of the [`middles`]; when the middles form more than
+/// [`ALIGNED_PAIRS`] pairs, they are not compared and there is no
+/// evidence (design D1 of `limit-move-evidence`).
 fn shares_half(a: &[usize], b: &[usize]) -> bool {
     let (shorter, longer) = if a.len() <= b.len() { (a, b) } else { (b, a) };
-    !shorter.is_empty()
-        && 2 * shorter.len() >= longer.len()
-        && 2 * common_in_order(longer, shorter) >= longer.len()
+    if shorter.is_empty() || 2 * shorter.len() < longer.len() {
+        return false;
+    }
+    let (cut, longer_middle, shorter_middle) = middles(longer, shorter);
+    if longer_middle.len().saturating_mul(shorter_middle.len()) > ALIGNED_PAIRS {
+        return false;
+    }
+    2 * (cut + common_in_order(longer_middle, shorter_middle)) >= longer.len()
 }
 
 /// The length of the longest common subsequence of `a` and `b`, by one
@@ -908,6 +927,95 @@ mod tests {
         assert!(!shares_half(&[1, 2, 3, 4], &[4, 3, 2, 1]));
         assert!(!shares_half(&[], &[]));
         assert!(!shares_half(&[1, 2], &[]));
+    }
+
+    // Design D1 of `limit-move-evidence`: two units whose middles, without
+    // the common start and end, form more than 2^26 pairs are no partners,
+    // though they share almost all their tokens; a change in one place
+    // leaves a middle of one token, near the start or near the end.
+    #[test]
+    fn move_evidence_has_a_limit() {
+        let long: Vec<usize> = (0..9000).collect();
+        let mut ends = long.clone();
+        ends[0] = usize::MAX;
+        ends[8999] = usize::MAX;
+        assert!(!shares_half(&long, &ends));
+        for place in [10, 8989] {
+            let mut one = long.clone();
+            one[place] = usize::MAX;
+            assert!(shares_half(&long, &one), "changed at {place}");
+        }
+    }
+
+    /// A C# class `class` whose method `Run(int)`, on line 5, has
+    /// complexity 12: eleven `if` statements, then the statement `first`,
+    /// 3,000 assignments (more than 8,192 tokens) and the statement `last`.
+    fn long_run(class: &str, first: &str, last: &str) -> String {
+        let mut body = String::new();
+        for i in 1..=11 {
+            let _ = writeln!(body, "        if (d > {i}) {{ d++; }}");
+        }
+        let _ = writeln!(body, "        {first};");
+        for i in 0..3000 {
+            let _ = writeln!(body, "        d += {i};");
+        }
+        let _ = writeln!(body, "        {last};");
+        format!(
+            "namespace Shop;\n\npublic class {class}\n{{\n    private static int Run(int d)\n    {{\n{body}        return d;\n    }}\n}}\n"
+        )
+    }
+
+    /// The findings when `src/Tests.cs`, with `before`, is deleted and
+    /// `src/Helpers.cs`, with `after`, is added.
+    fn moved_run(before: &str, after: &str) -> Vec<Finding> {
+        run_files(
+            Language::CSharp,
+            &[
+                ("src/Tests.cs", Some(before), None),
+                ("src/Helpers.cs", None, Some(after)),
+            ],
+        )
+    }
+
+    // complexity-analysis: "A long moved function changed at both ends".
+    // Only two operators change, but one is near the start and one near
+    // the end, so the middles between them have more than 8,192 tokens
+    // each. They are not compared, and `Helpers.Run(int)` is new.
+    #[test]
+    fn a_long_moved_function_changed_at_both_ends() {
+        let findings = moved_run(
+            &long_run("Tests", "d += 1", "d += 2"),
+            &long_run("Helpers", "d -= 1", "d -= 2"),
+        );
+        let mut expected = new(Severity::Warning, "Helpers.Run(int)", 5, 12);
+        expected.location.path = "src/Helpers.cs".into();
+        assert_eq!(findings, vec![expected]);
+    }
+
+    // complexity-analysis: "A long moved function changed in one place".
+    // The fingerprints differ; the common start and end leave a middle
+    // of one token, so the code evidence matches the two. Once near the
+    // start and once near the end, so each cut is needed.
+    #[test]
+    fn a_long_moved_function_changed_in_one_place() {
+        let before = long_run("Tests", "d += 1", "d += 2");
+        for after in [
+            long_run("Helpers", "d -= 1", "d += 2"),
+            long_run("Helpers", "d += 1", "d -= 2"),
+        ] {
+            assert_eq!(moved_run(&before, &after), vec![]);
+        }
+    }
+
+    // complexity-analysis: "A long function moved unchanged". The same
+    // code matches without code evidence.
+    #[test]
+    fn a_long_function_moved_unchanged() {
+        let findings = moved_run(
+            &long_run("Tests", "d += 1", "d += 2"),
+            &long_run("Helpers", "d += 1", "d += 2"),
+        );
+        assert_eq!(findings, vec![]);
     }
 
     // complexity-analysis: "Short removed namesake". A one-line removed
