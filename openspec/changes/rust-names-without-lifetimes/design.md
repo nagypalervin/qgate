@@ -8,10 +8,14 @@ through `compact` (whitespace removed except between two words). So the
 name is the text as written, and lifetimes and any comment inside the
 type come with it.
 
-In tree-sitter-rust 0.24, lifetimes appear in a type as `lifetime` nodes
-in four places: in `type_arguments` (`Walker<'s>`), in a `reference_type`
-(`&'a str`), in a `bounded_type` (`dyn Fn() + 'a`), and in a
-`for_lifetimes` list (`for<'a> fn(&'a str)`).
+In tree-sitter-rust 0.24, a lifetime in a type is a `lifetime` node in
+`type_arguments` (`Walker<'s>`), a `reference_type` (`&'a str`), a
+`bounded_type` (`dyn Fn() + 'a`), `trait_bounds` (`Item: Send + 'a`),
+`use_bounds` (`use<'a>`) and a `for_lifetimes` list (`for<'a> fn(&'a
+str)`). It is a `lifetime_parameter` in the `type_parameters` of a
+`for<'a>` that is not `for_lifetimes` (see "While coding"). The other
+parents of `lifetime` in the grammar, `self_parameter` and
+`where_predicate`, cannot occur in an `impl`'s type or trait.
 
 In qgate's own source, 11 `impl` blocks carry a lifetime: the three
 adapters' `Walker`s, `Conventions<'a>` and `JsonFinding<'a>`.
@@ -57,11 +61,14 @@ distinction that a name needs.
 **Chosen:** build the segment from the leaf tokens of the `type` and
 `trait` subtrees, joined with the same spacing rule `compact` applies.
 The rendering skips:
-- `lifetime` and `for_lifetimes` nodes;
-- the `,` or `+` that separated a skipped lifetime from a sibling that
-  remains;
-- the `<` and `>` of a `type_arguments` node whose only arguments were
-  lifetimes;
+- `lifetime`, `lifetime_parameter` and `for_lifetimes` nodes;
+- a list that held only lifetimes, with its brackets or colon:
+  `type_arguments`, `type_parameters`, `trait_bounds`, `use_bounds`;
+  and the `for` of a `for<...>` that held only lifetimes;
+- a `,` or `+` that no longer stands between two parts that stay. A
+  separator stays before a part that stays if some part before it stays
+  too; a trailing one stays if the part before it stays, as it did
+  before the change (`Foo<T,>`);
 - comments.
 
 **Alternative:** strip `'ident` with a pattern on the text. A
@@ -109,17 +116,29 @@ release.
 - **A literal is written as one piece.** A `char_literal` or
   `string_literal` (a const-generic argument) is not entered, so its
   quotes and escapes stay as written: `Code<'x'>` keeps its `'x'`.
-- **`lifetime_parameter` counts as a lifetime.** It appears in the
-  `for<'a>` of a `dyn for<'a> Fn(&'a str)`, which tree-sitter-rust reads
-  as a `higher_ranked_trait_bound` with `type_parameters`, not as
-  `for_lifetimes`. When those parameters are all lifetimes, the `for`
-  goes with them: `Box<dyn Fn(&str)>`.
+- **`lifetime_parameter` counts as a lifetime.** tree-sitter-rust has
+  three shapes of `for<'a>`: `for_lifetimes` in a function pointer type;
+  a `higher_ranked_trait_bound` with `type_parameters` in
+  `dyn for<'a> Fn(&'a str)`; and an `abstract_type` with
+  `type_parameters` as a plain child, not a field, in
+  `impl for<'a> Fn(&'a u8)`. In the last two, the parameters are
+  `lifetime_parameter` nodes; when they are all lifetimes, the `for` goes
+  with them: `Box<dyn Fn(&str)>`.
+- **Review of PR 1: the separator rule.** The first rule let each
+  lifetime take the separator after it, or the one before it if it was
+  last. In `Foo<T, 'a, 'b>` both lifetimes took the same separator, and
+  `Foo<T,>` remained. Lists of bounds (`Item: Send + 'a`, `use<'a>`) and
+  `impl for<'a>` were not emptied either. The rule now looks at what
+  stays instead of at the lifetimes (D2). All the review's inputs are
+  rejected by rustc in an `impl` header, so this changes no name in
+  real code (see "Verification").
 
 ## Verification
 
 - **Replay over the 56 merges of `main`** (task 3.1), with the release
-  binaries of `main` and of the branch: 234 findings either way. 16
-  findings in 8 merges differ only in their message, by a unit name that
+  binaries of `main` and of the branch after the review's fixes: 234
+  findings either way. 14 findings in 8 merges differ only in their
+  message, by a unit name that
   lost its lifetime (`Walker<'s>.enter` → `Walker.enter`,
   `Conventions<'a>.new` → `Conventions.new`,
   `<Walker<'_> as Visit>.enter` → `<Walker as Visit>.enter`). No finding
@@ -134,3 +153,9 @@ release.
   1253 units in the 41 Rust files outside `fixtures/`. No name contains
   `'`, and no name needed a `#2` suffix. The Rust fixtures have no name
   with `'` either.
+- **A larger corpus** (review of PR 1): 840 Rust files with units from
+  the Cargo registry and other projects, 21065 units. 4073 names differ
+  from `main`, and each is `main`'s name with lifetimes, their
+  separators, empty lists and comments removed. After the fix of the
+  separator rule, no name in this corpus changed compared with the
+  reviewed version.

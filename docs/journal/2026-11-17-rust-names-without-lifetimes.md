@@ -8,7 +8,7 @@
   against the old adapter as well. It failed there with exactly the
   false "new function" of the day before, then passed with the fix.
 - **The replay as a safety net again.** 56 merges, 234 findings before
-  and after. 16 messages changed, all only by a lifetime leaving a name.
+  and after. 14 messages changed, all only by a lifetime leaving a name.
   Nothing else moved.
 - **qgate reviewed its own fix.** Run on the branch, it flagged the new
   `left_out_of_name` at complexity 13: a match whose `|` alternatives
@@ -28,14 +28,24 @@
   change was undone before its pull request merged, so the replay could
   only show that names got shorter, not that a false finding went away.
   The one place that proves the fix is a test built for it.
-- **The grammar has two ways to say `for<'a>`.** In a function pointer
-  type it is `for_lifetimes`. In `dyn for<'a> Fn(...)` it is a
+- **The grammar has three ways to say `for<'a>`.** In a function
+  pointer type it is `for_lifetimes`. In `dyn for<'a> Fn(...)` it is a
   `higher_ranked_trait_bound` with ordinary `type_parameters`. Probing
-  the tree before writing the rule found both.
+  the tree before writing the rule found these two; the reviewer found
+  the third, `impl for<'a> Fn(...)`, along with lists of bounds and a
+  separator rule that broke on two lifetimes in a row. Nothing in 840
+  real files hit any of them: they are invalid in an `impl` header.
+- **A miscount in the record.** The verification first said 16 changed
+  messages; the reviewer counted 14 from the same reports. The number
+  was typed from a skim of the diff, not counted.
 
-**Effort:** about an hour; 1 PR, 6 commits, the replay run twice.
+**Effort:** about two hours; 1 PR, 7 commits, the replay run three
+times, one review round.
 
 **Follow-ups for Ervin to order:**
+- a negative impl, `impl !Sync for Foo`, is named like a positive one
+  (`<Foo as Sync>`): the `!` stands outside the `trait` field. Found by
+  the reviewer, older than this change;
 - the `Repo` test helper in one place (still open from
   `add-rust-analysis`).
 

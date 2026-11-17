@@ -240,50 +240,64 @@ impl Visit for TypeName<'_> {
     }
 }
 
-/// Whether `node` stays out of a type's name: a lifetime, a comment, the
-/// separator of a lifetime, and the `<>` or `for<>` that only lifetimes
-/// filled.
+/// Whether `node` stays out of a type's name: a lifetime, a comment, a
+/// separator no longer between two parts that stay, and a list or
+/// `for` that only lifetimes filled.
 fn left_out_of_name(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
     match node.kind() {
         "lifetime" | "lifetime_parameter" | "for_lifetimes" => true,
         _ if node.is_extra() => true,
-        "type_arguments" | "type_parameters" => only_lifetimes(node),
-        "," | "+" => separates_a_lifetime(node),
+        "," | "+" => !separator_stays(node),
         "for" => parent.is_some_and(binds_only_lifetimes),
+        _ => emptied(node),
+    }
+}
+
+/// Whether `node` leaves the name as a whole: a lifetime, or a list of
+/// arguments, parameters or bounds that held only lifetimes, with its
+/// brackets or colon.
+fn emptied(node: Node<'_>) -> bool {
+    match node.kind() {
+        "lifetime" | "lifetime_parameter" => true,
+        "type_arguments" | "type_parameters" | "trait_bounds" | "use_bounds" => {
+            named_children(node)
+                .into_iter()
+                .filter(|c| !c.is_extra())
+                .all(|c| matches!(c.kind(), "lifetime" | "lifetime_parameter"))
+        }
         _ => false,
     }
 }
 
-/// Whether `node` is a higher-ranked bound whose `for<...>` holds only
-/// lifetimes, so its `for` keyword leaves with them.
+/// Whether `node` is a higher-ranked bound or an `impl` type whose
+/// `for<...>` holds only lifetimes, so its `for` keyword leaves with them.
 fn binds_only_lifetimes(node: Node<'_>) -> bool {
-    node.kind() == "higher_ranked_trait_bound"
-        && node
-            .child_by_field_name("type_parameters")
-            .is_some_and(only_lifetimes)
+    // `abstract_type` holds its `type_parameters` as a plain child, not
+    // as a field.
+    matches!(node.kind(), "higher_ranked_trait_bound" | "abstract_type")
+        && named_children(node)
+            .into_iter()
+            .find(|c| c.kind() == "type_parameters")
+            .is_some_and(emptied)
 }
 
-/// Whether the separator `node` leaves with a lifetime: a lifetime takes
-/// the separator after it, or the one before it if it is the last in its
-/// list.
-fn separates_a_lifetime(node: Node<'_>) -> bool {
-    let is_separator = |n: Node<'_>| matches!(n.kind(), "," | "+");
-    sibling(node, Node::prev_sibling).is_some_and(is_lifetime)
-        || sibling(node, Node::next_sibling).is_some_and(|next| {
-            is_lifetime(next) && !sibling(next, Node::next_sibling).is_some_and(is_separator)
-        })
-}
-
-fn is_lifetime(node: Node<'_>) -> bool {
-    matches!(node.kind(), "lifetime" | "lifetime_parameter")
-}
-
-/// Whether a list of arguments or parameters holds nothing but lifetimes.
-fn only_lifetimes(list: Node<'_>) -> bool {
-    named_children(list)
-        .into_iter()
-        .filter(|c| !c.is_extra())
-        .all(is_lifetime)
+/// Whether the separator `node` stays in the name: one before a part that
+/// stays, if a part before it stays too; a trailing one, if the part
+/// before it stays.
+fn separator_stays(node: Node<'_>) -> bool {
+    let stays = |n: &Node<'_>| n.is_named() && !emptied(*n);
+    match sibling(node, Node::next_sibling).filter(Node::is_named) {
+        Some(next) => {
+            stays(&next) && {
+                let mut before = sibling(node, Node::prev_sibling);
+                while let Some(n) = before.filter(|n| !stays(n)) {
+                    before = sibling(n, Node::prev_sibling);
+                }
+                before.is_some()
+            }
+        }
+        None => sibling(node, Node::prev_sibling).is_some_and(|n| stays(&n)),
+    }
 }
 
 /// The sibling of `node` in direction `step`, past comments.
@@ -466,7 +480,13 @@ mod tests {
                       impl<'a, 'b: 'a> Two<'a, 'b, u8> { fn d(&self) {} }\n\
                       impl Run for Box<dyn for<'a> Fn(&'a str)> { fn e(&self) {} }\n\
                       impl<'a> Three<T, 'a /* c */, U> { fn f(&self) {} }\n\
-                      impl<'a> Run for Box<dyn Fn() + 'a + Send> { fn g(&self) {} }\n";
+                      impl<'a> Run for Box<dyn Fn() + 'a + Send> { fn g(&self) {} }\n\
+                      impl X for Foo<T, 'a, 'b> { fn h(&self) {} }\n\
+                      impl X for Box<dyn Iterator<Item: Send + 'a + 'b>> { fn i(&self) {} }\n\
+                      impl X for Box<dyn Iterator<Item: 'a>> { fn j(&self) {} }\n\
+                      impl X for Box<dyn Fn() + use<'a>> { fn k(&self) {} }\n\
+                      impl X for impl for<'a> Fn(&'a u8) { fn l(&self) {} }\n\
+                      impl X for Foo<'a, T,> { fn m(&self) {} }\n";
         assert_eq!(
             names_only(source),
             [
@@ -477,6 +497,14 @@ mod tests {
                 "<Box<dyn Fn(&str)> as Run>.e",
                 "Three<T,U>.f",
                 "<Box<dyn Fn()+Send> as Run>.g",
+                // review of PR 1: lists with several lifetimes, bounds,
+                // `use<..>` and `impl for<..>`
+                "<Foo<T> as X>.h",
+                "<Box<dyn Iterator<Item:Send>> as X>.i",
+                "<Box<dyn Iterator<Item>> as X>.j",
+                "<Box<dyn Fn()> as X>.k",
+                "<impl Fn(&u8) as X>.l",
+                "<Foo<T,> as X>.m",
             ]
         );
     }
