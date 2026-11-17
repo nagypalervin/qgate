@@ -1,0 +1,32 @@
+# jasontaylordev/CleanArchitecture, frozen before the first run (design D2).
+# The repository has no architecture tests and no import lint rules; its
+# layers are the project references of src/*/*.csproj:
+#   Domain -> (nothing), Application -> Domain,
+#   Infrastructure -> Application, Shared; Web -> Application,
+#   Infrastructure, ServiceDefaults.
+
+# Domain.csproj references no project.
+[[architecture.forbid]]
+name = "domain-is-pure"
+from = ["src/Domain/**"]
+to_namespaces = [
+  "CleanArchitecture.Application",
+  "CleanArchitecture.Infrastructure",
+  "CleanArchitecture.Web",
+  "CleanArchitecture.Shared",
+]
+
+# Application.csproj references Domain only.
+[[architecture.forbid]]
+name = "application-knows-no-infrastructure"
+from = ["src/Application/**"]
+to_namespaces = [
+  "CleanArchitecture.Infrastructure",
+  "CleanArchitecture.Web",
+  "CleanArchitecture.Shared",
+]
+
+[files]
+# EF Core migrations are generated; none are committed today, but a team
+# would add the line before the first one.
+exclude = ["**/Migrations/**"]
