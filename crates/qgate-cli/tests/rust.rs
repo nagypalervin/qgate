@@ -149,6 +149,37 @@ fn copies_are_found_within_one_language_only() {
     assert!(!duplicates(("src/a.ts", &ts), ("src/b.rs", &rs)));
 }
 
+/// A `Walker` whose `step` has complexity 11, in an `impl` block written
+/// as `header`.
+fn walker(header: &str) -> String {
+    let mut ifs = String::new();
+    for i in 0..10 {
+        let _ = writeln!(
+            ifs,
+            "        if self.1 > {i} {{\n            self.1 -= 1;\n        }}"
+        );
+    }
+    format!(
+        "pub struct Walker<'s>(&'s str, u32);\n\n{header} {{\n    fn step(&mut self) {{\n{ifs}    }}\n}}\n"
+    )
+}
+
+// rust-analysis: "A lifetime renamed" (`rust-names-without-lifetimes`).
+// With lifetimes in the name, `Walker<'_>.step` was a new function of
+// complexity 11, a Warning.
+#[test]
+fn a_lifetime_renamed_is_the_same_unit() {
+    let repo = Repo::new();
+    repo.write("crates/lang/src/walker.rs", walker("impl<'s> Walker<'s>"));
+    repo.commit("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("crates/lang/src/walker.rs", walker("impl Walker<'_>"));
+    repo.commit("feature");
+    let out = repo.qgate(&["--base", "main", "--fail-on", "warning"]);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+    assert_eq!(out.status.code(), Some(0));
+}
+
 /// A Rust file at revision `rev` whose `run` has `decisions` `if`s.
 fn rust_file(rev: usize, decisions: usize) -> String {
     let mut ifs = String::new();
