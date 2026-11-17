@@ -6,16 +6,16 @@ PR bodies are written to files first.
 
 ## 1. Moved functions (PR 1)
 
-- [ ] 1.1 Failing tests first, in the `complexity.rs` unit tests, with before/after fixture pairs under `fixtures/complexity/`, for the scenarios:
+- [x] 1.1 Failing tests first, in the `complexity.rs` unit tests, with before/after fixture pairs under `fixtures/complexity/`, for the scenarios:
   - "Method moved to a class in another file", "Moved and grown" and "Moved function message" (C#);
-  - "Moved out of a deleted file", "Moved to another class in the same file", "Ambiguous own name", "Same code settles an ambiguous own name" and "Another language family";
+  - "Moved out of a deleted file", "Moved to another class in the same file", "Ambiguous own name" and "Same code settles an ambiguous own name" ("Another language family" is a CLI test, 1.4: the analyzer is given one family at a time);
   - the own-name split of D2 on `Cart.Total(System.Int32)`, `<Id as From<a::B>>.from`, `Cart.get size` and `A.create#2`.
 
   `renamed_function_is_removed_plus_new` stays as it is. Verified when `cargo test -p qgate-analyzers` fails on exactly the new tests.
-- [ ] 1.2 Add `complexity::analyze(changes, gone)` with the matching by qualified name and then by own name (D1, D2), and the "moved from" message (D4). `ComplexityAnalyzer::analyze` calls it with one change. Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
-- [ ] 1.3 In the CLI, parse each gone file once into a `FileModel`, give duplication its tokens, and call complexity once per family after the per-file loop (D1). Verified when the existing CLI tests pass unchanged.
-- [ ] 1.4 Add a CLI test in `crates/qgate-cli/tests/` for a C# method of complexity 12 that moves from one class into a new class in a new file, while its old file is deleted. Verified when `qgate check --base` reports no finding, and the test fails if 1.3 is reverted.
-- [ ] 1.5 Re-measure with the branch's release binary (see 3.1 for the method). Verified when SV19 is gone, every other difference from the baseline is a moved unit, and the slowest run stays within 30 s. Record the result in "Verification" of `design.md`.
+- [x] 1.2 Add `complexity::analyze(changes, gone)` with the matching by qualified name and then by own name (D1, D2), and the "moved from" message (D4). `ComplexityAnalyzer::analyze` calls it with one change. Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
+- [x] 1.3 In the CLI, parse each gone file once into a `FileModel`, give duplication its tokens, and call complexity once per family after the per-file loop (D1). Verified when the existing CLI tests pass unchanged.
+- [x] 1.4 Add a CLI test in `crates/qgate-cli/tests/` for a C# method of complexity 12 that moves from one class into a new class in a new file, while its old file is deleted. Verified when `qgate check --base` reports no finding, and the test fails if 1.3 is reverted. Also "Another language family", in `tests/rust.rs`.
+- [x] 1.5 Re-measure with the branch's release binary (see 3.1 for the method). Verified when SV19 is gone, every other difference from the baseline is a moved unit, and the slowest run stays within 30 s. Record the result in "Verification" of `design.md`.
 
 ## 2. Inlined functions (PR 2)
 

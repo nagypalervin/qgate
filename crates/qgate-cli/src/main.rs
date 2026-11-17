@@ -27,7 +27,7 @@ use clap::builder::PossibleValue;
 use clap::error::ErrorKind as ClapErrorKind;
 use clap::{Arg, ArgAction, ArgMatches, Command, ValueEnum, value_parser};
 use qgate_analyzers::architecture::{ArchitectureAnalyzer, ForbidRule};
-use qgate_analyzers::complexity::ComplexityAnalyzer;
+use qgate_analyzers::complexity::{self, ComplexityAnalyzer};
 use qgate_analyzers::duplication::{ChangedSource, DuplicationIndex};
 use qgate_analyzers::hotspots::{self, RankedFile, WINDOW_DAYS};
 use qgate_analyzers::patterns::PathPatterns;
@@ -35,7 +35,7 @@ use qgate_analyzers::{Analyzer, FileChange};
 use qgate_config::Config;
 use qgate_core::{Finding, Location, Severity};
 use qgate_git::{BlobId, BlobReader, ChangedFile, Changes, GitError, Repository, TreeFile};
-use qgate_lang::{Family, FileModel, Language, ParseError, Token};
+use qgate_lang::{Family, FileModel, Language, ParseError};
 use qgate_report::{
     ReportSummary, render_azure, render_github, render_json, render_markdown, render_text,
 };
@@ -628,7 +628,8 @@ fn revision_check(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Checked, 
     // selection: a test counts as changed even when it is excluded
     // (design D2 of `add-test-gap-analysis`).
     let edited: Vec<String> = files.iter().map(|file| file.path.clone()).collect();
-    let mut analyzers: Vec<&dyn Analyzer> = vec![&ComplexityAnalyzer];
+    // Complexity runs after the loop, over all files at once.
+    let mut analyzers: Vec<&dyn Analyzer> = Vec::new();
     if !architecture.is_empty() {
         analyzers.push(&architecture);
     }
@@ -691,13 +692,16 @@ fn revision_check(dir: &Path, base: &str, head: HeadArg<'_>) -> Result<Checked, 
             .files_at(&head.revision)
             .map_err(|e| git_message(&e, base, &head))?;
         left.extend(deleted.into_iter().map(|file| (file.path, file.id)));
+        let mut reader = repo
+            .blob_reader()
+            .map_err(|e| git_message(&e, base, &head))?;
+        let gone = gone_files(&mut reader, &left, &selection)?;
+        findings.extend(complexity_findings(&analyzed, &gone, &selection));
         let (copies, complexity) = duplication(
-            &repo,
-            base,
-            &head,
+            &mut reader,
             &tree,
             &analyzed,
-            &left,
+            &gone,
             &changed_paths,
             &selection,
         )?;
@@ -771,43 +775,14 @@ fn hotspot_context(
 /// returns the complexity of each source file it compares, changed or
 /// not and tests left out, for hotspot ranking, so the tree is parsed
 /// once (design D5 of `add-hotspot-context`).
-// One more than clippy's limit: the revision check's state, passed
-// through rather than bundled into a struct used only here.
-#[allow(clippy::too_many_arguments)]
 fn duplication(
-    repo: &Repository,
-    base: &str,
-    head: &Head,
+    reader: &mut BlobReader,
     tree: &[TreeFile],
     changes: &[FileChange],
-    left: &[(String, BlobId)],
+    gone: &[Gone],
     changed_paths: &HashSet<String>,
     selection: &FileSelection,
 ) -> Result<(Vec<Finding>, HashMap<String, u32>), String> {
-    let mut reader = repo
-        .blob_reader()
-        .map_err(|e| git_message(&e, base, head))?;
-    // The base tokens of supported files that are gone (deleted, or
-    // renamed to another language); one that cannot be read or parsed
-    // counts as empty.
-    let mut gone: Vec<(String, Family, Vec<Token>)> = Vec::new();
-    for (path, id) in left {
-        // A deleted JavaScript file's code counts too, like a renamed one's.
-        let language = match selection.language_of(path) {
-            Some(language) => language,
-            None if selection.is_javascript(path) => Language::Tsx,
-            None => continue,
-        };
-        let tokens = match read_source(&mut reader, id)? {
-            Some(bytes) if generated_by_header(language, &bytes) => continue,
-            Some(bytes) => match parse_blob(language, bytes)? {
-                Ok(model) => model.tokens,
-                Err(_) => Vec::new(),
-            },
-            None => Vec::new(),
-        };
-        gone.push((path.clone(), language.family(), tokens));
-    }
     let paths: Vec<String> = changes
         .iter()
         .map(|change| change.path.to_string_lossy().into_owned())
@@ -831,10 +806,10 @@ fn duplication(
         }
         sources.extend(
             gone.iter()
-                .filter(|(_, gone_family, _)| *gone_family == family)
-                .map(|(path, _, tokens)| ChangedSource {
-                    path,
-                    before: tokens,
+                .filter(|gone| gone.family == family)
+                .map(|gone| ChangedSource {
+                    path: &gone.path,
+                    before: &gone.model.tokens,
                     after: &[],
                 }),
         );
@@ -859,7 +834,7 @@ fn duplication(
         let Some((_, index)) = indexes.iter_mut().find(|(f, _)| *f == language.family()) else {
             continue;
         };
-        let Some(bytes) = read_source(&mut reader, &file.id)? else {
+        let Some(bytes) = read_source(reader, &file.id)? else {
             continue;
         };
         if generated_by_header(language, &bytes) {
@@ -889,6 +864,77 @@ fn duplication(
     .collect();
     complexity.retain(|path, _| !tests.contains(path));
     Ok((findings, complexity))
+}
+
+/// The base version of a supported file that is gone: deleted, generated
+/// by its header, or renamed to another language or family.
+struct Gone {
+    path: String,
+    family: Family,
+    model: FileModel,
+}
+
+/// Read and parse the base versions of the files in `left`, once, for
+/// both duplication and complexity (design D1 of
+/// `complexity-of-moved-code`). One that cannot be read or parsed counts
+/// as empty; one generated by its header, or in no language qgate reads,
+/// is left out.
+fn gone_files(
+    reader: &mut BlobReader,
+    left: &[(String, BlobId)],
+    selection: &FileSelection,
+) -> Result<Vec<Gone>, String> {
+    let mut gone = Vec::new();
+    for (path, id) in left {
+        // A deleted JavaScript file's code counts too, like a renamed one's.
+        let language = match selection.language_of(path) {
+            Some(language) => language,
+            None if selection.is_javascript(path) => Language::Tsx,
+            None => continue,
+        };
+        let model = match read_source(reader, id)? {
+            Some(bytes) if generated_by_header(language, &bytes) => continue,
+            Some(bytes) => parse_blob(language, bytes)?.unwrap_or_default(),
+            None => FileModel::default(),
+        };
+        gone.push(Gone {
+            path: path.clone(),
+            family: language.family(),
+            model,
+        });
+    }
+    Ok(gone)
+}
+
+/// The complexity findings of the analyzed changes, one language family
+/// at a time, with the units of that family's gone files (design D1 of
+/// `complexity-of-moved-code`).
+fn complexity_findings(
+    changes: &[FileChange],
+    gone: &[Gone],
+    selection: &FileSelection,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for family in Family::ALL {
+        let of_family: Vec<&FileChange> = changes
+            .iter()
+            .filter(|change| {
+                selection
+                    .language_of(&change.path.to_string_lossy())
+                    .is_some_and(|language| language.family() == family)
+            })
+            .collect();
+        if of_family.is_empty() {
+            continue;
+        }
+        let models: Vec<&FileModel> = gone
+            .iter()
+            .filter(|gone| gone.family == family)
+            .map(|gone| &gone.model)
+            .collect();
+        findings.extend(complexity::analyze(&of_family, &models));
+    }
+    findings
 }
 
 /// One blob through the batch reader: `None` if git cannot give it as a

@@ -425,3 +425,41 @@ fn a_file_that_stops_being_generated_is_new() {
     let out = repo.qgate(&["--base", "main", "--fail-on", "never"]);
     assert_eq!(stdout(&out), new_error("src/Main.cs"), "{}", stderr(&out));
 }
+
+// complexity-analysis: "Moved out of a deleted file", for C#, and design
+// D1 of `complexity-of-moved-code`: a method of complexity 12 moves into a
+// new class in a new file, and its old file is deleted, not renamed.
+#[test]
+fn a_method_moved_out_of_a_deleted_file_is_not_new() {
+    let run = |class: &str, visibility: &str| {
+        let ifs = "        if (d > 0) { d--; }\n".repeat(11);
+        format!(
+            "public class {class}\n{{\n    {visibility} static int Run(int d)\n    {{\n{ifs}        return d;\n    }}\n"
+        )
+    };
+    let mut tests = run("Tests", "private");
+    for i in 0..12 {
+        let _ = write!(
+            tests,
+            "\n    public string Name{i}() {{ return \"name {i} of the old tests\"; }}\n"
+        );
+    }
+    tests.push_str("}\n");
+    let repo = Repo::new();
+    repo.write("src/Tests.cs", &tests);
+    repo.commit("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.remove("src/Tests.cs");
+    repo.write(
+        "src/Helpers.cs",
+        format!("{}}}\n", run("Helpers", "public")),
+    );
+    repo.commit("move Run into Helpers");
+    // Deleted and added, not renamed: the move is the analyzer's to find.
+    assert_eq!(
+        repo.git(&["diff", "--name-status", "-M", "main", "feature"]),
+        "A\tsrc/Helpers.cs\nD\tsrc/Tests.cs"
+    );
+    let out = repo.qgate(&["--base", "main"]);
+    assert_eq!(stdout(&out), "No regressions found.\n", "{}", stderr(&out));
+}
