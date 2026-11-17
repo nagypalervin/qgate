@@ -13,38 +13,6 @@ is new. A unit in the before file that is matched by neither is removed.
 - **WHEN** the two files are compared
 - **THEN** `calc` is treated as removed and `calculateTotal` as new
 
-### Requirement: Finding content
-
-Every complexity finding SHALL carry the before and after values, point to
-the line of the unit's name in the after file (or of the function itself for
-an unnamed default export), and use the message
-`<name>: cyclomatic complexity <before> -> <after> (+<delta>)` for an
-increase and `<name>: new function, cyclomatic complexity <after>` for a new
-unit. An increase of a moved unit SHALL append `, moved from <old name>`.
-An increase with inlined units SHALL write the parenthesis as
-`(+<delta>, +<growth> beyond the inlined <names>)`, the names joined by
-`, ` in their order in the before version.
-
-#### Scenario: Increase message
-
-- **WHEN** `applyDiscount`, named on line 88 of the after file, goes from 4 to 5
-- **THEN** the finding points to line 88 with message `applyDiscount: cyclomatic complexity 4 -> 5 (+1)`
-
-#### Scenario: New function message
-
-- **WHEN** a new function `buildInvoice` with complexity 14 is named on line 120
-- **THEN** the finding points to line 120 with message `buildInvoice: new function, cyclomatic complexity 14`
-
-#### Scenario: Moved function message
-
-- **WHEN** `Tests.Run(int)` moves to `Helpers.Run(int)` and goes from 12 to 14
-- **THEN** the message is `Helpers.Run(int): cyclomatic complexity 12 -> 14 (+2), moved from Tests.Run(int)`
-
-#### Scenario: Inlined function message
-
-- **WHEN** `decryptMany` goes from 4 to 15 and inlines `decryptManyV2`, which had complexity 10
-- **THEN** the message is `decryptMany: cyclomatic complexity 4 -> 15 (+11, +2 beyond the inlined decryptManyV2)`, with before value 4 and after value 15
-
 ## ADDED Requirements
 
 ### Requirement: Moved functions
@@ -120,12 +88,13 @@ partner.
 
 ### Requirement: Inlined functions
 
-A removed unit SHALL count as inlined into a matched unit that got more
-complex when at least half of the removed unit's tokens appear, in
-order, in the matched unit's after version. Its complexity minus 1 is
-then added to the before value for the severity. When the after value
-does not exceed that sum, no finding SHALL be reported. A removed unit
-SHALL count as inlined into at most one unit.
+A removed unit that counts as inlined into a matched unit that got more
+complex SHALL have its complexity minus 1 added to that unit's before
+value for the severity. When the after value does not exceed that sum,
+no finding SHALL be reported. A removed unit SHALL count as inlined into
+at most one unit, and at most one removed unit SHALL count as inlined
+into a unit; the pairs with the longest shared code are taken first,
+and of two alike removed units in one file, the earlier one.
 
 #### Scenario: Inlined behind a feature flag
 
@@ -139,8 +108,73 @@ SHALL count as inlined into at most one unit.
 - **WHEN** `decryptMany` holds the code of `decryptManyV2` plus three more `if` statements, with complexity 15
 - **THEN** a Warning `complexity/cyclomatic-increase` finding is reported for `decryptMany`, for the growth of 2
 
+#### Scenario: Alike removed units
+
+- **GIVEN** `process` with complexity 2, and `checkA` and `checkB` with the same code and complexity 6, in the base revision
+- **WHEN** the head revision removes both, and `process` now holds that code once and one more condition with five decision points, with complexity 12
+- **THEN** an Error `complexity/cyclomatic-increase` finding is reported for `process`, from 2 to 12, for the growth of 5 beyond the inlined `checkA`
+
+### Requirement: Evidence of inlining
+
+A removed unit with decision points SHALL count as inlined into a
+matched unit that got more complex only when the own tokens it shares,
+in order, with the code the change added to the matched unit are at
+least two thirds of the removed unit's own tokens and of that added
+code. The added code is the matched unit's own tokens in its after
+version outside a longest common subsequence with its own tokens in its
+before version.
+
 #### Scenario: Removed but not inlined
 
 - **GIVEN** `process` with complexity 3 and `legacy` with complexity 9 in the base revision
 - **WHEN** the head revision removes `legacy` and adds five `if` statements of other code to `process`
 - **THEN** an Error `complexity/cyclomatic-increase` finding is reported for `process`, from 3 to 8 (+5)
+
+#### Scenario: Removed code that was already there
+
+- **GIVEN** `handle` and `helper`, each with complexity 3 and the same code, in the base revision
+- **WHEN** the head revision removes `helper` and adds one `if` statement of other code to `handle`
+- **THEN** a Warning `complexity/cyclomatic-increase` finding is reported for `handle`, from 3 to 4 (+1)
+
+#### Scenario: Inlined among much new code
+
+- **GIVEN** `process` with complexity 3 and `helper` with complexity 7 in the base revision
+- **WHEN** the head revision removes `helper`, and `process` now holds `helper`'s code and three more `if` statements of other code, which make up more than a third of the code added to `process`, with complexity 12
+- **THEN** an Error `complexity/cyclomatic-increase` finding is reported for `process`, from 3 to 12 (+9)
+
+### Requirement: Limit of the alignment
+
+A matched unit whose before and after own tokens, without their common
+start and end, form more than 2^26 pairs SHALL NOT be credited with an
+inlined unit. A removed unit whose own tokens form more than 2^26 pairs
+with the code added to a matched unit SHALL NOT be credited to it. The
+time and memory of the evidence stay bounded.
+
+#### Scenario: A long function changed at both ends
+
+- **GIVEN** a matched unit whose before and after versions differ from their first changed token to their last over more than 8,192 tokens each
+- **WHEN** the head revision also removes a unit whose code it gained
+- **THEN** nothing is credited, and the unit's increase is reported in full
+
+#### Scenario: A very long inlined function
+
+- **GIVEN** a removed unit of more than 8,192 own tokens
+- **WHEN** the head revision removes it and adds its code, and nothing else, to a matched unit, and the code added to that unit is more than 8,192 tokens as well
+- **THEN** the removed unit is not credited, and the matched unit's increase is reported in full
+
+### Requirement: Messages of moved and inlined units
+
+An increase of a moved unit SHALL append `, moved from <old name>` to the
+message of "Finding content". An increase with an inlined unit SHALL
+write its parenthesis as `(+<delta>, +<growth> beyond the inlined <name>)`,
+and its before and after values SHALL stay the real ones.
+
+#### Scenario: Moved function message
+
+- **WHEN** `Tests.Run(int)` moves to `Helpers.Run(int)` and goes from 12 to 14
+- **THEN** the message is `Helpers.Run(int): cyclomatic complexity 12 -> 14 (+2), moved from Tests.Run(int)`
+
+#### Scenario: Inlined function message
+
+- **WHEN** `decryptMany` goes from 4 to 15 and inlines `decryptManyV2`, which had complexity 10
+- **THEN** the message is `decryptMany: cyclomatic complexity 4 -> 15 (+11, +2 beyond the inlined decryptManyV2)`, with before value 4 and after value 15

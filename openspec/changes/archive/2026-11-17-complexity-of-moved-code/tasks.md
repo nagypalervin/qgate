@@ -37,31 +37,39 @@ From the second review of PR 1 (Ervin's decision of 2026-11-17, D2):
 
 ## 2. Inlined functions (PR 2)
 
-- [ ] 2.1 Failing tests first:
+- [x] 2.1 Failing tests first:
   - in `complexity.rs`, fixtures for "Inlined behind a feature flag", "Inlined and grown beyond it", "Inlined function message" and "Removed but not inlined";
   - a case where one removed unit qualifies for two grown units, which credits only the larger share (D3).
 
   Verified when the new tests fail and no other test does.
-- [ ] 2.2 Credit inlined units in `complexity::analyze` (D3) and add the "beyond the inlined" message (D4). Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
-- [ ] 2.3 Describe moved and inlined functions in the README's complexity section, with the two message forms. Verified by reading it against the spec delta.
+- [x] 2.2 Credit inlined units in `complexity::analyze` (D3) and add the "beyond the inlined" message (D4). Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
+- [x] 2.3 Describe moved and inlined functions in the README's complexity section, with the two message forms. Verified by reading it against the spec delta.
+
+From the re-measurement of PR 2 (Ervin's decision of 2026-11-17, D3):
+
+- [x] 2.4 Make the evidence of inlining two thirds of both the removed unit's own tokens and the code the change added to the grown unit (D3), with tests for removed code that was already there and for a removed unit among much new code. Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`, and the re-measurement of 3.1 is repeated.
+
+From the review of PR 2 (Ervin's decision of 2026-11-17, D3):
+
+- [x] 2.5 Pair inlined units one to one, the longest common subsequence first, and give no credit above 2^26 pairs of tokens in the alignment of the added code, nor in the subsequence of a removed unit and that code (D3). Tests: two grown units inlining one helper, one grown unit with two alike removed units, a moved unit that also inlined code, a moved unit not taken as inlined, the ties and the limit of `added` (also through the analyzer), the limit of `evidence` (also through the analyzer). Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`, and the re-measurement of 3.1 is repeated.
 
 ## 3. Proof
 
-- [ ] 3.1 Re-measure the 150 pull requests of `evaluate-angular-dotnet` with the branch's release binary:
+- [x] 3.1 Re-measure the 150 pull requests of `evaluate-angular-dotnet` with the branch's release binary:
   - take `evaluation/run.py`, `commits.tsv` and the frozen `config/*.toml` from that branch (`git show change/evaluate-angular-dotnet:...`) into the scratchpad;
   - run against the same repository clones;
   - compare the complexity findings with the 0.9.0 reports in the scratchpad (`ev/out/`).
 
   Verified when every report parses.
-- [ ] 3.2 Check the differences. Verified when:
+- [x] 3.2 Check the differences. Verified when:
   - CL11 and SV19 are gone;
   - every other appeared, disappeared or changed complexity finding is a moved or inlined unit, which the pull request's diff confirms;
   - no other complexity finding judged useful or defensible in `findings.md` disappeared or got milder;
   - the slowest run stays within 30 s, also for server 8854, 8856 and 8859.
 
   The counts go into "Verification" of `design.md`.
-- [ ] 3.3 Check D3's threshold of half on CL11 and on every inlining that 3.2 found. Verified by recording the share each one reached. If a share lies between 40% and 60%, stop and ask whether the threshold holds.
-- [ ] 3.4 The journal entry for the change.
+- [x] 3.3 Check D3's threshold on CL11 and on every candidate pair near it. Verified by recording both shares of each pair that reaches 0.4 in its smaller one. The first rule (half) failed 3.2, so Ervin set two thirds both ways on the added code; the shares are recorded in "Verification".
+- [x] 3.4 The journal entry for the change.
 
 ## Workflow follow-up
 

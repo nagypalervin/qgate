@@ -68,11 +68,12 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
     let mut unmatched: Vec<((usize, usize), Unit<'_>)> = Vec::new();
     let mut removed: Vec<Unit<'_>> = Vec::new();
     for (c, change) in changes.iter().enumerate() {
-        let before: HashMap<&str, u32> = change
+        let before: HashMap<&str, usize> = change
             .before
             .functions
             .iter()
-            .map(|f| (f.name.as_str(), f.cyclomatic))
+            .enumerate()
+            .map(|(b, f)| (f.name.as_str(), b))
             .collect();
         // Matching relies on qgate-lang's guarantee that names are unique
         // within a file; a collision would silently drop a function.
@@ -85,7 +86,7 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
         for (u, after) in change.after.functions.iter().enumerate() {
             let origin = before
                 .get(after.name.as_str())
-                .map(|&old| Origin::Same(old));
+                .map(|&b| Origin::Same(Unit::new(&change.before, b)));
             if origin.is_none() {
                 unmatched.push(((c, u), Unit::new(&change.after, u)));
             }
@@ -109,16 +110,24 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
             .flat_map(|&model| (0..model.functions.len()).map(move |u| Unit::new(model, u))),
     );
 
-    for ((c, u), old) in moves(&unmatched, &removed) {
-        origins[c][u] = Some(Origin::Moved(old.function()));
+    let pairs = moves(&unmatched, &removed);
+    removed.retain(|old| !pairs.iter().any(|(_, moved)| moved.is(*old)));
+    for ((c, u), old) in pairs {
+        origins[c][u] = Some(Origin::Moved(old));
     }
+    let credits = inlined(changes, &origins, &removed);
 
     let mut findings = Vec::new();
-    for (change, file) in changes.iter().zip(&origins) {
-        for (unit, origin) in change.after.functions.iter().zip(file) {
+    for (c, (change, file)) in changes.iter().zip(&origins).enumerate() {
+        for (u, (unit, origin)) in change.after.functions.iter().zip(file).enumerate() {
+            let inlined = credits.get(&(c, u)).copied();
             findings.extend(match origin {
-                Some(Origin::Same(old)) => increase(change, unit, *old, None),
-                Some(Origin::Moved(old)) => increase(change, unit, old.cyclomatic, Some(&old.name)),
+                Some(origin) => {
+                    let old = origin.unit().function();
+                    let moved_from =
+                        matches!(origin, Origin::Moved(_)).then_some(old.name.as_str());
+                    increase(change, unit, old.cyclomatic, moved_from, inlined)
+                }
                 None => new_function(change, unit),
             });
         }
@@ -126,13 +135,186 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
     findings
 }
 
+/// The unit each matched unit that got more complex inlined, by change
+/// and unit index (design D3). A removed unit with decision points and a
+/// grown unit qualify as a pair when the longest common subsequence of
+/// the removed unit's own tokens and the code the change added to the
+/// grown unit is two thirds of both. Pairs are taken one to one, the
+/// longest subsequence first; ties go to the first grown unit by path,
+/// then by line, and then to the first removed unit.
+fn inlined<'a>(
+    changes: &[&'a FileChange],
+    origins: &[Vec<Option<Origin<'a>>>],
+    removed: &[Unit<'a>],
+) -> HashMap<(usize, usize), &'a Function> {
+    let mut interner = HashMap::new();
+    let removed: Vec<(&Function, Vec<usize>)> = removed
+        .iter()
+        .filter(|old| old.function().cyclomatic > 1)
+        .map(|old| (old.function(), old.tokens(&mut interner)))
+        .filter(|(_, tokens)| !tokens.is_empty())
+        .collect();
+    let mut candidates = candidates(changes, origins, &removed, &mut interner);
+    candidates.sort_by_key(|&(common, g, r, _)| (std::cmp::Reverse(common), g, r));
+    let mut credits = HashMap::new();
+    let mut taken = HashSet::new();
+    for (_, _, r, key) in candidates {
+        if !credits.contains_key(&key) && taken.insert(r) {
+            credits.insert(key, removed[r].0);
+        }
+    }
+    credits
+}
+
+/// The pairs of a grown unit and a removed unit with evidence of
+/// inlining, as (length of the common subsequence, index of the grown
+/// unit in [`grown`]'s order, index in `removed`, key of the grown unit).
+fn candidates<'a>(
+    changes: &[&'a FileChange],
+    origins: &[Vec<Option<Origin<'a>>>],
+    removed: &[(&Function, Vec<usize>)],
+    interner: &mut HashMap<&'a str, usize>,
+) -> Vec<(usize, usize, usize, (usize, usize))> {
+    let mut candidates = Vec::new();
+    let Some(largest) = removed.iter().map(|(_, tokens)| tokens.len()).max() else {
+        return candidates;
+    };
+    for (g, (key, after, before)) in grown(changes, origins).into_iter().enumerate() {
+        let (after, before) = (after.tokens(interner), before.tokens(interner));
+        // The added code has at least this many tokens; above 3/2 of the
+        // largest removed unit, no pair can reach two thirds of both.
+        if 2 * after.len().saturating_sub(before.len()) > 3 * largest {
+            continue;
+        }
+        let Some(added) = added(&before, &after) else {
+            continue;
+        };
+        for (r, (_, tokens)) in removed.iter().enumerate() {
+            if let Some(common) = evidence(tokens, &added) {
+                candidates.push((common, g, r, key));
+            }
+        }
+    }
+    candidates
+}
+
+/// The length of the longest common subsequence of a removed unit's own
+/// `tokens` and the `added` code of a grown unit, if it is two thirds of
+/// both (design D3). `None` above [`ALIGNED_PAIRS`] pairs of tokens.
+fn evidence(tokens: &[usize], added: &[usize]) -> Option<usize> {
+    let (short, long) = (tokens.len().min(added.len()), tokens.len().max(added.len()));
+    // Two thirds of both needs sizes within a factor of 3/2.
+    if 3 * short < 2 * long || short.saturating_mul(long) > ALIGNED_PAIRS {
+        return None;
+    }
+    let common = common_in_order(tokens, added);
+    (3 * common >= 2 * long).then_some(common)
+}
+
+/// The matched units that got more complex, by change and unit index,
+/// with their after and before versions, first by path, then by line.
+fn grown<'a>(
+    changes: &[&'a FileChange],
+    origins: &[Vec<Option<Origin<'a>>>],
+) -> Vec<((usize, usize), Unit<'a>, Unit<'a>)> {
+    let mut grown = Vec::new();
+    for (c, (change, file)) in changes.iter().zip(origins).enumerate() {
+        for (u, (unit, origin)) in change.after.functions.iter().zip(file).enumerate() {
+            let before = origin.map(Origin::unit);
+            if let Some(before) = before.filter(|b| unit.cyclomatic > b.function().cyclomatic) {
+                grown.push(((c, u), Unit::new(&change.after, u), before));
+            }
+        }
+    }
+    grown.sort_by_key(|&((c, _), unit, _)| (&changes[c].path, unit.function().line));
+    grown
+}
+
+/// The largest number of token pairs [`added`] aligns (2^26 bits, 8 MiB)
+/// and [`evidence`] compares (design D3).
+const ALIGNED_PAIRS: usize = 1 << 26;
+
+/// The tokens of `after` outside a longest common subsequence with
+/// `before`: the code a change added to a unit (design D3). The common
+/// start and end are cut off first; for the middle, one bit per pair of
+/// tokens records the choice of the dynamic programming, and a tie keeps
+/// the `after` token, so within the middle added tokens come as late as
+/// they can. `None` when the middle has more than [`ALIGNED_PAIRS`] pairs.
+fn added(before: &[usize], after: &[usize]) -> Option<Vec<usize>> {
+    let start = before.iter().zip(after).take_while(|(b, a)| b == a).count();
+    let (before, after) = (&before[start..], &after[start..]);
+    let end = before
+        .iter()
+        .rev()
+        .zip(after.iter().rev())
+        .take_while(|(b, a)| b == a)
+        .count();
+    let (before, after) = (&before[..before.len() - end], &after[..after.len() - end]);
+    let (n, m) = (before.len(), after.len());
+    if n.saturating_mul(m) > ALIGNED_PAIRS {
+        return None;
+    }
+    // skip[i * m + j]: with before[i] and after[j] unequal, dropping
+    // before[i] keeps the longest common subsequence of before[i..] and
+    // after[j..].
+    let mut skip = vec![0u64; (n * m).div_ceil(64)];
+    // below[j] and row[j]: the longest common subsequence of
+    // before[i + 1..] and before[i..] with after[j..].
+    let mut below = vec![0usize; m + 1];
+    let mut row = vec![0usize; m + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            row[j] = if before[i] == after[j] {
+                below[j + 1] + 1
+            } else if below[j] >= row[j + 1] {
+                let bit = i * m + j;
+                skip[bit / 64] |= 1 << (bit % 64);
+                below[j]
+            } else {
+                row[j + 1]
+            };
+        }
+        std::mem::swap(&mut row, &mut below);
+    }
+    Some(outside(before, after, &skip))
+}
+
+/// The tokens of `after` outside the common subsequence with `before`
+/// that the `skip` bits of [`added`] trace.
+fn outside(before: &[usize], after: &[usize], skip: &[u64]) -> Vec<usize> {
+    let (n, m) = (before.len(), after.len());
+    let (mut i, mut added) = (0, Vec::new());
+    let mut j = 0;
+    while j < m {
+        if i < n && before[i] == after[j] {
+            i += 1;
+            j += 1;
+        } else if i < n && skip[(i * m + j) / 64] & (1 << ((i * m + j) % 64)) != 0 {
+            i += 1;
+        } else {
+            added.push(after[j]);
+            j += 1;
+        }
+    }
+    added
+}
+
 /// Where an after unit's before version is.
 #[derive(Clone, Copy)]
 enum Origin<'a> {
-    /// In its own file, under the same name, with this complexity.
-    Same(u32),
+    /// In its own file, under the same name.
+    Same(Unit<'a>),
     /// A removed unit elsewhere: the unit moved.
-    Moved(&'a Function),
+    Moved(Unit<'a>),
+}
+
+impl<'a> Origin<'a> {
+    /// The before version.
+    fn unit(self) -> Unit<'a> {
+        match self {
+            Self::Same(unit) | Self::Moved(unit) => unit,
+        }
+    }
 }
 
 /// One unit of a file version: its function and, through the file's
@@ -150,6 +332,11 @@ impl<'a> Unit<'a> {
 
     fn function(self) -> &'a Function {
         &self.model.functions[self.index]
+    }
+
+    /// Whether `self` and `other` are the same unit of the same version.
+    fn is(self, other: Self) -> bool {
+        std::ptr::eq(self.model, other.model) && self.index == other.index
     }
 
     /// The unit's own tokens, as ids of `interner`.
@@ -331,24 +518,36 @@ fn bracket(c: char, before: &str) -> Bracket {
     }
 }
 
-/// Finding for a matched function, if it got more complex; `moved_from`
-/// names its old version when it moved.
+/// Finding for a matched function, if it got more complex beyond the
+/// unit it `inlined` (design D3); `moved_from` names its old version
+/// when it moved. The severity comes from the growth beyond the inlined
+/// unit, the metric keeps the real values (design D4).
 fn increase(
     change: &FileChange,
     after: &Function,
     before: u32,
     moved_from: Option<&str>,
+    inlined: Option<&Function>,
 ) -> Option<Finding> {
     let delta = after.cyclomatic.checked_sub(before).filter(|&d| d > 0)?;
-    let severity = if delta >= INCREASE_ERROR_DELTA {
+    let credit = inlined.map_or(0, |f| f.cyclomatic - 1);
+    let growth = delta.checked_sub(credit).filter(|&g| g > 0)?;
+    let severity = if growth >= INCREASE_ERROR_DELTA {
         Severity::Error
     } else {
         Severity::Warning
     };
     let mut message = format!(
-        "{}: cyclomatic complexity {before} -> {} (+{delta})",
+        "{}: cyclomatic complexity {before} -> {} (+{delta}",
         after.name, after.cyclomatic
     );
+    if let Some(inlined) = inlined {
+        message.push_str(", +");
+        message.push_str(&growth.to_string());
+        message.push_str(" beyond the inlined ");
+        message.push_str(&inlined.name);
+    }
+    message.push(')');
     if let Some(old) = moved_from {
         message.push_str(", moved from ");
         message.push_str(old);
@@ -401,6 +600,7 @@ fn location(change: &FileChange, after: &Function) -> Location {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
     use std::path::PathBuf;
 
     use qgate_core::{Location, Metric, Severity};
@@ -825,6 +1025,386 @@ mod tests {
         assert_eq!(
             run_files(Language::TypeScript, &files),
             vec![at("src/d.ts"), at("src/c.ts")]
+        );
+    }
+
+    macro_rules! inlined {
+        ($file:literal) => {
+            include_str!(concat!("../fixtures/complexity/inlined/", $file))
+        };
+    }
+
+    // complexity-analysis: "Inlined behind a feature flag".
+    // `decryptMany` (4) holds the code of the removed `decryptManyV2`
+    // (10) and no more: 12 does not exceed 4 + 9.
+    #[test]
+    fn inlined_behind_a_feature_flag() {
+        assert_eq!(
+            run(inlined!("before.ts"), inlined!("after_flag.ts")),
+            vec![]
+        );
+    }
+
+    // complexity-analysis: "Inlined and grown beyond it" and "Inlined
+    // function message". Three more `if` statements: 15 is 2 beyond
+    // 4 + 9, a Warning, while the metric keeps 4 and 15.
+    #[test]
+    fn inlined_and_grown_beyond_it() {
+        let mut expected = increase(Severity::Warning, "CipherService.decryptMany", 2, 4, 15);
+        expected.message = "CipherService.decryptMany: cyclomatic complexity 4 -> 15 \
+                            (+11, +2 beyond the inlined CipherService.decryptManyV2)"
+            .to_owned();
+        assert_eq!(
+            run(inlined!("before.ts"), inlined!("after_grown.ts")),
+            vec![expected]
+        );
+    }
+
+    // complexity-analysis: "Removed but not inlined". `legacy` is gone,
+    // but `process` grew by other code.
+    #[test]
+    fn removed_but_not_inlined() {
+        assert_eq!(
+            run(
+                inlined!("not_inlined_before.ts"),
+                inlined!("not_inlined_after.ts")
+            ),
+            vec![increase(Severity::Error, "process", 1, 3, 8)]
+        );
+    }
+
+    // complexity-analysis: "Removed code that was already there". The
+    // tokens of `helper` stand in `handle`, but in its old code: what the
+    // change added to `handle` is one other `if` statement.
+    #[test]
+    fn removed_code_that_was_already_there() {
+        assert_eq!(
+            run(
+                inlined!("already_there_before.ts"),
+                inlined!("already_there_after.ts")
+            ),
+            vec![increase(Severity::Warning, "handle", 1, 3, 4)]
+        );
+    }
+
+    // complexity-analysis: "Inlined among much new code". `process`
+    // holds all of `helper` (7), more than two thirds of its tokens, but
+    // that is less than two thirds of the code added to `process`, so
+    // nothing is credited. Credited, the growth would be 3, a Warning.
+    #[test]
+    fn inlined_among_much_new_code() {
+        assert_eq!(
+            run(
+                inlined!("among_new_before.ts"),
+                inlined!("among_new_after.ts")
+            ),
+            vec![increase(Severity::Error, "process", 1, 3, 12)]
+        );
+    }
+
+    // Design D3: a removed unit counts as inlined into one unit, the one
+    // with the longer common subsequence, though it comes later. `a` and
+    // `b` both hold all five checks of `helper` (6), but `a` pushes another
+    // value in the last one, so only `b` is credited and `a` keeps its
+    // whole increase.
+    #[test]
+    fn a_removed_unit_is_credited_once() {
+        assert_eq!(
+            run(inlined!("two_before.ts"), inlined!("two_after.ts")),
+            vec![increase(Severity::Error, "a", 1, 2, 7)]
+        );
+    }
+
+    /// TypeScript `if` statements, one per name, each pushing its name.
+    fn checks(names: &[&str]) -> String {
+        names.iter().fold(String::new(), |mut checks, name| {
+            let _ = writeln!(checks, "    if (input.{name}) {{ out.push('{name}'); }}");
+            checks
+        })
+    }
+
+    /// A TypeScript method of `Input`, returning the `out` its `body` fills.
+    fn method(name: &str, body: &str) -> String {
+        format!(
+            "  {name}(input: Input): string[] {{\n    const out: string[] = [];\n{body}    return out;\n  }}\n"
+        )
+    }
+
+    // Design D3: a grown unit is credited with one removed unit at most.
+    // `a.ts` and `b.ts` each inline their own copy of the same helper; the
+    // copies are alike, yet each `run` is credited with one.
+    #[test]
+    fn each_grown_unit_takes_one_removed_unit() {
+        let helper = checks(&["alpha", "beta", "gamma", "delta", "epsilon"]);
+        let start = "    if (input.empty) { return out; }\n";
+        let before = format!(
+            "export class Job {{\n{}\n{}}}\n",
+            method("run", start),
+            method("helper", &helper)
+        );
+        let after = format!(
+            "export class Job {{\n{}}}\n",
+            method("run", &format!("{start}{helper}"))
+        );
+        let files = [
+            ("src/a.ts", Some(before.as_str()), Some(after.as_str())),
+            ("src/b.ts", Some(before.as_str()), Some(after.as_str())),
+        ];
+        assert_eq!(run_files(Language::TypeScript, &files), vec![]);
+    }
+
+    // Design D3: a removed unit is credited once, and so is a grown unit.
+    // `process` takes the code of one of two alike checks; the other one's
+    // decision points do not hide the five of the new condition.
+    #[test]
+    fn one_of_two_alike_removed_units() {
+        let check = checks(&["alpha", "beta", "gamma", "delta", "epsilon"]);
+        let start = "    if (input.empty) { return out; }\n";
+        let before = format!(
+            "export class Job {{\n{}\n{}\n{}}}\n",
+            method("process", start),
+            method("checkA", &check),
+            method("checkB", &check)
+        );
+        let condition =
+            "    if (input.a && input.b && input.c && input.d && input.e) { return out; }\n";
+        let after = format!(
+            "export class Job {{\n{}}}\n",
+            method("process", &format!("{start}{check}{condition}"))
+        );
+        let mut expected = increase(Severity::Error, "Job.process", 2, 2, 12);
+        expected.message = "Job.process: cyclomatic complexity 2 -> 12 \
+                            (+10, +5 beyond the inlined Job.checkA)"
+            .to_owned();
+        assert_eq!(run(&before, &after), vec![expected]);
+    }
+
+    // Design D3 and D4: a moved unit's added code is measured against the
+    // unit it moved from, and its message has both forms.
+    #[test]
+    fn moved_and_inlined() {
+        let names = [
+            "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o",
+        ];
+        let body = checks(&names);
+        let helper = checks(&["alpha", "beta", "gamma", "delta", "epsilon"]);
+        let old = format!(
+            "export class A {{\n{}\n{}}}\n",
+            method("run", &body),
+            method("helper", &helper)
+        );
+        let new = format!(
+            "export class B {{\n{}}}\n",
+            method(
+                "run",
+                &format!("{body}{helper}    if (input.zeta) {{ return out; }}\n")
+            )
+        );
+        let files = [
+            ("src/a.ts", Some(old.as_str()), None),
+            ("src/b.ts", None, Some(new.as_str())),
+        ];
+        let mut expected = increase(Severity::Warning, "B.run", 2, 16, 22);
+        expected.location.path = "src/b.ts".into();
+        expected.message = "B.run: cyclomatic complexity 16 -> 22 \
+                            (+6, +1 beyond the inlined A.helper), moved from A.run"
+            .to_owned();
+        assert_eq!(run_files(Language::TypeScript, &files), vec![expected]);
+    }
+
+    // Design D3: a unit a move took is no longer removed, so it is not
+    // credited as inlined, though `run` gained the same code.
+    #[test]
+    fn a_moved_unit_is_not_inlined() {
+        let load = checks(&["alpha", "beta", "gamma", "delta"]);
+        let start = "    if (input.empty) { return out; }\n";
+        let a = format!("export class A {{\n{}}}\n", method("load", &load));
+        let b_before = format!("export class B {{\n{}}}\n", method("run", start));
+        let b_after = format!(
+            "export class B {{\n{}\n{}}}\n",
+            method("load", &load),
+            method("run", &format!("{start}{load}"))
+        );
+        let files = [
+            ("src/a.ts", Some(a.as_str()), None),
+            ("src/b.ts", Some(b_before.as_str()), Some(b_after.as_str())),
+        ];
+        let mut expected = increase(Severity::Warning, "B.run", 11, 2, 6);
+        expected.location.path = "src/b.ts".into();
+        assert_eq!(run_files(Language::TypeScript, &files), vec![expected]);
+    }
+
+    // Design D3: when two grown units hold the same share of a removed
+    // one, the first by path is credited, whatever the order of files.
+    #[test]
+    fn a_tie_goes_to_the_first_path() {
+        let checks = (0..5).fold(String::new(), |mut checks, i| {
+            let _ = writeln!(checks, "  if (input.flag{i}) {{ out.push('flag {i}'); }}");
+            checks
+        });
+        let run_fn = |body: &str| {
+            format!(
+                "export function run(input: Input): string[] {{\n  const out: string[] = [];\n  if (input.empty) {{ return out; }}\n{body}  return out;\n}}\n"
+            )
+        };
+        let helper = format!(
+            "export function helper(input: Input): string[] {{\n  const out: string[] = [];\n{checks}  return out;\n}}\n"
+        );
+        let (before, after) = (run_fn(""), run_fn(&checks));
+        let mut files = vec![
+            ("src/a.ts", Some(before.as_str()), Some(after.as_str())),
+            ("src/b.ts", Some(before.as_str()), Some(after.as_str())),
+            ("src/c.ts", Some(helper.as_str()), None),
+        ];
+        let mut expected = increase(Severity::Error, "run", 1, 2, 7);
+        expected.location.path = "src/b.ts".into();
+        assert_eq!(
+            run_files(Language::TypeScript, &files),
+            vec![expected.clone()]
+        );
+        files.reverse();
+        assert_eq!(run_files(Language::TypeScript, &files), vec![expected]);
+    }
+
+    // complexity-analysis: a removed unit counts as inlined only with
+    // decision points. `helper` (1) went into `process` whole, yet the
+    // message names nothing inlined.
+    #[test]
+    fn a_unit_without_decision_points_is_not_credited() {
+        let helper = "  const total = input.items.length * input.price;\n  const tax = total * input.rate;\n  out.push(String(total + tax));\n";
+        let before = format!(
+            "export function process(input: Input): string[] {{\n  const out: string[] = [];\n  if (input.empty) {{ return out; }}\n  return out;\n}}\n\nexport function helper(input: Input, out: string[]): void {{\n{helper}}}\n"
+        );
+        let after = format!(
+            "export function process(input: Input): string[] {{\n  const out: string[] = [];\n  if (input.empty) {{ return out; }}\n{helper}  if (input.gift) {{ out.push('gift'); }}\n  return out;\n}}\n"
+        );
+        assert_eq!(
+            run(&before, &after),
+            vec![increase(Severity::Warning, "process", 1, 2, 3)]
+        );
+    }
+
+    // Design D3: the code a change added is what lies outside a longest
+    // common subsequence with the before version.
+    #[test]
+    fn added_code() {
+        let added = |before: &[usize], after: &[usize]| added(before, after).unwrap();
+        assert_eq!(added(&[1, 2, 3, 4], &[1, 5, 2, 3, 6, 4]), vec![5, 6]);
+        assert_eq!(added(&[1, 2, 3], &[3, 1, 2]), vec![3]);
+        assert_eq!(added(&[1, 2], &[1, 2]), Vec::<usize>::new());
+        assert_eq!(added(&[], &[1, 2]), vec![1, 2]);
+        assert_eq!(added(&[1, 2, 3], &[]), Vec::<usize>::new());
+        assert_eq!(added(&[7, 1, 7, 2, 7], &[1, 8, 2, 9]), vec![8, 9]);
+        // A tie keeps the after token: of the two `1`s, the later is added.
+        assert_eq!(added(&[1], &[1, 1]), vec![1]);
+        assert_eq!(added(&[2, 1, 3], &[2, 1, 4, 1, 3]), vec![4, 1]);
+        // A tie in the middle: matching `2` rather than `1` adds the `1`.
+        assert_eq!(added(&[1, 2], &[3, 2, 1, 3]), vec![3, 1, 3]);
+    }
+
+    // Design D3: above 2^26 pairs of tokens, the alignment is not made,
+    // so the unit is credited with nothing. The common start and end do
+    // not count.
+    #[test]
+    fn added_code_has_a_limit() {
+        let before: Vec<usize> = (0..8193).collect();
+        let after: Vec<usize> = (1..8194).collect();
+        assert_eq!(added(&before, &after), None);
+        let mark = vec![usize::MAX; 100_000];
+        let wrapped = [&mark[..], &after[..10], &mark[..]].concat();
+        let around = [&mark[..], &before[..10], &mark[..]].concat();
+        assert_eq!(added(&around, &wrapped), Some(vec![10]));
+    }
+
+    // Design D3: above 2^26 pairs of tokens, a removed unit and the added
+    // code are not compared, so the pair is not credited.
+    #[test]
+    fn evidence_has_a_limit() {
+        assert_eq!(evidence(&[1, 2, 3], &[1, 2, 3]), Some(3));
+        let long = vec![1; 8193];
+        assert_eq!(evidence(&long, &long), None);
+    }
+
+    // Design D3: a removed unit of more than 8,192 own tokens is not
+    // compared with the code added to a unit, so it is not credited, and
+    // the increase is reported in full.
+    #[test]
+    fn a_very_long_inlined_function() {
+        let helper = format!(
+            "{}{}",
+            checks(&["alpha", "beta", "gamma", "delta", "epsilon"]),
+            "    out.push(input.x);\n".repeat(1200)
+        );
+        let start = "    if (input.empty) { return out; }\n";
+        let before = format!(
+            "export class Job {{\n{}\n{}}}\n",
+            method("process", start),
+            method("helper", &helper)
+        );
+        let after = format!(
+            "export class Job {{\n{}}}\n",
+            method("process", &format!("{start}{helper}"))
+        );
+        assert_eq!(
+            run(&before, &after),
+            vec![increase(Severity::Error, "Job.process", 2, 2, 7)]
+        );
+    }
+
+    // Design D3: one long middle is enough for the limit. `process` loses
+    // a long body and takes a helper's code; its after version is small
+    // enough to compare with the helper, yet nothing is credited.
+    #[test]
+    fn a_long_function_that_shrank_around_an_inlined_one() {
+        let helper = format!(
+            "{}{}",
+            checks(&["alpha", "beta", "gamma", "delta", "epsilon"]),
+            "    out.push(input.y);\n".repeat(800)
+        );
+        let process = |first: &str, middle: &str, last: &str| {
+            let first = format!("    if (input.{first}) {{ return out; }}\n");
+            let last = format!("    if (input.{last}) {{ return out; }}\n");
+            method("process", &format!("{first}{middle}{last}"))
+        };
+        let before = format!(
+            "export class Job {{\n{}\n{}}}\n",
+            process("first", &"    out.push(input.x);\n".repeat(1500), "last"),
+            method("helper", &helper)
+        );
+        let after = format!(
+            "export class Job {{\n{}}}\n",
+            process("start", &helper, "end")
+        );
+        assert_eq!(
+            run(&before, &after),
+            vec![increase(Severity::Error, "Job.process", 2, 3, 8)]
+        );
+    }
+
+    // Design D3: a unit whose two versions differ at both ends of more
+    // than 8,192 tokens is not aligned, so the helper it inlined is not
+    // credited and its increase is reported in full.
+    #[test]
+    fn a_long_function_changed_at_both_ends() {
+        let helper = checks(&["alpha", "beta", "gamma", "delta", "epsilon"]);
+        let body = "    out.push(input.x);\n".repeat(1200);
+        let process = |first: &str, middle: &str, last: &str| {
+            let first = format!("    if (input.{first}) {{ return out; }}\n");
+            let last = format!("    if (input.{last}) {{ return out; }}\n");
+            method("process", &format!("{first}{middle}{last}"))
+        };
+        let before = format!(
+            "export class Job {{\n{}\n{}}}\n",
+            process("first", &body, "last"),
+            method("helper", &helper)
+        );
+        let after = format!(
+            "export class Job {{\n{}}}\n",
+            process("start", &format!("{body}{helper}"), "end")
+        );
+        assert_eq!(
+            run(&before, &after),
+            vec![increase(Severity::Error, "Job.process", 2, 3, 8)]
         );
     }
 

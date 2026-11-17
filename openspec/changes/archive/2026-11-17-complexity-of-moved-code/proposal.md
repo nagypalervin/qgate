@@ -100,6 +100,19 @@ review, he decided that the evidence counts both ways: the shared tokens
 are half of each function's, so a short removed namesake is no evidence
 for a long new function (D2).
 
+On the re-measurement of PR 2, the evidence for inlining (half of the
+removed function's tokens in the grown function) credited four removed
+functions to functions that had grown by logic of their own, one of
+them a finding judged defensible. Ervin decided on 2026-11-17 that it
+counts both ways and on the added code only: the shared tokens are two
+thirds of the removed function's and two thirds of the code the change
+added to the grown function (D3). On the review of PR 2, he decided that
+inlining pairs one to one, the pair with the most shared code first, so
+a grown function is credited with at most one removed function and a
+removed function goes to at most one; and that a function whose two
+versions are too long to align (more than 2^26 pairs of tokens in their
+changed middle) gets no credit (D3).
+
 ## Capabilities
 
 ### New Capabilities
@@ -109,8 +122,11 @@ None.
 ### Modified Capabilities
 
 - `complexity-analysis`: "Matching functions between versions" matches
-  moved functions across classes and files; a new requirement credits
-  inlined functions; "Finding content" adds the two message forms.
+  moved functions across classes and files; new requirements credit
+  inlined functions, with their evidence and its limit, and add the two
+  message forms ("Messages of moved and inlined units"; kept apart from
+  "Finding content" when archiving, as one text grew past 500
+  characters).
 
 ## Impact
 

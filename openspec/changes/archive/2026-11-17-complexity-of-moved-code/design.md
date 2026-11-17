@@ -167,25 +167,124 @@ A removed unit `R` is inlined into a unit `U` when all of these hold:
 - `U` was matched (D2 or by name) and got more complex;
 - `R` is still removed after D2, and is in the same family;
 - `R` has decision points (complexity above 1);
-- the longest common subsequence of `R`'s own tokens and `U`'s after own
-  tokens is at least half as long as `R`'s own tokens.
+- the longest common subsequence of `R`'s own tokens and the code the
+  change added to `U` is at least two thirds as long as each of them.
 
-The token texts are compared after interning them to integers. The
-subsequence is computed with one row of dynamic programming, so it takes
-O(|R|·|U|) time and O(|U|) memory.
+The added code is `U`'s after own tokens outside a longest common
+subsequence with its before own tokens (for a moved `U`, those of the
+unit it moved from). The token texts are compared after interning them
+to integers. The subsequence of `R` and the added code is computed with
+one row of dynamic programming, so it takes O(|R|·|A|) time and O(|A|)
+memory. The added code needs the alignment itself: after the common
+start and end are cut off, one bit per pair of the middle's tokens
+records the choice, so the middle of a function of 3,000 tokens with as
+many before takes about a megabyte. Above 2^26 pairs (8 MiB of bits)
+the unit gets no credit at all. The subsequence of `R` and the added code
+has the same limit: when their sizes multiply to more than 2^26, the
+pair is not compared and not credited.
 
-Each `R` is credited to one `U`: the one whose subsequence covers the
-largest share of `R`. Ties go to the first `U` by path, then by line.
-`U`'s *credited before* is its before value plus the sum of
-(complexity − 1) over the units credited to it. A finding is reported
+Pairing is one to one: a grown unit takes at most one removed unit, and
+a removed unit goes to at most one grown unit. Of all the pairs that
+pass the test, the one with the longest common subsequence is taken
+first; ties go to the first `U` by path, then by line, then to the first
+`R` in the order of the removed units: those of changed files by path,
+then those of deleted files by path, each by position. `U`'s *credited
+before* is its before value plus
+(complexity − 1) of the unit credited to it. A finding is reported
 only when the after value exceeds the credited before. Its severity
 comes from that growth: 1 to 4 is a Warning, 5 or more an Error.
 
-*Why half, in order:* an inlined body keeps its order but loses or gains
-a few lines (CL11 renamed a log message, and removed V1 and the ternary
-around both). Half rules out a function whose code merely resembles the
-growth. Below half, a hidden real increase is a worse failure than one
-more Warning. Checked on the evaluation pull requests in task 3.3.
+*As built (PR 2):*
+- `inlined` in `complexity.rs` runs after the move pairs are settled,
+  on the removed units no pair took. An `Origin` holds the before unit
+  (of the same name, or the one the unit moved from). `grown` lists the
+  matched units whose after value exceeds their before one, with both
+  versions, sorted by path and line, so the tie rule holds whatever the
+  order of the files. `added` gives the code the change added to each.
+  `evidence` tests one pair and returns the length of its common
+  subsequence. A pair whose sizes differ by more than a factor of 3/2
+  cannot reach two thirds of both and is skipped without the
+  subsequence, and so is a grown unit that gained more than 3/2 of the
+  largest removed unit's tokens. `candidates` lists the passing pairs;
+  `inlined` sorts them by (longer common subsequence first, grown unit,
+  removed unit) and takes them greedily, each side once.
+- `added` cuts off the common start and end, then aligns the middle. On
+  a tie it keeps the after token in the alignment and drops the before
+  one, so within the middle the added tokens are the latest ones that
+  could be (a token matched through the common end stays matched);
+  `outside` traces the alignment back. It returns nothing above 2^26
+  pairs, and `evidence` refuses a pair above 2^26 as well.
+- `increase` takes the credited unit: growth is the real delta minus
+  its (complexity − 1). No growth, no finding.
+- Tests: CL11's shape behind a feature flag (no finding), the same with
+  growth beyond it (a Warning of +2 beyond), a removed unit that was
+  not inlined (the increase stays an Error), removed code that was
+  already in the grown unit, a removed unit among much new code, one
+  removed unit credited only once although two units qualify, the tie
+  by path in both file orders, a removed unit without decision points
+  (no name in the message), two grown units inlining one helper, one
+  grown unit with two alike removed units (only one is credited), a
+  moved unit that also inlined code, a moved unit that is not taken as
+  inlined, `added` on its own with its ties, its limit (also through
+  the analyzer, for a long function changed at both ends) and the limit
+  of `evidence` (also through the analyzer, for a very long inlined
+  function). Matching
+  against the whole after version, the removed side alone, half both
+  ways, crediting every qualifying unit, crediting several units to one
+  grown unit, crediting one removed unit to several, taking a pair other
+  than the longest first, crediting units without decision points,
+  either limit left out, a tie that keeps the before token, the whole
+  after version taken when `added` refuses (a unit whose long body went
+  and whose short after version holds a helper) and dropping the sort
+  each fail a test. Two mutants survive and are equivalent:
+  without the skip of a grown unit by size (the pair test rejects the
+  same pairs); with the sort by removed unit before grown unit (the
+  reviewer's brute force over every candidate graph of 3×3 and 4×4 found
+  no case where the pairs differ). The boundary of the limit, 2^26
+  pairs exactly, is not pinned: a test would align 2^26 pairs.
+- A short removed function rarely qualifies: its signature and the
+  lines around its body are own tokens that do not come along when it
+  is inlined. That is the cautious side too.
+
+*Why in order:* an inlined body keeps its order but loses or gains a few
+lines (CL11 renamed a log message, and removed V1 and the ternary around
+both).
+
+*Why two thirds, both ways, on the added code (Ervin's decision on the
+re-measurement, 2026-11-17):* the first rule asked only that half of
+`R`'s tokens appear in `U`'s after version. On the 150 pull requests it
+credited, besides CL11, four removed functions to functions that had
+grown by logic of their own, among them CL33 (clients 24277,
+`processMessageWithSender` 50 -> 52, judged defensible): a short `R`
+finds half of its tokens, in order, in a long `U`, since statements such
+as `await _x.RunAsync(organization)` or `if (x == null) { return; }` are
+everywhere. Measured with diagnostic builds (task 3.3):
+
+| Rule | CL11 (`decryptManyV2`) | Strongest false pair |
+|---|---|---|
+| half of `R`, in `U`'s after version | 0.99 | 0.96 (server 8812) |
+| half of `R`, in the added code | 0.86 | 0.69 (server 8812, SV3 milder) |
+| both ways, in the added code | 0.86 and 1.00 | 0.55 and 0.56 (server 8812) |
+
+Half both ways still credited three false pairs in server 8812, one of
+them making SV3 (useful) milder. Two thirds lies between 0.56 and 0.86
+with room on both sides. Its cost: when `U` gains as much code of its
+own as it inlines, nothing is credited and the whole growth is reported,
+the cautious side.
+
+*Why one to one, and why a limit (Ervin's decision on the PR 2 review,
+2026-11-17):* the first version credited each `R` to the one `U` with
+the most of it, but let one `U` take any number of `R`s. Two alike
+helpers (`checkA`, `checkB`) removed next to one grown unit that inlined
+only one of them were both credited, and the growth from the second
+went silent. One to one credits only what one body can hold, and the
+longest pair first keeps CL11 credited when `decryptManyV1` also comes
+close. The reviewer timed a function of 12,000 lines changed at both
+ends: 33.6 s for the alignment alone, over the 30-second budget, and
+on the second review a helper of 12,000 lines inlined into a short
+function: 15.5 s for its subsequence with the added code. With the
+limit such a unit is reported in full, the cautious side; no function of
+the 150 pull requests comes near it.
 
 *Why own tokens:* complexity is counted on own code, so the evidence
 should be the same code. With an end line, nested named units would get
@@ -200,9 +299,10 @@ adds logic elsewhere would go silent.
 - Moved: `<name>: cyclomatic complexity <before> -> <after> (+<delta>), moved from <old name>`.
   The old qualified name tells where the unit came from; its file is not
   in the message.
-- Inlined: `(+<delta>, +<growth> beyond the inlined <names>)` in place
-  of `(+<delta>)`, with the names in their order in the before version.
-  A moved unit that also inlined code gets both forms.
+- Inlined: `(+<delta>, +<growth> beyond the inlined <name>)` in place
+  of `(+<delta>)`, with the qualified name of the one credited unit.
+  A moved unit that also inlined code gets both forms, the inlined part
+  first.
 - The metric keeps the real before and after values. `<delta>` is the
   real delta, and only the severity and `<growth>` use the credited
   before. Report formats that print the metric stay true.
@@ -241,7 +341,10 @@ Each one stands alone. After PR 1, inlining is still reported as today.
   own-name group that the fingerprint did not settle. Groups such as
   `constructor`, `ngOnInit` or `Dispose()` can be large in a big pull
   request, but pairs whose sizes differ more than twofold are skipped
-  without the test. The re-measurement checks the time.
+  without the test. The re-measurement checks the time. The test has no
+  limit like that of inlining (D3): by the reviewer's estimate, a
+  function of 12,000 lines that moves and changes takes about 15 s. A
+  follow-up can give it the same 2^26 limit.
 - **`Token` gains a field.** `Token` is a public type of `qgate-lang`,
   and code that builds it literally must add the field. The only users
   are in this workspace.
@@ -289,3 +392,58 @@ the other rules byte-identical. Slowest runs: server 8812 7.2 s, server
 8822 6.8 s, server 8781 6.8 s, server 8884 6.8 s and server 8813 6.7 s.
 The reviewer's reproduction (a one-line `ngOnInit` removed, a 14 added)
 now reports a new function, as 0.9.0 does.
+
+**PR 2, first rule (half of the removed unit, in the grown one's after
+version), 2026-11-17.** All 150 reports parsed. Against 0.9.0, SV19 and
+CL11 gone, and four more: CL33 (clients 24277,
+`processMessageWithSender` 50 -> 52, judged defensible), server 8812
+`SaveUsersSendInvitesAsync` 41 -> 43, server 8813 a test 3 -> 4 and
+server 8820 `OrganizationsController.Edit` 38 -> 41. In each, the
+pull request's diff shows growth by logic of the function's own, so
+3.2 failed; see D3 for the shares and Ervin's decision.
+
+**PR 2 with two thirds both ways on the added code (tasks 2.4, 3.1 to
+3.3), 2026-11-17.** All 150 reports parsed.
+
+- Against 0.9.0: 2 complexity findings gone, none new or changed, 60
+  the same. The two are SV19 (moved) and CL11 (`decryptMany` 4 -> 12,
+  now credited with `decryptManyV2`, which leaves no growth). Against
+  PR 1, only CL11 went.
+- No finding judged useful or defensible in `findings.md` went or got
+  milder, besides those two.
+- The 326 findings of the other rules are byte-identical.
+- Slowest runs: server 8812 6.8 s, server 8893 6.7 s, server 8865 6.6 s,
+  server 8823 6.5 s and server 8886 6.5 s; server 8859 6.5 s, 8854
+  6.4 s and 8856 6.4 s. All within 30 s.
+
+Shares of the candidate pairs (task 3.3; a diagnostic build of the
+final rule). 80 pairs of a removed unit with decision points and a
+grown unit reach 0.4 in either share; the rule binds on the smaller
+one, and 19 reach 0.4 in that:
+
+| Pull request | Removed unit -> grown unit | Removed | Added | Pairs | Credited |
+|---|---|---|---|---|---|
+| clients 24645 | `decryptManyV2` -> `decryptMany` (CL11) | 0.861 | 1.000 | 1 | yes |
+| server 8812 | `OrganizationService.ReplaceAndUpdateCacheAsync` -> methods that gained seat-reservation code | 0.494 to 0.545 | 0.527 to 0.560 | 5 | no |
+| server 8812 | `GetPrivilegedControlsSeatLimitErrorAsync` -> the same methods | 0.463 to 0.507 | 0.419 to 0.471 | 5 | no |
+| server 8812 | `UpdateSecretsManagerSubscriptionCommand.ReplaceAndUpdateCacheAsync` -> the same methods | 0.469 to 0.694 | 0.400 to 0.459 | 6 | no |
+| clients 24645 | `decryptManyV1` -> `decryptMany` | 0.762 | 0.463 | 1 | no |
+| clients 24277 | `getDecryptedCiphers` -> `processMessageWithSender` (CL33) | 0.667 | 0.431 | 1 | no |
+
+Every pair but CL11 has its smaller share between 40% and 60%, and none
+is an inlining: the server 8812 methods gained seat-reservation code
+and share only repository, event and seat calls with the removed ones;
+`decryptManyV1` is the branch the change dropped; CL33 grew by a
+`case` of its own. They are the pairs Ervin's decision of two thirds
+was measured on, so the threshold holds, with 0.12 to spare below and
+0.19 above.
+
+**PR 2 with one-to-one pairing and the limits (task 2.5),
+2026-11-17.** All 150 reports parsed; every run exited with 0.
+
+- Against 0.9.0: SV19 and CL11 gone, none new or changed, 60 the same.
+  Against the two-thirds run above: no difference at all.
+- The 326 findings of the other rules are byte-identical.
+- Slowest runs: server 8811 7.2 s, server 8781 7.2 s, server 8812
+  7.1 s, server 8837 6.9 s and server 8855 6.9 s; server 8856 6.8 s,
+  8859 6.5 s and 8854 6.5 s. All within 30 s.
