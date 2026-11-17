@@ -15,12 +15,18 @@
 //! - **New duplication:** a block is new duplication when the change
 //!   increased the number of files that hold it. Unchanged files are the
 //!   same in both revisions, so the changed files decide.
+//! - **Written code:** only tokens on lines the change wrote count
+//!   towards a block. A line diff of each changed file gives its added
+//!   lines, and added lines that match removed ones by their trimmed text,
+//!   in runs of three, moved (design D3 of `duplication-of-new-code`).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
 use qgate_core::{Finding, Location, Severity};
 use qgate_lang::Token;
+
+use crate::diff::kept;
 
 /// Rule id of a newly duplicated block.
 pub const RULE: &str = "duplication/duplicate-block";
@@ -80,6 +86,9 @@ pub struct DuplicationIndex {
     /// Per key that a changed file contains: every place in the head
     /// revision, changed files included.
     places: HashMap<Key, Vec<Place>>,
+    /// Per changed file, per token of its head version: whether the
+    /// token is on a line the change wrote (see [`written_lines`]).
+    written: Vec<Vec<bool>>,
     /// The token hash; replaceable in tests to force collisions.
     token_hash: fn(&str) -> u64,
 }
@@ -99,8 +108,26 @@ impl DuplicationIndex {
             before: HashSet::new(),
             before_files: HashMap::new(),
             places: HashMap::new(),
+            written: Vec::new(),
             token_hash,
         };
+        for (change, lines) in changes.iter().zip(written_lines(changes)) {
+            // A token past the known lines counts as written, as every
+            // token did before lines were known, so unknown lines behave
+            // as before.
+            index.written.push(
+                change
+                    .after
+                    .iter()
+                    .map(|t| {
+                        (t.line as usize)
+                            .checked_sub(1)
+                            .and_then(|i| lines.get(i))
+                            .is_none_or(|&written| written)
+                    })
+                    .collect(),
+            );
+        }
         for (file, change) in changes.iter().enumerate() {
             index.paths.push(change.path.to_owned());
             let windows = index.windows(file, change.after);
@@ -177,8 +204,9 @@ impl DuplicationIndex {
     /// Which keys two or more files share, which of them grew, and which
     /// changed files newly duplicate them (design D3, step 4): per growing
     /// key, the changed files that did not hold it before, as many as the
-    /// change added files that hold it, skipping the first by path when
-    /// every holder is new (the original).
+    /// change added files that hold it, skipping those whose copies moved
+    /// (design D1 of `duplication-of-new-code`), or else the first by path
+    /// when every holder is new (the original).
     fn counts(&self) -> Counts {
         let mut counts = Counts::default();
         for (key, places) in &self.places {
@@ -195,14 +223,26 @@ impl DuplicationIndex {
                 continue;
             }
             counts.growing.insert(*key);
-            let mut new: Vec<usize> = holding
+            // A new holder is moved when none of its places of the key has
+            // a token on a written line: it continues a holder the change
+            // removed, so it is no new copy. Moved holders come first and
+            // are skipped; without one, a holder is the original when
+            // every holder is new.
+            let mut new: Vec<(bool, usize)> = holding
                 .iter()
                 .copied()
                 .filter(|&f| f < self.changed.len() && !self.before.contains(&(f, *key)))
+                .map(|f| {
+                    let written = places.iter().any(|p| {
+                        p.path == f && self.written[f][p.start..][..MIN_TOKENS].contains(&true)
+                    });
+                    (written, f)
+                })
                 .collect();
-            new.sort_by_key(|&f| &self.paths[f]);
-            let skip = usize::from(holding.len() == new.len());
-            for file in new.into_iter().skip(skip) {
+            new.sort_by_key(|&(written, f)| (written, &self.paths[f]));
+            let moved = new.iter().filter(|(written, _)| !written).count();
+            let skip = moved.max(usize::from(holding.len() == new.len()));
+            for (_, file) in new.into_iter().skip(skip) {
                 if budget == 0 {
                     break;
                 }
@@ -242,8 +282,9 @@ impl DuplicationIndex {
     /// file continues it, so each finding names a copy of the whole block;
     /// where no copy continues, a new block starts. A block is reported
     /// only if at least [`MIN_TOKENS`] of its tokens are new duplicated
-    /// code: covered by a reported window, not by duplicated code the file
-    /// already had, and not by a block already reported in this file.
+    /// code: on a line the change wrote, covered by a reported window, not
+    /// by duplicated code the file already had, and not by a block already
+    /// reported in this file.
     #[allow(clippy::too_many_arguments)] // The per-file state of one pass.
     fn blocks(
         &self,
@@ -300,7 +341,7 @@ impl DuplicationIndex {
             let new_tokens = (0..tokens)
                 .filter(|&t| {
                     let at = place.start + t;
-                    coverage.new[at] && !coverage.old[at] && !seen[t]
+                    coverage.new[at] && !coverage.old[at] && !seen[t] && self.written[file][at]
                 })
                 .count();
             if new_tokens >= MIN_TOKENS {
@@ -445,6 +486,92 @@ struct Coverage {
     old: Vec<bool>,
 }
 
+/// The hashes of three consecutive lines.
+type LineRun = [u64; 3];
+
+/// Per changed file, per line of its head version: whether the change
+/// wrote it, an added line that did not move (design D3 of
+/// `duplication-of-new-code`).
+///
+/// - **Added and removed lines** come from a line diff of each file's
+///   two versions; every line of a deleted file is removed.
+/// - **Runs:** three consecutive added (or removed) lines of one file,
+///   not all empty. They overlap, one per first line.
+/// - **Pairing:** each removed run moves at most one added run with the
+///   same hashes: first one of its own file, then, in path and line order,
+///   one of another file. The lines of an added run that moved are not
+///   written.
+fn written_lines(changes: &[ChangedSource<'_>]) -> Vec<Vec<bool>> {
+    let diffs: Vec<(Vec<bool>, Vec<bool>)> = changes
+        .iter()
+        .map(|c| kept(c.before_lines, c.after_lines))
+        .collect();
+    let mut order: Vec<usize> = (0..changes.len()).collect();
+    order.sort_by_key(|&file| changes[file].path);
+    let mut pool = removed_runs(changes, &diffs, &order);
+    let mut written: Vec<Vec<bool>> = diffs
+        .iter()
+        .map(|(_, kept_after)| kept_after.iter().map(|kept| !kept).collect())
+        .collect();
+    let mut take = |file: usize, start: usize, run: LineRun, own: bool| {
+        let found = pool.get_mut(&run).and_then(|files| {
+            files
+                .iter_mut()
+                .find(|(from, count)| *count > 0 && (!own || *from == file))
+        });
+        found.map(|(_, count)| {
+            *count -= 1;
+            written[file][start..start + 3].fill(false);
+        })
+    };
+    let mut unpaired = Vec::new();
+    for &file in &order {
+        for (start, run) in line_runs(changes[file].after_lines, &diffs[file].1) {
+            if take(file, start, run, true).is_none() {
+                unpaired.push((file, start, run));
+            }
+        }
+    }
+    for (file, start, run) in unpaired {
+        take(file, start, run, false);
+    }
+    written
+}
+
+/// Per removed run: the files that removed it, in the given (path)
+/// order, and how many times each.
+fn removed_runs(
+    changes: &[ChangedSource<'_>],
+    diffs: &[(Vec<bool>, Vec<bool>)],
+    order: &[usize],
+) -> HashMap<LineRun, Vec<(usize, usize)>> {
+    let mut pool: HashMap<LineRun, Vec<(usize, usize)>> = HashMap::new();
+    for &file in order {
+        for (_, run) in line_runs(changes[file].before_lines, &diffs[file].0) {
+            let files = pool.entry(run).or_default();
+            match files.last_mut() {
+                Some((last, count)) if *last == file => *count += 1,
+                _ => files.push((file, 1)),
+            }
+        }
+    }
+    pool
+}
+
+/// Every run of three consecutive lines that are all changed (not
+/// `kept`) and not all empty, with its first line's index.
+fn line_runs<'l>(
+    lines: &'l [u64],
+    kept: &'l [bool],
+) -> impl Iterator<Item = (usize, LineRun)> + 'l {
+    lines
+        .windows(3)
+        .zip(kept.windows(3))
+        .enumerate()
+        .filter(|(_, (run, kept))| !kept.contains(&true) && run.iter().any(|&h| h != 0))
+        .map(|(start, (run, _))| (start, [run[0], run[1], run[2]]))
+}
+
 /// Runs of consecutive windows of a changed file whose keys another file
 /// shares, as indices into its windows: each run is one or more blocks.
 fn runs(windows: &[(Key, Place)], shared: &HashSet<Key>) -> Vec<(usize, usize)> {
@@ -560,22 +687,36 @@ mod tests {
         others: &[(&str, Vec<Token>)],
         hash: fn(&str) -> u64,
     ) -> Vec<Finding> {
-        let lines: Vec<(Vec<u64>, Vec<u64>)> = changes
+        let changes: Vec<(&str, Code, Code)> = changes
             .iter()
-            .map(|(_, before, after)| (lines_of(before), lines_of(after)))
+            .map(|(path, before, after)| {
+                (
+                    *path,
+                    (before.clone(), lines_of(before)),
+                    (after.clone(), lines_of(after)),
+                )
+            })
             .collect();
+        findings_of(&changes, others, hash)
+    }
+
+    /// A version of a changed file: its tokens and line hashes.
+    type Code = (Vec<Token>, Vec<u64>);
+
+    fn findings_of(
+        changes: &[(&str, Code, Code)],
+        others: &[(&str, Vec<Token>)],
+        hash: fn(&str) -> u64,
+    ) -> Vec<Finding> {
         let sources: Vec<ChangedSource<'_>> = changes
             .iter()
-            .zip(&lines)
-            .map(
-                |((path, before, after), (before_lines, after_lines))| ChangedSource {
-                    path,
-                    before,
-                    after,
-                    before_lines,
-                    after_lines,
-                },
-            )
+            .map(|(path, before, after)| ChangedSource {
+                path,
+                before: &before.0,
+                after: &after.0,
+                before_lines: &before.1,
+                after_lines: &after.1,
+            })
             .collect();
         let mut index = DuplicationIndex::with_token_hash(&sources, hash);
         for (path, tokens) in others {
@@ -584,12 +725,39 @@ mod tests {
         index.findings()
     }
 
+    /// Like `run`, for TypeScript sources, with the line hashes of
+    /// `parse`: `changes` as (path, before, after), "" for a version the
+    /// file does not have.
+    fn run_ts(
+        changes: &[(&str, &str, &str)],
+        others: &[(&str, &str)],
+    ) -> Vec<(String, u32, String)> {
+        let code = |source: &str| {
+            let model = parse(Language::TypeScript, source).expect("parses");
+            (model.tokens, model.lines)
+        };
+        let changes: Vec<(&str, Code, Code)> = changes
+            .iter()
+            .map(|(path, before, after)| (*path, code(before), code(after)))
+            .collect();
+        let others: Vec<(&str, Vec<Token>)> = others
+            .iter()
+            .map(|(path, source)| (*path, tokens(source)))
+            .collect();
+        summary(findings_of(&changes, &others, fnv1a))
+    }
+
     fn run_with(
         changes: &[(&str, Vec<Token>, Vec<Token>)],
         others: &[(&str, Vec<Token>)],
         hash: fn(&str) -> u64,
     ) -> Vec<(String, u32, String)> {
-        findings_with(changes, others, hash)
+        summary(findings_with(changes, others, hash))
+    }
+
+    /// (path, line, message) of each finding.
+    fn summary(findings: Vec<Finding>) -> Vec<(String, u32, String)> {
+        findings
             .into_iter()
             .map(|f| {
                 assert_eq!(f.rule, RULE);
@@ -910,7 +1078,10 @@ mod tests {
     #[test]
     fn only_as_many_files_as_the_change_added_are_reported() {
         // The block leaves a.ts and arrives in b.ts and d.ts; c.ts keeps
-        // it. One more file holds it than before: one finding.
+        // it. One more file holds it than before: one finding. b.ts comes
+        // first by path, so the block moved there; d.ts is the new copy
+        // (duplication-analysis: "Moved and copied next to an existing
+        // copy", design D1 of duplication-of-new-code).
         let block = texts("s", 60);
         assert_eq!(
             run(
@@ -922,9 +1093,9 @@ mod tests {
                 &[("c.ts", synthetic(&block))],
             ),
             [(
-                "b.ts".to_owned(),
+                "d.ts".to_owned(),
                 1,
-                "duplicates c.ts:1-60 (lines 1-60, 60 tokens, and 1 more)".to_owned()
+                "duplicates b.ts:1-60 (lines 1-60, 60 tokens, and 1 more)".to_owned()
             )]
         );
     }
@@ -1373,5 +1544,222 @@ mod tests {
             ),
             []
         );
+    }
+
+    // Requirement: Lines the change wrote, Moved lines
+    // (duplication-of-new-code)
+
+    #[test]
+    fn moved_lines_are_paired_in_runs_of_three_one_to_one_own_file_first() {
+        // (path, before, after) as line hashes, 0 for an empty line.
+        let files: [(&str, &[u64], &[u64]); 9] = [
+            // Own file first: a.ts moves 1-2-3 below its rest, and 0.ts,
+            // first by path, gets a copy.
+            ("a.ts", &[1, 2, 3, 7, 8, 9, 10], &[7, 8, 9, 10, 1, 2, 3]),
+            ("0.ts", &[], &[1, 2, 3]),
+            // One to one: old.ts held 4-5-6 once, b.ts and c.ts get it.
+            ("c.ts", &[], &[4, 5, 6]),
+            ("b.ts", &[], &[4, 5, 6]),
+            ("old.ts", &[4, 5, 6], &[]),
+            // Runs of three: each line was removed, but not the three in a
+            // row.
+            ("d.ts", &[], &[20, 21, 22]),
+            ("gone.ts", &[20, 0, 21, 0, 22], &[]),
+            // Three empty lines are no run.
+            ("e.ts", &[], &[0, 0, 0, 30]),
+            ("blank.ts", &[0, 0, 0, 31], &[]),
+        ];
+        let sources: Vec<ChangedSource<'_>> = files
+            .iter()
+            .map(|&(path, before_lines, after_lines)| ChangedSource {
+                path,
+                before: &[],
+                after: &[],
+                before_lines,
+                after_lines,
+            })
+            .collect();
+        let (f, t) = (false, true);
+        assert_eq!(
+            written_lines(&sources),
+            [
+                vec![f, f, f, f, f, f, f],
+                vec![t, t, t],
+                vec![t, t, t],
+                vec![f, f, f],
+                vec![],
+                vec![t, t, t],
+                vec![],
+                vec![t, t, t, t],
+                vec![],
+            ]
+        );
+    }
+
+    /// TypeScript lines `v<i> = alpha.<tag><i>(beta, 1);` for `i` in
+    /// `range`, each after `indent`: ten normalized tokens a line, and no
+    /// two tags alike.
+    fn statements(tag: &str, range: std::ops::Range<usize>, indent: &str) -> String {
+        let lines: Vec<String> = range
+            .map(|i| format!("{indent}v{i} = alpha.{tag}{i}(beta, 1);\n"))
+            .collect();
+        lines.concat()
+    }
+
+    /// `block` as the body of a method of a new class `name`, four spaces
+    /// deep.
+    fn in_class(name: &str, block: &str) -> String {
+        format!("export class {name} {{\n  run() {{\n{block}  }}\n}}\n")
+    }
+
+    #[test]
+    fn the_same_small_edit_in_existing_copies_is_not_reported() {
+        // One argument added on the middle line: every window of the block
+        // holds the edit, so every window is new.
+        let block = statements("s", 0..6, "");
+        let edited = block.replace("alpha.s2(beta, 1)", "alpha.s2(beta, 1, mock())");
+        assert_eq!(
+            run_ts(
+                &[
+                    ("src/a.spec.ts", &block, &edited),
+                    ("src/b.spec.ts", &block, &edited)
+                ],
+                &[]
+            ),
+            []
+        );
+    }
+
+    #[test]
+    fn a_copy_completed_by_a_few_written_lines_is_not_reported() {
+        let block = statements("s", 0..6, "");
+        assert_eq!(
+            run_ts(
+                &[("src/a.ts", &statements("s", 0..3, ""), &block)],
+                &[("src/u.ts", &block)]
+            ),
+            []
+        );
+    }
+
+    #[test]
+    fn a_new_copy_in_an_edited_file_is_reported() {
+        let block = statements("s", 0..6, "");
+        let other = statements("o", 0..6, "");
+        assert_eq!(
+            run_ts(
+                &[("src/a.ts", &other, &format!("{other}{block}"))],
+                &[("src/u.ts", &block)]
+            ),
+            [(
+                "src/a.ts".to_owned(),
+                7,
+                "duplicates src/u.ts:1-6 (lines 7-12, 60 tokens)".to_owned()
+            )]
+        );
+    }
+
+    /// `src/big.ts` with the block of `statements("s", 0..6, ...)` twice,
+    /// in two functions, and six more lines.
+    fn big() -> String {
+        let block = statements("s", 0..6, "  ");
+        format!(
+            "function first() {{\n{block}}}\nfunction second() {{\n{block}}}\n{}",
+            statements("m", 0..6, "")
+        )
+    }
+
+    #[test]
+    fn a_split_file_is_not_reported() {
+        // Each copy moves one level deeper, into a class of its own.
+        let block = statements("s", 0..6, "    ");
+        let one = in_class("One", &block) + &statements("m", 0..3, "");
+        let two = in_class("Two", &block) + &statements("m", 3..6, "");
+        assert_eq!(
+            run_ts(
+                &[
+                    ("src/big.ts", &big(), ""),
+                    ("src/one.ts", "", &one),
+                    ("src/two.ts", "", &two)
+                ],
+                &[]
+            ),
+            []
+        );
+    }
+
+    #[test]
+    fn a_helper_copied_into_two_files_is_reported_once() {
+        // Out of path order on purpose: a.ts takes the moved lines.
+        let helper = statements("s", 0..6, "");
+        assert_eq!(
+            run_ts(
+                &[
+                    ("src/b.ts", "", &helper),
+                    ("src/old.ts", &helper, ""),
+                    ("src/a.ts", "", &helper)
+                ],
+                &[]
+            ),
+            [(
+                "src/b.ts".to_owned(),
+                1,
+                "duplicates src/a.ts:1-6 (lines 1-6, 60 tokens)".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn moved_within_a_file_and_copied_is_reported_for_the_copy() {
+        // The rest of a.ts is longer than the block, so the diff keeps the
+        // rest and the block is removed and added. src/0.ts comes first by
+        // path; only the own-file pass leaves the block to a.ts.
+        let block = statements("s", 0..6, "");
+        let rest = statements("x", 0..8, "");
+        assert_eq!(
+            run_ts(
+                &[
+                    (
+                        "src/a.ts",
+                        &format!("{block}{rest}"),
+                        &format!("{rest}{block}")
+                    ),
+                    ("src/0.ts", "", &block)
+                ],
+                &[]
+            ),
+            [(
+                "src/0.ts".to_owned(),
+                1,
+                "duplicates src/a.ts:9-14 (lines 1-6, 60 tokens)".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn moved_and_renamed_is_reported() {
+        let block = statements("s", 0..6, "    ");
+        let moved = in_class("One", &block) + &statements("m", 0..3, "");
+        let renamed =
+            in_class("Two", &block.replace("alpha", "gamma")) + &statements("m", 3..6, "");
+        // The moved copy is the original whichever comes first by path.
+        for (moved_path, renamed_path) in
+            [("src/one.ts", "src/two.ts"), ("src/two.ts", "src/one.ts")]
+        {
+            let found = run_ts(
+                &[
+                    ("src/big.ts", &big(), ""),
+                    (moved_path, "", &moved),
+                    (renamed_path, "", &renamed),
+                ],
+                &[],
+            );
+            assert_eq!(found.len(), 1, "{found:?}");
+            assert_eq!(found[0].0, renamed_path);
+            assert!(
+                found[0].2.starts_with(&format!("duplicates {moved_path}:")),
+                "{found:?}"
+            );
+        }
     }
 }

@@ -32,7 +32,7 @@ lines). The replay tools are on the branch `change/evaluate-angular-dotnet`.
   defines them.
 - Keep `counts()`, the extent of a block and the message unchanged:
   which files are new holders, and which copy a finding names, stay as
-  they are.
+  they are, except that a holder the block only moved to is none (D1).
 - No git call, dependency or configuration added. The analyzer stays
   testable with before/after fixtures.
 
@@ -50,13 +50,34 @@ A token counts towards a block's 50 new tokens when it is `new`, not
 `old`, not used by an earlier block, **and its line is written**.
 `counts()` keeps deciding growth by holding files, so moved code still
 keeps a window from growing where it does today. The new condition only
-removes tokens from the count; it never adds one. So the change can only
-silence findings, never create one.
+removes tokens from the count; it never adds one. So the condition
+alone can only silence findings, never create one.
 
 *Alternative:* replace the window coverage by written lines. That would
 change which files are new holders and which copy is named, and give
 up conditions that the spec scenarios ("Existing duplication", "Code
 written next to shared code") rest on. Rejected.
+
+**Moved holders are no new copies** (decided by Ervin during the apply,
+2026-11-17). The written-line condition alone left a gap: `a.ts` is
+deleted, its block goes to `b.ts` and `d.ts`, and the unchanged `c.ts`
+keeps its copy. `counts()` reported `b.ts`, the first new holder by
+path, while the pairing of D3, also in path order, made `b.ts`'s lines
+moved, so the written copy in `d.ts` went unreported. Now `counts()`
+looks at the new holders of a window: one where no place of the window
+has a token on a written line is moved. Moved holders are sorted first
+and skipped. If there is one, it is the original, and no other holder
+is skipped; otherwise the first by path is, as before. So `d.ts` is
+reported, naming `b.ts`.
+
+This is no longer "only silences": a finding can pass from a moved
+holder to a written one in the same change. Per window, the number of
+reported holders still never grows, since at least as many are skipped
+as before.
+
+*Alternative:* the spec as it was, with this case as a known loss. Then
+an unchanged copy elsewhere would hide a written copy that the "helper
+copied into two files" scenario reports without it. Rejected.
 
 ### D2: A line is its trimmed text, hashed
 
@@ -148,6 +169,15 @@ holds; a deleted file has no `after_lines`. `DuplicationIndex::add`
     it may pair another occurrence of the same run, so which of the
     file's lines count as written can shift. The replay is the check
     for both.
+  - Each run of changed elements then slides down as far as equal
+    elements allow, as git's diff does in the common case (decided by
+    Ervin during the apply, 2026-11-17). Git also slides up to join
+    runs, and its indent heuristic may stop earlier; neither is done
+    here. Without the slide, a test appended after a similar test that
+    ends in the same lines counted as the old test's tail plus a new
+    test's head, so the tail of the copy looked kept and the copy lost
+    its written tokens (SV20 in the replay). A run that slides into the
+    next one joins it.
 
 *Alternatives:*
 
@@ -170,19 +200,25 @@ Fixtures first, then the code. Mutation checks are done by hand.
   - Myers against a brute-force LCS on many small generated inputs (a
     fixed seed, no new dependency);
   - the limit (one difference past it gives the fallback);
+  - the slide: a copy added after the code it copies is added last, in
+    both directions, and a run that slides into the next joins it;
   - `middles` behaves as before (complexity's tests).
 - **`qgate-lang`:** `lines` for CRLF, white space, an empty last line
   and a file without a trailing newline, in all three languages through
   `parse`.
 - **`duplication`:** one fixture test per new spec scenario, and the
-  existing tests unchanged.
+  existing tests unchanged, except
+  `only_as_many_files_as_the_change_added_are_reported`, which now
+  expects the finding for `d.ts` (D1, moved holders).
 - **Mutants:** each must fail a test:
   - no own-file pass;
   - no consumption;
   - runs of one line;
   - empty runs allowed;
   - untrimmed hashes;
-  - no written-line condition.
+  - no written-line condition;
+  - moved holders not skipped;
+  - moved holders not sorted first.
 
 ### D7: Two pull requests
 
@@ -199,11 +235,12 @@ Fixtures first, then the code. Mutation checks are done by hand.
   CL14 in the spike. The replay checks it, and a minimum of tokens per
   run is the lever if it shows up.
 - **Myers breaks ties differently from git.** Repeated lines (`}`) may
-  count as added in other places than in the spike. → The replay. The
-  bar is the judged findings of the proposal, and any difference is
-  explained before merge.
-- **Known noise stays:** SV8 and SV27, moved blocks with enough edited
-  lines.
+  count as added in other places than in the spike. → The slide of D5
+  follows git's convention, and the replay checks the rest. The bar is
+  the judged findings of the proposal, and any difference is explained
+  before merge.
+- **Known noise stays:** SV23 and SV27, moved blocks with enough edited
+  lines. The spike named SV8 instead of SV23; see Verification.
 - **Known loss:** SV30 (defensible). Its block starts in the tail of an
   existing test.
 - **Line hash collisions** make a written line moved. A run needs three
@@ -253,3 +290,74 @@ appear. No configuration changes.
   of complexity's `common_in_order`. The search is now split in two,
   and `common_in_order` moved into `diff`, generic, for both. After
   that, no finding.
+
+**PR 2** (the rule):
+
+- **Tests first.** Of the seven new fixture tests, the three the rule
+  changes failed on their result ("The same small edit in existing
+  copies", "A copy completed by a few written lines", "A split file");
+  the other four passed already.
+- **A decision during the apply.** With the rule in place,
+  `only_as_many_files_as_the_change_added_are_reported` reported nothing:
+  the moved copy in `b.ts` hid the written one in `d.ts`. Ervin chose
+  that a moved holder is no new copy (D1); the test now expects the
+  finding for `d.ts`, and the spec delta has the scenario "Moved and
+  copied next to an existing copy".
+- **Mutants of D6**, each by hand and reverted, each failing a test:
+  - no own-file pass: the pairing test, "Moved within a file and copied";
+  - no consumption: the pairing test, "A helper copied into two files"
+    and three more;
+  - runs of one line: the pairing test;
+  - empty runs allowed: the pairing test;
+  - untrimmed hashes: "A split file", in the analyzer and end to end;
+  - no written-line condition: "The same small edit in existing
+    copies", "A copy completed by a few written lines", "A split file";
+  - moved holders not skipped:
+    `only_as_many_files_as_the_change_added_are_reported`;
+  - moved holders not sorted first (only by path): "Moved and renamed",
+    which runs with the moved copy first and last by path (added after
+    the review).
+- **The CLI's wiring** (task 4.4). The two end-to-end tests fail when the
+  CLI swaps `before_lines` and `after_lines`, when it leaves them empty,
+  or when the deleted file's or the JavaScript base's lines alone are
+  empty.
+- **A second decision: the slide** (D5). The first replay lost SV20,
+  a defensible finding, which the spike kept. Our diff aligned the
+  appended test's last lines with the old test's last lines, where git
+  slides the insertion down. Ervin chose the slide. Three mutants each
+  fail one of its tests: no slide of the added side, no slide of the
+  removed side, and runs that do not join.
+- **Replay of the 150 pull requests against `main` after PR 43:**
+  - duplication falls from 279 to 139 findings, and no finding appears
+    that did not overlap one before;
+  - every finding of another rule is identical;
+  - useful: 6 of 6 stay;
+  - defensible: 12 of 13 stay, only SV30 goes, as the proposal expected;
+  - noise: 20 of 22 go. SV28 overlaps the SV23 that stays and counts as
+    gone, checked by hand.
+- **SV23 instead of SV8** (accepted by Ervin). SV23 stays and SV8 goes,
+  where the spike predicted the reverse. The written lines of both are
+  the same as the spike's; the spike only estimated tokens with a
+  regular expression. qgate's tokenizer counts 40 written tokens for SV8
+  and 55 for SV23, against the threshold of 50.
+- **Cost.** In the batch the slowest run, server PR 8812, took 7.5 s
+  against 7.0 s. Timed alone, three times each and interleaved, the
+  medians are 7.17 s before and 7.29 s after
+  on PR 8812, and 6.68 s and 6.85 s on PR 8826: within 3 %.
+- **qgate on itself.** It reported four Warnings, none failing.
+  `written_lines` was a new function of complexity 11; building the pool
+  of removed runs moved into `removed_runs`, and the finding went. The
+  other three are +1 each, and each is one condition of the rule: a
+  token's written flag in `with_token_hash`, the moved holders in
+  `counts`, and the written-line test in `blocks`. They stay.
+- **Review.** The `reviewer` subagent ran one round and found no
+  blocker. Fixed after it:
+  - no test pinned that a moved holder sorts before a written one; "Moved
+    and renamed" now runs both path orders, and the mutant fails it;
+  - the README said each removed line moves once (it is each run of
+    three) and that the first new file by path is the original (a file
+    the block only moved to is);
+  - a comment still said the written flags can only silence a finding;
+  - the slide is git's in the common case, not in every case;
+  - the proposal named one new requirement instead of the two of the
+    spec delta, and task 5.4 named four decisions instead of nine.

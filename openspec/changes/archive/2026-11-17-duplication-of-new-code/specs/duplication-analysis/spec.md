@@ -9,8 +9,10 @@ number of files that hold it, only in files that did not hold it before,
 at most as many as it added, and only if at least 50 of its tokens are
 new: on lines the change wrote, not covered by duplicated code the file
 already had, nor by a window whose block an earlier finding in the same
-file reported. When every file that holds it is new, the first by path
-SHALL count as the original.
+file reported. A file that holds it with none of its tokens on lines
+the change wrote SHALL NOT count as a new copy: the block moved there.
+When every file that holds it is new and none of them is such a file,
+the first by path SHALL count as the original.
 
 #### Scenario: Existing duplication
 
@@ -91,6 +93,12 @@ from, then one in other files, in path and line order.
 - **GIVEN** the change moves a 60-token block from the top to the bottom of `src/a.ts`, and adds a copy of it to the new `src/0.ts`
 - **WHEN** the user runs `qgate check --base main`
 - **THEN** a `duplication/duplicate-block` finding for `src/0.ts` names `src/a.ts`
+
+#### Scenario: Moved and copied next to an existing copy
+
+- **GIVEN** `src/a.ts` and `src/c.ts` share a 60-token block, and the change deletes `src/a.ts` and adds `src/b.ts` and `src/d.ts`, both with the block
+- **WHEN** the user runs `qgate check --base main`
+- **THEN** one finding is reported, for `src/d.ts`, naming `src/b.ts`
 
 #### Scenario: Moved and renamed
 

@@ -1016,6 +1016,75 @@ fn a_javascript_rename_does_not_hide_a_new_copy() {
     assert_eq!(stdout(&out), COPY_FINDING, "{}", stderr(&out));
 }
 
+// duplication-analysis: Moved lines, end to end: the CLI hands the
+// analyzer the line hashes of both versions, also of a deleted file and of
+// a file renamed from JavaScript (duplication-of-new-code).
+
+/// A 60-token block of six lines, each after `indent`, and `rest`: eight
+/// more lines of other code.
+fn block(indent: &str) -> String {
+    (0..6)
+        .map(|i| format!("{indent}v{i} = alpha.s{i}(beta, 1);\n"))
+        .collect::<Vec<_>>()
+        .concat()
+}
+
+fn rest() -> String {
+    (0..8)
+        .map(|i| format!("w{i} = gamma.m{i}(delta, 2);\n"))
+        .collect::<Vec<_>>()
+        .concat()
+}
+
+/// The block twice, in two functions, then the rest: what a split
+/// starts from.
+fn block_twice() -> String {
+    let b = block("  ");
+    format!(
+        "function first() {{\n{b}}}\nfunction second() {{\n{b}}}\n{}",
+        rest()
+    )
+}
+
+/// The block one level deeper, in a method of a new class `name`.
+fn block_in_class(name: &str) -> String {
+    format!(
+        "export class {name} {{\n  run() {{\n{}  }}\n}}\n",
+        block("    ")
+    )
+}
+
+#[test]
+fn a_split_file_is_not_a_new_copy() {
+    let repo = Repo::new();
+    repo.write("src/big.ts", block_twice());
+    repo.commit("base");
+    repo.remove("src/big.ts");
+    repo.write("src/one.ts", block_in_class("One"));
+    repo.write("src/two.ts", format!("{}{}", block_in_class("Two"), rest()));
+    repo.commit("split");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), NO_REGRESSIONS, "{}", stderr(&out));
+}
+
+#[test]
+fn a_block_moved_out_of_a_file_renamed_from_javascript_is_not_a_new_copy() {
+    // util.js holds the block twice. The change renames it to TypeScript,
+    // keeps one copy and moves the other into moved.ts.
+    let repo = Repo::new();
+    repo.write("src/util.js", block_twice());
+    repo.commit("base");
+    repo.git(&["mv", "src/util.js", "src/util.ts"]);
+    repo.write(
+        "src/util.ts",
+        format!("function first() {{\n{}}}\n{}", block("  "), rest()),
+    );
+    repo.write("src/moved.ts", block_in_class("Moved"));
+    repo.commit("migrate");
+    let out = repo.qgate(&["--base", "HEAD~1"]);
+    assert_eq!(stdout(&out), NO_REGRESSIONS, "{}", stderr(&out));
+}
+
 // revision-input: Working tree as head (add-worktree-input)
 
 /// A repository with `f` in `src/a.ts` at complexity 2 committed on

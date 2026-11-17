@@ -465,9 +465,21 @@ warning src/orders/format.ts:4  duplicates src/utils/date.ts:1-6 (lines 4-9, 68 
 - **Only new copies are reported.** Duplication the code base already has
   is not, nor code written next to it; nor is code that only moved, also
   out of a deleted file; nor a file renamed or moved from `.js` to `.ts`.
-  When a change adds the same block to two new files, the first by path
-  counts as the original.
-- **A block must span at least 50 tokens**, about 5 to 8 lines.
+  When a change adds the same block to two new files, a file it only
+  moved to counts as the original, or else the first by path.
+- **Only code the change wrote counts.** A line diff of each changed
+  file gives the lines it added. Three added lines in a row that match
+  three removed lines, of the same file or another, moved; the others
+  were written. Lines match by their text without leading and trailing
+  white space, so code moved into another scope still matches. Each
+  run of three removed lines moves once: first within its own file,
+  then to other files in path order. So code that only moved does not
+  count, also when repetition within one file becomes repetition across
+  files, as when a large file is split. A helper that a split copies into two
+  files counts once as moved and once as written. The same small edit in
+  existing copies writes only the edited lines.
+- **A block must span at least 50 tokens**, about 5 to 8 lines, and at
+  least 50 of them must be on lines the change wrote.
 - It is a Warning, so it fails a run only with `--fail-on warning`. The
   two-file form does not check duplication.
 
