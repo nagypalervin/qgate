@@ -18,7 +18,7 @@ written to files first.
   Verified when `cargo test -p qgate-lang` fails on exactly these.
 - [x] 2.2 Render the `impl` segment from the syntax tree (D2). Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
 - [x] 2.3 A CLI test for "A lifetime renamed" in `crates/qgate-cli/tests/rust.rs`. A method of complexity 11 moves from `impl<'s> Walker<'s>` to `impl Walker<'_>`. Verified when `qgate check --base` reports no finding; the test fails if the change from 2.2 is reverted.
-- [ ] 2.4 The README's Rust section says that lifetimes are not part of a unit's name, with an example (`Walker.record_token`). Verified by reading it against the spec delta.
+- [x] 2.4 The README's Rust section says that lifetimes are not part of a unit's name, with an example (`Walker.record_token`). Verified by reading it against the spec delta.
 
 ## 3. Proof
 

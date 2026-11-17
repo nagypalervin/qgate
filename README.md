@@ -784,6 +784,9 @@ check and no architecture rules yet.
   by its file: `Cart.total`, `<Cart as fmt::Display>.fmt` for a trait
   implementation, `Stack<T>.push`, `tests.adds_two`, `outer.inner`. So
   the `fmt` of `Display` and of `Debug` keep apart when one moves.
+  Lifetimes are not part of a name: a method of `impl<'s> Walker<'s>`
+  and of `impl Walker<'_>` is `Walker.record_token` either way, so
+  rewriting a lifetime does not make it a new function.
 - **Decision points:** `if` (and `if let`), `while` (and `while let`),
   `for`, `let ... else`, each `match` arm except `_`, a match guard, each
   `|` between pattern alternatives, `&&` and `||`, also in a let chain.
