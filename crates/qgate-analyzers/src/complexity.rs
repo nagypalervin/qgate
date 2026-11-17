@@ -1351,6 +1351,36 @@ mod tests {
         );
     }
 
+    // Design D3: one long middle is enough for the limit. `process` loses
+    // a long body and takes a helper's code; its after version is small
+    // enough to compare with the helper, yet nothing is credited.
+    #[test]
+    fn a_long_function_that_shrank_around_an_inlined_one() {
+        let helper = format!(
+            "{}{}",
+            checks(&["alpha", "beta", "gamma", "delta", "epsilon"]),
+            "    out.push(input.y);\n".repeat(800)
+        );
+        let process = |first: &str, middle: &str, last: &str| {
+            let first = format!("    if (input.{first}) {{ return out; }}\n");
+            let last = format!("    if (input.{last}) {{ return out; }}\n");
+            method("process", &format!("{first}{middle}{last}"))
+        };
+        let before = format!(
+            "export class Job {{\n{}\n{}}}\n",
+            process("first", &"    out.push(input.x);\n".repeat(1500), "last"),
+            method("helper", &helper)
+        );
+        let after = format!(
+            "export class Job {{\n{}}}\n",
+            process("start", &helper, "end")
+        );
+        assert_eq!(
+            run(&before, &after),
+            vec![increase(Severity::Error, "Job.process", 2, 3, 8)]
+        );
+    }
+
     // Design D3: a unit whose two versions differ at both ends of more
     // than 8,192 tokens is not aligned, so the helper it inlined is not
     // credited and its increase is reported in full.

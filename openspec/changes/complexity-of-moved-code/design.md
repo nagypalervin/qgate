@@ -233,16 +233,15 @@ comes from that growth: 1 to 4 is a Warning, 5 or more an Error.
   ways, crediting every qualifying unit, crediting several units to one
   grown unit, crediting one removed unit to several, taking a pair other
   than the longest first, crediting units without decision points,
-  either limit left out, a tie that keeps the before token and dropping
-  the sort each fail a test. Three mutants survive and are equivalent:
+  either limit left out, a tie that keeps the before token, the whole
+  after version taken when `added` refuses (a unit whose long body went
+  and whose short after version holds a helper) and dropping the sort
+  each fail a test. Two mutants survive and are equivalent:
   without the skip of a grown unit by size (the pair test rejects the
   same pairs); with the sort by removed unit before grown unit (the
   reviewer's brute force over every candidate graph of 3×3 and 4×4 found
-  no case where the pairs differ); and taking the whole after version
-  when `added` refuses (to reach two thirds of it, the removed unit
-  must be twice the middle of more than 8,192 tokens, so `evidence`
-  refuses the pair). The boundary of the limit, 2^26 pairs exactly, is
-  not pinned: a test would align 2^26 pairs.
+  no case where the pairs differ). The boundary of the limit, 2^26
+  pairs exactly, is not pinned: a test would align 2^26 pairs.
 - A short removed function rarely qualifies: its signature and the
   lines around its body are own tokens that do not come along when it
   is inlined. That is the cautious side too.
@@ -342,7 +341,10 @@ Each one stands alone. After PR 1, inlining is still reported as today.
   own-name group that the fingerprint did not settle. Groups such as
   `constructor`, `ngOnInit` or `Dispose()` can be large in a big pull
   request, but pairs whose sizes differ more than twofold are skipped
-  without the test. The re-measurement checks the time.
+  without the test. The re-measurement checks the time. The test has no
+  limit like that of inlining (D3): by the reviewer's estimate, a
+  function of 12,000 lines that moves and changes takes about 15 s. A
+  follow-up can give it the same 2^26 limit.
 - **`Token` gains a field.** `Token` is a public type of `qgate-lang`,
   and code that builds it literally must add the field. The only users
   are in this workspace.
@@ -435,3 +437,13 @@ and share only repository, event and seat calls with the removed ones;
 `case` of its own. They are the pairs Ervin's decision of two thirds
 was measured on, so the threshold holds, with 0.12 to spare below and
 0.19 above.
+
+**PR 2 with one-to-one pairing and the limits (task 2.5),
+2026-11-17.** All 150 reports parsed; every run exited with 0.
+
+- Against 0.9.0: SV19 and CL11 gone, none new or changed, 60 the same.
+  Against the two-thirds run above: no difference at all.
+- The 326 findings of the other rules are byte-identical.
+- Slowest runs: server 8811 7.2 s, server 8781 7.2 s, server 8812
+  7.1 s, server 8837 6.9 s and server 8855 6.9 s; server 8856 6.8 s,
+  8859 6.5 s and 8854 6.5 s. All within 30 s.

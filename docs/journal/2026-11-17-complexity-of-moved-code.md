@@ -50,7 +50,7 @@
   the cautious side.
 
 **Effort:** a long day; 2 PRs, about 10 commits, the replay run seven
-times plus four diagnostic runs, five review rounds.
+times plus four diagnostic runs, six review rounds.
 
 **Blog idea:** "The fixture passed, the replay didn't." A rule written
 from one real incident (CL11) fit its own fixtures and still fired on

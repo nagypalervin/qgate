@@ -190,5 +190,5 @@ time and memory of the evidence stay bounded.
 #### Scenario: A very long inlined function
 
 - **GIVEN** a removed unit of more than 8,192 own tokens
-- **WHEN** the head revision removes it and adds its code, and nothing else, to a matched unit
+- **WHEN** the head revision removes it and adds its code, and nothing else, to a matched unit, and the code added to that unit is more than 8,192 tokens as well
 - **THEN** the removed unit is not credited, and the matched unit's increase is reported in full
