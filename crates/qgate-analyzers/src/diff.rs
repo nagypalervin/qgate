@@ -29,6 +29,28 @@ pub(crate) fn middles<'t, T: PartialEq>(
     (start, end, &a[..a.len() - end], &b[..b.len() - end])
 }
 
+/// The length of the longest common subsequence of `a` and `b`, by one
+/// row of dynamic programming, in O(|a|·|b|) time and O(|b|) memory.
+pub(crate) fn common_in_order<T: PartialEq>(a: &[T], b: &[T]) -> usize {
+    // row[j]: the longest common subsequence of the elements of `a` so
+    // far and b[..j].
+    let mut row = vec![0usize; b.len() + 1];
+    for element in a {
+        // The previous row's row[j], while row[j] is being overwritten.
+        let mut diagonal = 0;
+        for (j, other) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = if element == other {
+                diagonal + 1
+            } else {
+                above.max(row[j])
+            };
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
 /// Per element of `a` and of `b`, whether it is kept: part of the common
 /// subsequence of a shortest edit script from `a` to `b`. The common
 /// start and end are kept; between them, the search for a script gives
@@ -54,30 +76,40 @@ pub(crate) fn kept<T: PartialEq>(a: &[T], b: &[T]) -> (Vec<bool>, Vec<bool>) {
 /// The pairs `(x, y)` with `a[x] == b[y]` of a shortest edit script from
 /// `a` to `b`, by Myers' greedy algorithm; `None` when it needs more than
 /// [`MAX_EDITS`] edits.
+fn myers<T: PartialEq>(a: &[T], b: &[T]) -> Option<Vec<(usize, usize)>> {
+    let (trace, edits) = search(a, b)?;
+    Some(walk_back(&trace, edits, signed(a.len()), signed(b.len())))
+}
+
+/// Whether a step of Myers' algorithm reaches diagonal `diagonal` from
+/// diagonal `diagonal + 1` (one element of `b` inserted) rather than
+/// from `diagonal - 1` (one of `a` deleted), given what the step before
+/// reached on each: `furthest(k)`.
+fn from_above(step: isize, diagonal: isize, furthest: impl Fn(isize) -> isize) -> bool {
+    diagonal == -step || (diagonal != step && furthest(diagonal - 1) < furthest(diagonal + 1))
+}
+
+/// The forward search of Myers' algorithm: the trace and the number of
+/// edits of a shortest script, or `None` beyond [`MAX_EDITS`].
 ///
 /// After `step` edits, `furthest[k]` is the furthest `x` reached on
 /// diagonal `k = x - y`. The trace keeps it for the diagonals
-/// `-step..=step` after each step, at `step² + step + k`, to walk the
-/// script back from the end.
-fn myers<T: PartialEq>(a: &[T], b: &[T]) -> Option<Vec<(usize, usize)>> {
+/// `-step..=step` after each step, at `step² + step + k`.
+fn search<T: PartialEq>(a: &[T], b: &[T]) -> Option<(Vec<isize>, isize)> {
     let (a_len, b_len) = (signed(a.len()), signed(b.len()));
     let limit = signed((a.len() + b.len()).min(MAX_EDITS));
     // furthest[diagonal + offset], for diagonal in -limit - 1..=limit + 1.
     let offset = limit + 1;
     let mut furthest = vec![0; unsigned(2 * offset + 1)];
-    let reach = |furthest: &[isize], diagonal: isize| furthest[unsigned(diagonal + offset)];
     let mut trace: Vec<isize> = Vec::new();
-    let mut edits = None;
     for step in 0..=limit {
         let mut reached = false;
         for diagonal in (-step..=step).step_by(2) {
-            let mut x = if diagonal == -step
-                || (diagonal != step
-                    && reach(&furthest, diagonal - 1) < reach(&furthest, diagonal + 1))
-            {
-                reach(&furthest, diagonal + 1)
+            let reach = |k: isize| furthest[unsigned(k + offset)];
+            let mut x = if from_above(step, diagonal, reach) {
+                reach(diagonal + 1)
             } else {
-                reach(&furthest, diagonal - 1) + 1
+                reach(diagonal - 1) + 1
             };
             let mut y = x - diagonal;
             while x < a_len && y < b_len && a[unsigned(x)] == b[unsigned(y)] {
@@ -87,35 +119,32 @@ fn myers<T: PartialEq>(a: &[T], b: &[T]) -> Option<Vec<(usize, usize)>> {
             furthest[unsigned(diagonal + offset)] = x;
             reached |= x >= a_len && y >= b_len;
         }
-        trace.extend((-step..=step).map(|diagonal| reach(&furthest, diagonal)));
+        trace.extend((-step..=step).map(|k| furthest[unsigned(k + offset)]));
         if reached {
-            edits = Some(step);
-            break;
+            return Some((trace, step));
         }
     }
-    let edits = edits?;
-    // Walk back from the end: the last edit of each step left the
-    // diagonal that the step before reached furthest.
-    let traced = |step: isize, diagonal: isize| trace[unsigned(step * step + step + diagonal)];
+    None
+}
+
+/// The common pairs of the script that [`search`] traced, walking back
+/// from `(a_len, b_len)`: the last edit of each step left the diagonal
+/// that the step before reached furthest.
+fn walk_back(trace: &[isize], edits: isize, a_len: isize, b_len: isize) -> Vec<(usize, usize)> {
     let mut pairs = Vec::new();
     let (mut x, mut y) = (a_len, b_len);
     for step in (0..=edits).rev() {
         let (prev_x, prev_y) = if step == 0 {
             (0, 0)
         } else {
+            let before = |k: isize| trace[unsigned((step - 1) * step + k)];
             let diagonal = x - y;
-            let prev_diagonal = if diagonal == -step
-                || (diagonal != step
-                    && traced(step - 1, diagonal - 1) < traced(step - 1, diagonal + 1))
-            {
+            let prev_diagonal = if from_above(step, diagonal, before) {
                 diagonal + 1
             } else {
                 diagonal - 1
             };
-            (
-                traced(step - 1, prev_diagonal),
-                traced(step - 1, prev_diagonal) - prev_diagonal,
-            )
+            (before(prev_diagonal), before(prev_diagonal) - prev_diagonal)
         };
         while x > prev_x && y > prev_y {
             x -= 1;
@@ -124,7 +153,7 @@ fn myers<T: PartialEq>(a: &[T], b: &[T]) -> Option<Vec<(usize, usize)>> {
         }
         (x, y) = (prev_x, prev_y);
     }
-    Some(pairs)
+    pairs
 }
 
 /// A slice index or length as `isize`, which every one fits.
@@ -140,24 +169,6 @@ fn unsigned(n: isize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The length of a longest common subsequence, by dynamic programming.
-    fn lcs(a: &[u8], b: &[u8]) -> usize {
-        let mut row = vec![0; b.len() + 1];
-        for x in a {
-            let mut diagonal = 0;
-            for (j, y) in b.iter().enumerate() {
-                let above = row[j + 1];
-                row[j + 1] = if x == y {
-                    diagonal + 1
-                } else {
-                    above.max(row[j])
-                };
-                diagonal = above;
-            }
-        }
-        row[b.len()]
-    }
 
     /// The kept elements of `s`, in order.
     fn kept_of(s: &[u8], kept: &[bool]) -> Vec<u8> {
@@ -196,7 +207,7 @@ mod tests {
             assert_eq!(kept_b.len(), b.len());
             let common = kept_of(&a, &kept_a);
             assert_eq!(common, kept_of(&b, &kept_b), "{a:?} {b:?}");
-            assert_eq!(common.len(), lcs(&a, &b), "{a:?} {b:?}");
+            assert_eq!(common.len(), common_in_order(&a, &b), "{a:?} {b:?}");
         }
     }
 

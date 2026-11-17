@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use qgate_core::{Finding, Location, Metric, Severity};
 use qgate_lang::{FileModel, Function};
 
-use crate::diff::middles;
+use crate::diff::{common_in_order, middles};
 use crate::{Analyzer, FileChange};
 
 /// Rule id for a matched function whose complexity increased.
@@ -448,28 +448,6 @@ fn shares_half(a: &[usize], b: &[usize]) -> bool {
         return false;
     }
     2 * (start + end + common_in_order(longer_middle, shorter_middle)) >= longer.len()
-}
-
-/// The length of the longest common subsequence of `a` and `b`, by one
-/// row of dynamic programming, in O(|a|·|b|) time and O(|b|) memory.
-fn common_in_order(a: &[usize], b: &[usize]) -> usize {
-    // row[j]: the longest common subsequence of the tokens of `a` so far
-    // and b[..j].
-    let mut row = vec![0usize; b.len() + 1];
-    for &token in a {
-        // The previous row's row[j], while row[j] is being overwritten.
-        let mut diagonal = 0;
-        for (j, &other) in b.iter().enumerate() {
-            let above = row[j + 1];
-            row[j + 1] = if token == other {
-                diagonal + 1
-            } else {
-                above.max(row[j])
-            };
-            diagonal = above;
-        }
-    }
-    row[b.len()]
 }
 
 /// The own name of a unit: the last segment of its qualified name, after
