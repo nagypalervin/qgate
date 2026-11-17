@@ -38,7 +38,10 @@ block's and its target's lines the pull request changed).
 
 ## Spot-check
 
-Ervin's spot-check of 10 findings (task 2.4) is recorded below the table.
+`spotcheck.py` drew SV3, SV18, SV25, SV27, SV29, CL2, CL7, CL8, CL23 and
+CL37. Each was shown to Ervin with its pull request, location, class and
+reason. On 2026-11-17 he agreed with all 10, so the sample stands as
+judged (D3 asks for a second round only above 2 disagreements).
 
 ## The sample
 

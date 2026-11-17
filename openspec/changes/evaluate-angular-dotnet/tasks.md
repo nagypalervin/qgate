@@ -15,11 +15,11 @@ written to files first.
 - [x] 2.1 `evaluation/run.py`: for each listed commit, check it out, place the frozen `qgate.toml` and run `qgate check --base C^ --worktree --format json --fail-on never` (D1), saving the JSON and the wall time. Verified by 150 JSON reports that all parse, and a second run of one commit giving the same findings.
 - [x] 2.2 `evaluation/summary.py`: per repository, commented and would-fail pull requests, with and without bots; findings per rule and severity; the slowest and median run time (D4). Verified by the script printing the same numbers twice from the saved reports.
 - [x] 2.3 The sample of D3 (every Error, up to 30 Warnings per repository, `random.Random(20261117)`), drawn by `evaluation/sample.py`, and each sampled finding judged useful, defensible or noise with one sentence of reason in `evaluation/findings.md`. Verified by every sampled finding appearing in `findings.md` exactly once with a class and a reason.
-- [ ] 2.4 Ervin's spot-check: 10 findings drawn at random from the sample, shown to him with the code they point at. His verdicts are recorded in `findings.md`. Verified by the record; more than 2 disagreements send 2.3 round again (D3).
+- [x] 2.4 Ervin's spot-check: 10 findings drawn at random from the sample, shown to him with the code they point at. His verdicts are recorded in `findings.md`. Verified by the record; more than 2 disagreements send 2.3 round again (D3).
 
 ## 3. Verdict, recipe and pilot plan
 
-- [ ] 3.1 An "Evaluation" section in `design.md` with the criteria table of D4, per-rule counts, every "no signal" rule, and go or no-go. A failed criterion names the fix change to propose, and the work stops here until Ervin decides. Verified by each number in the table matching `summary.py` output.
+- [x] 3.1 An "Evaluation" section in `design.md` with the criteria table of D4, per-rule counts, every "no signal" rule, and go or no-go. A failed criterion names the fix change to propose, and the work stops here until Ervin decides. Verified by each number in the table matching `summary.py` output.
 - [ ] 3.2 The pilot plan (D6) in `design.md`: the comment-only start, the week-1 measurement with these scripts, the condition and the step to blocking, the feedback route. Verified by every step naming who does it and what it produces.
 - [ ] 3.3 README "Angular + .NET" recipe: a `qgate.toml` with layer rules and the exclusions the evaluation supports, and the Azure Pipelines job of the README's Azure section with `--fail-on never` on both check lines. Verified by the recipe's `qgate.toml` loading in the `CleanArchitecture` clone without a configuration error, and the job differing from the README's Azure job only in `--fail-on`.
 
