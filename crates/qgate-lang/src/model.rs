@@ -18,6 +18,12 @@ pub struct FileModel {
     /// The file's code as normalized tokens, in source order, for
     /// comparing code: see [`Token`].
     pub tokens: Vec<Token>,
+    /// One hash per line of the source, at index `line - 1`: the 64-bit
+    /// FNV-1a hash of the line's text without leading and trailing white
+    /// space, and 0 for an empty line. Every line counts, comments too,
+    /// so two lines with the same text have the same hash in any language
+    /// (design D2 of `duplication-of-new-code`).
+    pub lines: Vec<u64>,
 }
 
 /// One normalized token. Identifiers become `$id`; strings, numbers,

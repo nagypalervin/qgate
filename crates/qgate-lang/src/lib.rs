@@ -31,7 +31,9 @@
 //! code, or C#'s `using` directives, namespace declarations and
 //! preprocessor directives, or Rust's `use` declarations, module
 //! declarations and attributes. C# and Rust types are code and keep their
-//! tokens; Rust macro calls are compared by their tokens too.
+//! tokens; Rust macro calls are compared by their tokens too. Next to the
+//! tokens, it holds a hash of each line's trimmed text, so lines that
+//! moved can be told from lines that were written.
 //!
 //! C# units are named by their types and signature, such as
 //! `Cart.Total(int)`; [`csharp_generated_name`] and
@@ -65,11 +67,13 @@ pub use model::{FileModel, Function, Import, ParseError, Token, Using};
 /// Returns [`ParseError::Syntax`] if the source contains a syntax error,
 /// and [`ParseError::Parser`] if the parser itself fails.
 pub fn parse(language: Language, source: &str) -> Result<FileModel, ParseError> {
-    match language {
+    let mut model = match language {
         Language::TypeScript | Language::Tsx => typescript::parse(language, source),
         Language::CSharp => csharp::parse(source),
         Language::Rust => rust::parse(source),
-    }
+    }?;
+    model.lines = common::line_hashes(source);
+    Ok(model)
 }
 
 /// A language qgate knows how to analyze.
@@ -199,5 +203,40 @@ mod tests {
     #[test]
     fn unknown_extension() {
         assert_eq!(Language::from_extension("cobol"), None);
+    }
+
+    /// The line hashes of `source`, parsed as `language`.
+    fn lines(language: Language, source: &str) -> Vec<u64> {
+        parse(language, source).expect("valid source").lines
+    }
+
+    #[test]
+    fn each_line_is_hashed_by_its_trimmed_text() {
+        for (language, code) in [
+            (Language::TypeScript, "let a = 1;"),
+            (Language::CSharp, "class A {}"),
+            (Language::Rust, "fn a() {}"),
+        ] {
+            let plain = lines(language, &format!("{code}\n// note\n\n{code}\n"));
+            assert_eq!(plain.len(), 4, "{language:?}");
+            assert_eq!(plain[0], plain[3], "{language:?}");
+            assert_ne!(plain[0], plain[1], "{language:?}");
+            // An empty line is 0, also one with white space only.
+            assert_eq!(plain[2], 0, "{language:?}");
+            assert_ne!(plain[0], 0, "{language:?}");
+            // Indentation, trailing white space, CRLF and a missing last
+            // newline change nothing.
+            let messy = lines(
+                language,
+                &format!("\t  {code}  \r\n  // note\r\n \t \r\n    {code}"),
+            );
+            assert_eq!(messy, plain, "{language:?}");
+        }
+    }
+
+    #[test]
+    fn a_file_without_code_has_its_lines() {
+        assert_eq!(lines(Language::TypeScript, "// a\n// b\n").len(), 2);
+        assert_eq!(lines(Language::TypeScript, ""), Vec::<u64>::new());
     }
 }

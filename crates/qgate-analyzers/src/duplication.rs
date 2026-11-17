@@ -39,6 +39,12 @@ pub struct ChangedSource<'a> {
     pub before: &'a [Token],
     /// Tokens of the head version.
     pub after: &'a [Token],
+    /// Line hashes of the base version ([`FileModel::lines`]).
+    ///
+    /// [`FileModel::lines`]: qgate_lang::FileModel::lines
+    pub before_lines: &'a [u64],
+    /// Line hashes of the head version.
+    pub after_lines: &'a [u64],
 }
 
 /// A window's identity: two independent 64-bit hashes of its token texts,
@@ -542,6 +548,8 @@ mod tests {
                 path,
                 before,
                 after,
+                before_lines: &[],
+                after_lines: &[],
             })
             .collect();
         let mut index = DuplicationIndex::with_token_hash(&sources, hash);

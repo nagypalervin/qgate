@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use qgate_core::{Finding, Location, Metric, Severity};
 use qgate_lang::{FileModel, Function};
 
+use crate::diff::middles;
 use crate::{Analyzer, FileChange};
 
 /// Rule id for a matched function whose complexity increased.
@@ -242,7 +243,7 @@ const ALIGNED_PAIRS: usize = 1 << 26;
 /// the `after` token, so within the middle added tokens come as late as
 /// they can. `None` when the middle has more than [`ALIGNED_PAIRS`] pairs.
 fn added(before: &[usize], after: &[usize]) -> Option<Vec<usize>> {
-    let (_, before, after) = middles(before, after);
+    let (_, _, before, after) = middles(before, after);
     let (n, m) = (before.len(), after.len());
     if n.saturating_mul(m) > ALIGNED_PAIRS {
         return None;
@@ -270,22 +271,6 @@ fn added(before: &[usize], after: &[usize]) -> Option<Vec<usize>> {
         std::mem::swap(&mut row, &mut below);
     }
     Some(outside(before, after, &skip))
-}
-
-/// The number of tokens cut from each of `a` and `b`, and their middles:
-/// what is left of each when their common start and then, of the rest,
-/// their common end are cut off. A longest common subsequence of `a` and
-/// `b` is the cut tokens plus a longest common subsequence of the middles.
-fn middles<'t>(a: &'t [usize], b: &'t [usize]) -> (usize, &'t [usize], &'t [usize]) {
-    let start = a.iter().zip(b).take_while(|(x, y)| x == y).count();
-    let (a, b) = (&a[start..], &b[start..]);
-    let end = a
-        .iter()
-        .rev()
-        .zip(b.iter().rev())
-        .take_while(|(x, y)| x == y)
-        .count();
-    (start + end, &a[..a.len() - end], &b[..b.len() - end])
 }
 
 /// The tokens of `after` outside the common subsequence with `before`
@@ -458,11 +443,11 @@ fn shares_half(a: &[usize], b: &[usize]) -> bool {
     if shorter.is_empty() || 2 * shorter.len() < longer.len() {
         return false;
     }
-    let (cut, longer_middle, shorter_middle) = middles(longer, shorter);
+    let (start, end, longer_middle, shorter_middle) = middles(longer, shorter);
     if longer_middle.len().saturating_mul(shorter_middle.len()) > ALIGNED_PAIRS {
         return false;
     }
-    2 * (cut + common_in_order(longer_middle, shorter_middle)) >= longer.len()
+    2 * (start + end + common_in_order(longer_middle, shorter_middle)) >= longer.len()
 }
 
 /// The length of the longest common subsequence of `a` and `b`, by one

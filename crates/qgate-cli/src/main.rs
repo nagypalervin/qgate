@@ -802,6 +802,8 @@ fn duplication(
                 path,
                 before: &change.before.tokens,
                 after: &change.after.tokens,
+                before_lines: &change.before.lines,
+                after_lines: &change.after.lines,
             })
             .collect();
         if sources.is_empty() {
@@ -814,6 +816,8 @@ fn duplication(
                     path: &gone.path,
                     before: &gone.model.tokens,
                     after: &[],
+                    before_lines: &gone.model.lines,
+                    after_lines: &[],
                 }),
         );
         indexes.push((family, DuplicationIndex::new(&sources)));
@@ -1049,11 +1053,16 @@ fn file_change(
             let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
             // The code it already had is not new either: its tokens count
             // as the base version for duplication.
-            let (imports, mut tokens) = if let Ok(model) = parse_blob(Language::Tsx, bytes)? {
-                (model.imports, model.tokens)
+            let (imports, mut tokens, lines) = if let Ok(model) = parse_blob(Language::Tsx, bytes)?
+            {
+                (model.imports, model.tokens, model.lines)
             } else {
                 old_path = None;
-                (after.imports.clone(), after.tokens.clone())
+                (
+                    after.imports.clone(),
+                    after.tokens.clone(),
+                    after.lines.clone(),
+                )
             };
             // The model has no functions, so its tokens belong to none.
             for token in &mut tokens {
@@ -1064,6 +1073,7 @@ fn file_change(
                 imports,
                 usings: Vec::new(),
                 tokens,
+                lines,
             }
         }
         (Some(id), Some(old_language)) => {

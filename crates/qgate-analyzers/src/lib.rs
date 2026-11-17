@@ -45,6 +45,7 @@
 
 pub mod architecture;
 pub mod complexity;
+mod diff;
 pub mod duplication;
 pub mod hotspots;
 pub mod patterns;
