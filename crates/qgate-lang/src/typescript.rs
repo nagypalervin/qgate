@@ -1210,12 +1210,13 @@ mod tests {
 
     // Design D3 of `complexity-of-moved-code`: a token carries the unit
     // whose fingerprint covers it; a nested named function's tokens are
-    // its own, and top-level code and a class body belong to no unit.
+    // its own, top-level code and a class body belong to no unit, and a
+    // bound call with its options belongs to the function passed through.
     #[test]
     fn tokens_carry_their_unit() {
         let model = parse(
             Language::TypeScript,
-            "const top = 1;\nclass Cart {\n  total(items) {\n    const sum = (a) => a + 1;\n    return sum(items);\n  }\n}\n",
+            "const top = 1;\nclass Cart {\n  total(items) {\n    const sum = (a) => a + 1;\n    return sum(items);\n  }\n}\nexport const GET = withAuth(async () => 1, { role: 2 });\n",
         )
         .expect("parses");
         crate::common::assert_unit_runs(
@@ -1225,7 +1226,8 @@ mod tests {
                 (Some("Cart.total"), "total ( $id ) { const $id ="),
                 (Some("Cart.total.sum"), "( $id ) => $id + $lit"),
                 (Some("Cart.total"), "return $id ( $id ) }"),
-                (None, "}"),
+                (None, "} export const $id ="),
+                (Some("GET"), "$id ( async ( ) => $lit , { role : $lit } )"),
             ],
         );
     }

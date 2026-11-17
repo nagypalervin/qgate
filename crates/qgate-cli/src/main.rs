@@ -1049,12 +1049,16 @@ fn file_change(
             let bytes = repo.read_blob(id).map_err(|e| e.to_string())?;
             // The code it already had is not new either: its tokens count
             // as the base version for duplication.
-            let (imports, tokens) = if let Ok(model) = parse_blob(Language::Tsx, bytes)? {
+            let (imports, mut tokens) = if let Ok(model) = parse_blob(Language::Tsx, bytes)? {
                 (model.imports, model.tokens)
             } else {
                 old_path = None;
                 (after.imports.clone(), after.tokens.clone())
             };
+            // The model has no functions, so its tokens belong to none.
+            for token in &mut tokens {
+                token.unit = None;
+            }
             FileModel {
                 functions: Vec::new(),
                 imports,

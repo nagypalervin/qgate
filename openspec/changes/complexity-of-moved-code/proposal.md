@@ -34,9 +34,9 @@ be fixed first.
   function that the change removed somewhere else, when both have the
   same *own name* (the last segment of the qualified name; for C# it
   includes the parameter types). They are matched when they have the
-  same fingerprint, or else when at least half of the removed function's
-  tokens appear in order in the new one, and only when neither has
-  another such partner. Otherwise nothing is matched and the function
+  same fingerprint, or else when the tokens they share in order are at
+  least half of each one's tokens, and only when neither has another
+  such partner. Otherwise nothing is matched and the function
   counts as new, as today (D2). Functions of a deleted JavaScript file
   are not matched (D1).
   A moved function that got more complex is reported under
@@ -86,15 +86,19 @@ Approved by Ervin on 2026-11-17 with all four recommendations.
    the metric keeps the real before and after values. *Recommended:
    yes.*
 4. **Two pull requests, no release.** PR 1: per-change analysis and
-   moved functions. PR 2: the token's unit and inlining, the re-measurement
-   of the 150 pull requests, and the archive. A release, 0.10.0, follows
+   moved functions. PR 2: the token's unit (moved to PR 1, see below)
+   and inlining, the re-measurement of the 150 pull requests, and the
+   archive. A release, 0.10.0, follows
    once the duplication fix is merged too, at your call. *Recommended:
    yes.*
 
 On the review of PR 1, Ervin decided two more points on 2026-11-17:
 a move needs the same code or code evidence, also when the own name is
 unique, so `Token::unit` moves into PR 1 (D2, D5); and functions of a
-deleted JavaScript file stay out of the matching (D1).
+deleted JavaScript file stay out of the matching (D1). On the second
+review, he decided that the evidence counts both ways: the shared tokens
+are half of each function's, so a short removed namesake is no evidence
+for a long new function (D2).
 
 ## Capabilities
 

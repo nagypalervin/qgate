@@ -51,11 +51,12 @@ An increase with inlined units SHALL write the parenthesis as
 
 Units without a match by qualified name SHALL be grouped by own name,
 the last segment of the qualified name (for C#, with its parameter
-types), across one language family's changed and deleted files; units
-of a deleted JavaScript file are left out. An after unit and a removed
-unit of a group SHALL be matched when they have the same code, or else
-when at least half of the removed unit's tokens appear in order in the
-after unit, provided neither has another such partner.
+types), across one language family's changed files and the files the
+change removed from it; units of JavaScript files are left out. An
+after unit and a removed unit of a group SHALL be matched when they have
+the same code, or else when the own tokens they share in order are at
+least half of each one's own tokens, provided neither has another such
+partner.
 
 #### Scenario: Method moved to a class in another file
 
@@ -93,10 +94,16 @@ after unit, provided neither has another such partner.
 - **WHEN** the head revision adds `BComponent.ngOnInit` with complexity 14, in which less than half of the tokens of `AComponent.ngOnInit` appear in order
 - **THEN** `BComponent.ngOnInit` is new, and a Warning `complexity/cyclomatic-new` finding is reported for it
 
+#### Scenario: Short removed namesake
+
+- **GIVEN** the base revision has `AComponent.ngOnInit` with the one statement `this.store.load();`, and the head revision removes it
+- **WHEN** the head revision adds `BComponent.ngOnInit` with complexity 14, which contains that statement among thirteen `if` statements
+- **THEN** `BComponent.ngOnInit` is new, and a Warning `complexity/cyclomatic-new` finding is reported for it
+
 #### Scenario: Ambiguous own name
 
 - **GIVEN** the base revision has `A.load` and `B.load`, each with complexity 12, and the head revision removes both
-- **WHEN** the head revision adds `C.load` with complexity 12, whose code differs from both by one operator
+- **WHEN** the head revision adds `C.load` with complexity 12, whose code shares more than half of its tokens with each of them
 - **THEN** `C.load` is new, and a Warning `complexity/cyclomatic-new` finding is reported for it
 
 #### Scenario: Same code settles an ambiguous own name

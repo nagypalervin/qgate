@@ -29,6 +29,12 @@ From the review of PR 1 (Ervin's decisions of 2026-11-17, D1 and D2):
 - [x] 1.8 Settle each own-name group in two passes, same code then code evidence (D2), and leave the units of deleted JavaScript files out of complexity (D1). Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
 - [x] 1.9 Re-measure as in 1.5. Verified when the result is the same as 1.5's, or every difference is explained, and the slowest run stays within 30 s.
 
+From the second review of PR 1 (Ervin's decision of 2026-11-17, D2):
+
+- [x] 1.10 Failing tests first: a fixture for "Short removed namesake"; the in-order share counts both units; a group whose first pass settles one pair leaves only the rest to the second (removed `A`, `B`; after `C` with the code of `A`, and `D` with evidence for both). Verified when the new tests fail and no other test does.
+- [x] 1.11 Make the evidence of a move half of both units' own tokens (D2). Also from the review: the before model of a file renamed from JavaScript drops its tokens' units, since it has no functions; the TypeScript token test covers a bound call. Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`.
+- [x] 1.12 Re-measure as in 1.5. Verified when every difference from 1.9 is explained, and the slowest run stays within 30 s.
+
 ## 2. Inlined functions (PR 2)
 
 - [ ] 2.1 Failing tests first:

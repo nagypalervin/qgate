@@ -80,6 +80,9 @@ analyzed for complexity, so code coming from it is new to the analysis.
 - Since `analyze` is given one family at a time, the spec's "Another
   language family" scenario is tested through the CLI
   (`tests/rust.rs`), not in `complexity.rs`.
+- The before version of a file renamed from JavaScript has imports and
+  tokens but no functions, so the CLI clears its tokens' units: a
+  `Token::unit` always points into its own model's functions.
 
 *Alternative:* a second pass over the per-file findings, which rewrites a
 `cyclomatic-new` finding once a removed match turns up. It would need the
@@ -101,9 +104,10 @@ own name. Each group is settled in two passes:
    fingerprint are matched when neither has another partner with that
    fingerprint in the group.
 2. **Code evidence.** Among the units the first pass left, an after
-   unit `A` and a removed unit `R` are partners when at least half of
-   `R`'s own tokens appear in order in `A`'s own tokens (the test of D3).
-   They are matched when neither has another partner.
+   unit `A` and a removed unit `R` are partners when the longest common
+   subsequence of their own tokens is at least half of `R`'s own tokens
+   and at least half of `A`'s. They are matched when neither has another
+   partner.
 
 The rest stay new or removed. A group of one after unit and one removed
 unit needs evidence too. A matched pair is then judged like a pair
@@ -122,6 +126,16 @@ compared, and a real new function reported as a small increase, or not
 at all. Angular lifecycle hooks, `Dispose`, `Handle` and `ToString`
 make this common. *Decided by Ervin on 2026-11-17*, on the review of
 PR 1, in place of matching a group of one and one without evidence.
+
+*Why half of both:* with half of `R` alone, a one-line `ngOnInit`
+removed from one component was evidence for any larger `ngOnInit` added
+to another that contained its few tokens, and that one was reported as
+an increase of its whole complexity, an Error where a new function is a
+Warning or nothing. Half of both bounds the size: a moved unit may
+change, and even double, but a unit more than twice as long as its
+namesake is new, as before this change. *Decided by Ervin on
+2026-11-17*, on the second review of PR 1. Inlining (below) keeps the
+share of `R` alone, since its credit is only `R`'s own decision points.
 
 *Why not more:* a heuristic that also matches renames would turn some
 real new functions into increases. The spec's "Renamed function" stays.
@@ -143,9 +157,10 @@ text does not change, so neither does duplication (it reads only
   its fingerprint, but their tokens, which come before the method in the
   class body, belong to no unit. A move keeps its decorators, so this
   only lowers the share of a unit that has many of them.
-- The in-order test is `has_evidence` in `complexity.rs`, over token
-  texts interned per analysis. It returns early when the after unit has
-  fewer than half as many tokens as the removed one.
+- The in-order test of a move is `shares_half` in `complexity.rs`,
+  over token texts interned per analysis, on top of `common_in_order`,
+  the subsequence length that inlining will use as well. It returns
+  early when one unit has more than twice as many tokens as the other.
 
 A removed unit `R` is inlined into a unit `U` when all of these hold:
 
@@ -218,13 +233,15 @@ Each one stands alone. After PR 1, inlining is still reported as today.
   same size. That is accepted: the code did not get more complex in
   total.
 - **A wrong move match.** Two functions with the same own name, one
-  removed and one added in the same change, are matched only when half
-  of the removed one's code is in the new one. A rewrite that keeps half
-  of the old code is then judged as an increase, with "moved from" in the
-  message, so a reader can see it.
-- **Run time of moves.** The in-order test runs only for units of one
-  own-name group that the fingerprint did not settle, usually one or two
-  pairs per group.
+  removed and one added in the same change, are matched only when they
+  share, in order, half of each one's code. A rewrite that keeps that
+  much of the old code is then judged as an increase, with "moved from"
+  in the message, so a reader can see it.
+- **Run time of moves.** The in-order test runs for every pair of an
+  own-name group that the fingerprint did not settle. Groups such as
+  `constructor`, `ngOnInit` or `Dispose()` can be large in a big pull
+  request, but pairs whose sizes differ more than twofold are skipped
+  without the test. The re-measurement checks the time.
 - **`Token` gains a field.** `Token` is a public type of `qgate-lang`,
   and code that builds it literally must add the field. The only users
   are in this workspace.
@@ -264,3 +281,11 @@ passes the evidence test, though its fingerprint changed with its
 modifiers. The 326 findings of the other rules are byte-identical.
 Slowest runs: server 8812 6.8 s, server 8874 6.6 s, server 8865 6.5 s,
 server 8854 6.5 s and server 8871 6.5 s.
+
+**PR 1 with the evidence counted both ways (task 1.12), 2026-11-17.**
+All 150 reports parsed. No difference from 1.9: against 0.9.0, SV19
+gone and the other 61 complexity findings the same; the 326 findings of
+the other rules byte-identical. Slowest runs: server 8812 7.2 s, server
+8822 6.8 s, server 8781 6.8 s, server 8884 6.8 s and server 8813 6.7 s.
+The reviewer's reproduction (a one-line `ngOnInit` removed, a 14 added)
+now reports a new function, as 0.9.0 does.

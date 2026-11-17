@@ -169,7 +169,7 @@ impl<'a> Unit<'a> {
 /// Pair unmatched after units with removed units of the same own name
 /// (design D2), in two passes over each group: first units with the same
 /// code (fingerprint), then, among the rest, units with code evidence
-/// ([`has_evidence`]).
+/// ([`shares_half`]).
 fn moves<'a, K: Copy>(unmatched: &[(K, Unit<'a>)], removed: &[Unit<'a>]) -> Vec<(K, Unit<'a>)> {
     let mut groups: BTreeMap<&str, Group<'a, K>> = BTreeMap::new();
     for &(key, unit) in unmatched {
@@ -206,7 +206,7 @@ fn moves<'a, K: Copy>(unmatched: &[(K, Unit<'a>)], removed: &[Unit<'a>]) -> Vec<
         settle(
             &mut new,
             &mut old,
-            |i, j| has_evidence(&old_tokens[j], &new_tokens[i]),
+            |i, j| shares_half(&old_tokens[j], &new_tokens[i]),
             &mut pairs,
         );
     }
@@ -248,21 +248,27 @@ fn settle<'a, K: Copy>(
     old.retain(|_| keep.next().unwrap_or(true));
 }
 
-/// Whether at least half of the `removed` unit's tokens appear in order
-/// in the `after` unit's (design D2): the length of their longest common
-/// subsequence, by one row of dynamic programming, in O(|removed|·|after|)
-/// time. A unit without tokens is no evidence.
-fn has_evidence(removed: &[usize], after: &[usize]) -> bool {
-    if removed.is_empty() || 2 * after.len() < removed.len() {
-        return false;
-    }
-    // row[j]: the longest common subsequence of the removed tokens so far
-    // and after[..j].
-    let mut row = vec![0usize; after.len() + 1];
-    for &token in removed {
+/// Whether the tokens of `a` and `b` have a common subsequence of at
+/// least half of each one's length: the evidence of a move (design D2).
+/// A unit without tokens is no evidence, nor is one more than twice as
+/// long as the other, which is checked before the subsequence.
+fn shares_half(a: &[usize], b: &[usize]) -> bool {
+    let (shorter, longer) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+    !shorter.is_empty()
+        && 2 * shorter.len() >= longer.len()
+        && 2 * common_in_order(longer, shorter) >= longer.len()
+}
+
+/// The length of the longest common subsequence of `a` and `b`, by one
+/// row of dynamic programming, in O(|a|·|b|) time and O(|b|) memory.
+fn common_in_order(a: &[usize], b: &[usize]) -> usize {
+    // row[j]: the longest common subsequence of the tokens of `a` so far
+    // and b[..j].
+    let mut row = vec![0usize; b.len() + 1];
+    for &token in a {
         // The previous row's row[j], while row[j] is being overwritten.
         let mut diagonal = 0;
-        for (j, &other) in after.iter().enumerate() {
+        for (j, &other) in b.iter().enumerate() {
             let above = row[j + 1];
             row[j + 1] = if token == other {
                 diagonal + 1
@@ -272,7 +278,7 @@ fn has_evidence(removed: &[usize], after: &[usize]) -> bool {
             diagonal = above;
         }
     }
-    2 * row[after.len()] >= removed.len()
+    row[b.len()]
 }
 
 /// The own name of a unit: the last segment of its qualified name, after
@@ -684,17 +690,64 @@ mod tests {
         assert_eq!(findings, vec![expected]);
     }
 
-    // Design D2: the evidence of a move, at least half of the removed
-    // unit's tokens in order in the after unit.
+    // Design D2: the evidence of a move, a common subsequence of at
+    // least half of each unit's tokens.
     #[test]
-    fn evidence_is_half_of_the_removed_tokens_in_order() {
-        assert!(has_evidence(&[1, 2, 3, 4], &[9, 1, 9, 2, 9]));
-        assert!(has_evidence(&[1, 2, 3], &[1, 2]));
-        assert!(has_evidence(&[1, 2, 3, 4], &[1, 2, 3, 4, 5, 6, 7, 8, 9]));
-        assert!(!has_evidence(&[1, 2, 3, 4], &[4, 3, 2, 1]));
-        assert!(!has_evidence(&[1, 2, 3], &[3, 9, 9]));
-        assert!(!has_evidence(&[], &[1, 2]));
-        assert!(!has_evidence(&[1, 2], &[]));
+    fn evidence_is_half_of_both_units_tokens_in_order() {
+        assert_eq!(common_in_order(&[1, 2, 3, 4], &[9, 1, 9, 2, 9]), 2);
+        assert_eq!(common_in_order(&[1, 2, 3, 4], &[4, 3, 2, 1]), 1);
+        assert_eq!(common_in_order(&[], &[1]), 0);
+        assert!(shares_half(&[1, 2, 3, 4], &[1, 2, 9, 9]));
+        assert!(shares_half(&[1, 2, 3], &[1, 2, 3, 4, 5, 6]));
+        assert!(shares_half(&[1, 2, 3, 4, 5, 6], &[1, 2, 3]));
+        // A short removed namesake is no evidence for a long after unit,
+        // and the other way round.
+        assert!(!shares_half(&[1, 2], &[1, 2, 3, 4, 5]));
+        assert!(!shares_half(&[1, 2, 3, 4, 5], &[1, 2]));
+        assert!(!shares_half(&[1, 2, 3, 4], &[9, 1, 9, 2, 9]));
+        assert!(!shares_half(&[1, 2, 3, 4], &[4, 3, 2, 1]));
+        assert!(!shares_half(&[], &[]));
+        assert!(!shares_half(&[1, 2], &[]));
+    }
+
+    // complexity-analysis: "Short removed namesake". A one-line removed
+    // `ngOnInit` is no evidence for a long new one that contains it.
+    #[test]
+    fn short_removed_namesake_is_no_evidence() {
+        let findings = run_files(
+            Language::TypeScript,
+            &[
+                (
+                    "src/a.component.ts",
+                    Some(moved!("short", "before/a.component.ts")),
+                    None,
+                ),
+                (
+                    "src/b.component.ts",
+                    None,
+                    Some(moved!("short", "after/b.component.ts")),
+                ),
+            ],
+        );
+        let mut expected = new(Severity::Warning, "BComponent.ngOnInit", 2, 14);
+        expected.location.path = "src/b.component.ts".into();
+        assert_eq!(findings, vec![expected]);
+    }
+
+    // Design D2: the second pass sees only what the first left. `C.load`
+    // has the code of `A.load`; `D.load` has evidence for both `A.load`
+    // and `B.load`, so it pairs with `B.load` only once `A.load` is taken.
+    #[test]
+    fn evidence_only_settles_what_the_same_code_left() {
+        let mut files = vec![
+            ("src/a.ts", Some(moved!("ambiguous", "before/a.ts")), None),
+            ("src/b.ts", Some(moved!("ambiguous", "before/b.ts")), None),
+            ("src/c.ts", None, Some(moved!("leftovers", "after/c.ts"))),
+            ("src/d.ts", None, Some(moved!("leftovers", "after/d.ts"))),
+        ];
+        assert_eq!(run_files(Language::TypeScript, &files), vec![]);
+        files.reverse();
+        assert_eq!(run_files(Language::TypeScript, &files), vec![]);
     }
 
     // complexity-analysis: "Ambiguous own name".
