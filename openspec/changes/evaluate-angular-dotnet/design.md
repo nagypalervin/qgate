@@ -291,6 +291,19 @@ Two things are Ervin's to decide:
   blocking, a team needs either a way to accept a finding or the rule
   that such a pull request is merged with an override.
 
+Decided by Ervin on 2026-11-17:
+- **The complexity fix comes first,** since it removes the only false
+  Error. The duplication fix follows.
+- **The comment rate is judged on the partner's pull requests.** No
+  third change now: week 1 of the pilot measures the rate on the
+  partner's last 50 pull requests, and only a rate above about 1 in 3
+  there leads to quieter rules.
+- **Accepting a known violation goes into the pilot plan (D6)** as a
+  condition of the switch to blocking, not into a change now.
+
+This change waits, as Gate 1 agreed: after both fixes, the second
+measurement goes into this section, then tasks 3.2 and 3.3 follow.
+
 ## Risks / Trade-offs
 
 - **[The stand-ins are not the partner's code]** → they share the stack
