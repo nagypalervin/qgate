@@ -27,6 +27,7 @@ def main():
     only = set(sys.argv[6:])
     with open(listing) as f:
         rows = [r for r in csv.DictReader(f, delimiter="\t") if not only or r["commit"] in only]
+    os.makedirs(out, exist_ok=True)
     runs = os.path.join(out, "runs.tsv")
     new = not os.path.exists(runs)
     with open(runs, "a") as log:
