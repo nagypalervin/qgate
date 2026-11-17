@@ -14,7 +14,9 @@ use std::hash::Hash;
 
 use tree_sitter::Node;
 
-use crate::common::{Mark, Tokens, Units, Visit, compact, line_of, node_text, run};
+use crate::common::{
+    Mark, Tokens, Units, Visit, compact, line_of, named_children, node_text, run, walk,
+};
 use crate::{FileModel, ParseError};
 
 /// Parse Rust source into a [`FileModel`].
@@ -96,10 +98,10 @@ impl Visit for Walker<'_> {
             "impl_item" => {
                 let ty = node
                     .child_by_field_name("type")
-                    .map(|t| compact(&self.text(t)))
+                    .map(|t| type_name(t, self.source))
                     .unwrap_or_default();
                 let segment = match node.child_by_field_name("trait") {
-                    Some(t) => format!("<{ty} as {}>", compact(&self.text(t))),
+                    Some(t) => format!("<{ty} as {}>", type_name(t, self.source)),
                     None => ty,
                 };
                 self.units.push_segment(segment);
@@ -193,6 +195,97 @@ impl<'s> Walker<'s> {
     fn text(&self, node: Node<'_>) -> String {
         node_text(node, self.source)
     }
+}
+
+/// How an `impl`'s type or trait appears in a unit's name (design D2 of
+/// `rust-names-without-lifetimes`): its tokens as written, without
+/// whitespace, comments and lifetimes. The `,` or `+` that set a lifetime
+/// apart leaves with it, and so do a `<>` and a `for<>` that held only
+/// lifetimes.
+fn type_name(node: Node<'_>, source: &[u8]) -> String {
+    let mut name = TypeName {
+        source,
+        text: String::new(),
+        skip: false,
+    };
+    walk(node, &mut name);
+    compact(&name.text)
+}
+
+/// The walk of [`type_name`]: leaves and literals are written down, with
+/// a space between them that `compact` removes again where no two words
+/// meet.
+struct TypeName<'s> {
+    source: &'s [u8],
+    text: String,
+    /// Whether the node just entered is left out, with all below it.
+    skip: bool,
+}
+
+impl Visit for TypeName<'_> {
+    type Frame = ();
+
+    fn enter(&mut self, node: Node<'_>, ancestors: &[Node<'_>]) {
+        self.skip = left_out_of_name(node, ancestors.last().copied());
+        if !self.skip && (node.child_count() == 0 || node.kind().ends_with("_literal")) {
+            self.text.push_str(&node_text(node, self.source));
+            self.text.push(' ');
+        }
+    }
+
+    fn leave(&mut self, (): ()) {}
+
+    fn descend(&mut self, node: Node<'_>) -> bool {
+        !self.skip && !node.kind().ends_with("_literal")
+    }
+}
+
+/// Whether `node` stays out of a type's name: a lifetime, a comment, the
+/// separator of a lifetime, and the `<>` or `for<>` that only lifetimes
+/// filled.
+fn left_out_of_name(node: Node<'_>, parent: Option<Node<'_>>) -> bool {
+    match node.kind() {
+        "lifetime" | "lifetime_parameter" | "for_lifetimes" => true,
+        _ if node.is_extra() => true,
+        "type_arguments" | "type_parameters" => only_lifetimes(node),
+        // A lifetime takes the separator after it, or the one before it
+        // if it is the last in its list.
+        "," | "+" => {
+            sibling(node, Node::prev_sibling).is_some_and(is_lifetime)
+                || sibling(node, Node::next_sibling).is_some_and(|next| {
+                    is_lifetime(next)
+                        && !sibling(next, Node::next_sibling)
+                            .is_some_and(|after| matches!(after.kind(), "," | "+"))
+                })
+        }
+        "for" => parent.is_some_and(|p| {
+            p.kind() == "higher_ranked_trait_bound"
+                && p.child_by_field_name("type_parameters")
+                    .is_some_and(only_lifetimes)
+        }),
+        _ => false,
+    }
+}
+
+fn is_lifetime(node: Node<'_>) -> bool {
+    matches!(node.kind(), "lifetime" | "lifetime_parameter")
+}
+
+/// Whether a list of arguments or parameters holds nothing but lifetimes.
+fn only_lifetimes(list: Node<'_>) -> bool {
+    named_children(list)
+        .into_iter()
+        .filter(|c| !c.is_extra())
+        .all(is_lifetime)
+}
+
+/// The sibling of `node` in direction `step`, past comments.
+fn sibling<'t>(node: Node<'t>, step: fn(&Node<'t>) -> Option<Node<'t>>) -> Option<Node<'t>> {
+    let mut next = step(&node);
+    while let Some(n) = next.filter(Node::is_extra) {
+        next = step(&n);
+    }
+    next
 }
 
 /// Subtrees that produce no tokens: those of [`NO_TOKEN_KINDS`], a module
@@ -308,11 +401,11 @@ mod tests {
                 ("shop.Cart.total", 47),
                 ("shop.<Cart as fmt::Display>.fmt", 53),
                 ("shop.<Cart as fmt::Debug>.fmt", 59),
-                // types and traits as written, without whitespace
+                // types and traits as written, without whitespace and lifetimes
                 ("Stack<T>.push", 66),
                 ("<Id as From<u8>>.from", 70),
                 ("<Id as From<HashMap<String,u32>>>.from", 76),
-                ("Parser<'a>.parse", 82),
+                ("Parser.parse", 82),
                 ("<&Cart as Total>.total", 88),
                 ("<Vec<T> as Total>.sum", 97),
                 ("outer", 102),
@@ -325,6 +418,59 @@ mod tests {
                 ("tests.adds_two", 134),
                 ("tests.deeper.helper", 137),
             ])
+        );
+    }
+
+    fn names_only(source: &str) -> Vec<String> {
+        names(source).into_iter().map(|(n, _)| n).collect()
+    }
+
+    // Requirement: Rust qualified names; scenarios "Lifetimes are not
+    // part of the name" and "A comment inside a type".
+    #[test]
+    fn lifetimes_and_comments_are_not_part_of_a_name() {
+        let source = "impl<'s> Walker<'s> { fn step(&mut self) {} }\n\
+                      impl Walker<'_> { fn stop(&mut self) {} }\n\
+                      impl<'a, T> Pair<'a, T> { fn first(&self) {} }\n\
+                      impl<'a> From<&'a str> for Id<'a> { fn from(v: &'a str) -> Self { Id(v) } }\n\
+                      impl Show for Box<dyn Fn() + 'static> { fn show(&self) {} }\n\
+                      impl Stack</* item */ T> { fn push(&mut self, x: T) {} }\n";
+        assert_eq!(
+            names_only(source),
+            [
+                "Walker.step",
+                "Walker.stop",
+                "Pair<T>.first",
+                "<Id as From<&str>>.from",
+                "<Box<dyn Fn()> as Show>.show",
+                "Stack<T>.push",
+            ]
+        );
+    }
+
+    // Design D2 of `rust-names-without-lifetimes`: only lifetimes leave a
+    // name; a char argument, `mut`, `dyn` and higher-ranked types keep
+    // the rest of their text.
+    #[test]
+    fn only_lifetimes_leave_a_name() {
+        let source = "impl Code<'x'> { fn a(&self) {} }\n\
+                      impl<'a> Run for &'a mut dyn Fn(&'a str) { fn b(&self) {} }\n\
+                      impl Run for for<'a> fn(&'a str) { fn c(&self) {} }\n\
+                      impl<'a, 'b: 'a> Two<'a, 'b, u8> { fn d(&self) {} }\n\
+                      impl Run for Box<dyn for<'a> Fn(&'a str)> { fn e(&self) {} }\n\
+                      impl<'a> Three<T, 'a /* c */, U> { fn f(&self) {} }\n\
+                      impl<'a> Run for Box<dyn Fn() + 'a + Send> { fn g(&self) {} }\n";
+        assert_eq!(
+            names_only(source),
+            [
+                "Code<'x'>.a",
+                "<&mut dyn Fn(&str) as Run>.b",
+                "<fn(&str) as Run>.c",
+                "Two<u8>.d",
+                "<Box<dyn Fn(&str)> as Run>.e",
+                "Three<T,U>.f",
+                "<Box<dyn Fn()+Send> as Run>.g",
+            ]
         );
     }
 

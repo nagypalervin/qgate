@@ -92,9 +92,25 @@ for the same type and trait, so this only matters for code under
 - **[A grammar node kind we did not list holds a lifetime]** →
   verification: the replay over the merges of `main`, run with the
   binary before and after, may differ only in unit names that contained
-  `'`. A test also scans every unit name of qgate's own source for `'`.
+  `'`. Task 3.2 also checks every unit name of qgate's own source for `'`.
 
 ## Migration Plan
 
 None. qgate keeps no state between runs. The change ships with the next
 release.
+
+## While coding
+
+- **The type is walked with the shared `walk`, not by recursion.** A
+  type can nest as deeply as the source likes, and the adapters keep the
+  stack flat (`share-adapter-walker`). A small `Visit` writes down the
+  leaves; whether a separator or a `for` stays out is decided from its
+  neighbours and its parent, so the walk needs no second pass.
+- **A literal is written as one piece.** A `char_literal` or
+  `string_literal` (a const-generic argument) is not entered, so its
+  quotes and escapes stay as written: `Code<'x'>` keeps its `'x'`.
+- **`lifetime_parameter` counts as a lifetime.** It appears in the
+  `for<'a>` of a `dyn for<'a> Fn(&'a str)`, which tree-sitter-rust reads
+  as a `higher_ranked_trait_bound` with `type_parameters`, not as
+  `for_lifetimes`. When those parameters are all lifetimes, the `for`
+  goes with them: `Box<dyn Fn(&str)>`.
