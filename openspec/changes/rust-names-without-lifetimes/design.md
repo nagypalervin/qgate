@@ -114,3 +114,23 @@ release.
   as a `higher_ranked_trait_bound` with `type_parameters`, not as
   `for_lifetimes`. When those parameters are all lifetimes, the `for`
   goes with them: `Box<dyn Fn(&str)>`.
+
+## Verification
+
+- **Replay over the 56 merges of `main`** (task 3.1), with the release
+  binaries of `main` and of the branch: 234 findings either way. 16
+  findings in 8 merges differ only in their message, by a unit name that
+  lost its lifetime (`Walker<'s>.enter` → `Walker.enter`,
+  `Conventions<'a>.new` → `Conventions.new`,
+  `<Walker<'_> as Visit>.enter` → `<Walker as Visit>.enter`). No finding
+  appeared or disappeared, and nothing else changed.
+- **Why no finding disappeared:** the one rename that motivated the
+  change, the split `impl` of `share-adapter-walker`, was undone before
+  that pull request merged. So the history holds no lifetime rename for
+  the replay to show. The CLI test of task 2.3 covers it: with the old
+  naming it fails with `Walker<'_>.step: new function, cyclomatic
+  complexity 11`.
+- **qgate's own source** (task 3.2), parsed with the branch's library:
+  1253 units in the 41 Rust files outside `fixtures/`. No name contains
+  `'`, and no name needed a `#2` suffix. The Rust fixtures have no name
+  with `'` either.

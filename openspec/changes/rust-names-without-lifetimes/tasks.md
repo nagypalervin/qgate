@@ -22,9 +22,9 @@ written to files first.
 
 ## 3. Proof
 
-- [ ] 3.1 Replay with the branch's release binary, compared with the baseline from 1.1 (design, Risks). Verified when every difference is in a unit name that contained `'` on `main`, or is a finding that disappeared because of such a name. The differences are counted in "Verification" of `design.md`.
-- [ ] 3.2 Analyze qgate's own source with the branch's binary. Verified when no unit name contains `'`. The result is recorded in "Verification" of `design.md`.
-- [ ] 3.3 The journal entry for the change.
+- [x] 3.1 Replay with the branch's release binary, compared with the baseline from 1.1 (design, Risks). Verified when every difference is in a unit name that contained `'` on `main`, or is a finding that disappeared because of such a name. The differences are counted in "Verification" of `design.md`.
+- [x] 3.2 Analyze qgate's own source with the branch's binary. Verified when no unit name contains `'`. The result is recorded in "Verification" of `design.md`.
+- [x] 3.3 The journal entry for the change.
 
 ## Workflow follow-up
 
