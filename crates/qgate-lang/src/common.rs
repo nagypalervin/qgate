@@ -71,6 +71,26 @@ pub(crate) fn line_of(node: Node<'_>) -> u32 {
     u32::try_from(node.start_position().row + 1).unwrap_or(u32::MAX)
 }
 
+/// One hash per line of `source`, for [`FileModel::lines`]: FNV-1a of the
+/// trimmed text, 0 for an empty line. Lines end at `\n`, like the rows
+/// of tree-sitter, and a `\r` before it is dropped. Trimming removes
+/// Unicode white space and a byte order mark, which editors add or drop
+/// without a change to the code.
+pub(crate) fn line_hashes(source: &str) -> Vec<u64> {
+    source
+        .lines()
+        .map(|line| {
+            let line = line.trim_matches(|c: char| c.is_whitespace() || u32::from(c) == 0xFEFF);
+            if line.is_empty() {
+                return 0;
+            }
+            line.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+            })
+        })
+        .collect()
+}
+
 /// The named children of a node.
 pub(crate) fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
     let mut cursor = node.walk();

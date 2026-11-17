@@ -107,6 +107,8 @@ impl From<Walker<'_>> for FileModel {
             imports: Vec::new(),
             usings: walker.usings,
             tokens: walker.tokens.finish(),
+            // Set by `parse`, from the source.
+            lines: Vec::new(),
         }
     }
 }
