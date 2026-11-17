@@ -179,13 +179,17 @@ memory. The added code needs the alignment itself: after the common
 start and end are cut off, one bit per pair of the middle's tokens
 records the choice, so the middle of a function of 3,000 tokens with as
 many before takes about a megabyte. Above 2^26 pairs (8 MiB of bits)
-the unit gets no credit at all.
+the unit gets no credit at all. The subsequence of `R` and the added code
+has the same limit: when their sizes multiply to more than 2^26, the
+pair is not compared and not credited.
 
 Pairing is one to one: a grown unit takes at most one removed unit, and
 a removed unit goes to at most one grown unit. Of all the pairs that
 pass the test, the one with the longest common subsequence is taken
 first; ties go to the first `U` by path, then by line, then to the first
-`R` in the same order. `U`'s *credited before* is its before value plus
+`R` in the order of the removed units: those of changed files by path,
+then those of deleted files by path, each by position. `U`'s *credited
+before* is its before value plus
 (complexity − 1) of the unit credited to it. A finding is reported
 only when the after value exceeds the credited before. Its severity
 comes from that growth: 1 to 4 is a Warning, 5 or more an Error.
@@ -206,8 +210,10 @@ comes from that growth: 1 to 4 is a Warning, 5 or more an Error.
   removed unit) and takes them greedily, each side once.
 - `added` cuts off the common start and end, then aligns the middle. On
   a tie it keeps the after token in the alignment and drops the before
-  one, so the added tokens are the latest ones that could be; `outside`
-  traces the alignment back. It returns nothing above 2^26 pairs.
+  one, so within the middle the added tokens are the latest ones that
+  could be (a token matched through the common end stays matched);
+  `outside` traces the alignment back. It returns nothing above 2^26
+  pairs, and `evidence` refuses a pair above 2^26 as well.
 - `increase` takes the credited unit: growth is the real delta minus
   its (complexity − 1). No growth, no finding.
 - Tests: CL11's shape behind a feature flag (no finding), the same with
@@ -219,15 +225,24 @@ comes from that growth: 1 to 4 is a Warning, 5 or more an Error.
   (no name in the message), two grown units inlining one helper, one
   grown unit with two alike removed units (only one is credited), a
   moved unit that also inlined code, a moved unit that is not taken as
-  inlined, `added` on its own with its ties, and its limit. Matching
+  inlined, `added` on its own with its ties, its limit (also through
+  the analyzer, for a long function changed at both ends) and the limit
+  of `evidence` (also through the analyzer, for a very long inlined
+  function). Matching
   against the whole after version, the removed side alone, half both
   ways, crediting every qualifying unit, crediting several units to one
   grown unit, crediting one removed unit to several, taking a pair other
-  than the longest first, crediting units without decision points, no
-  limit and dropping the sort each fail a test. Two mutants survive and
-  are equivalent: without the skip of a grown unit by size (the pair
-  test rejects the same pairs) and with the sort by removed unit before
-  grown unit (the fixtures have no such tie).
+  than the longest first, crediting units without decision points,
+  either limit left out, a tie that keeps the before token and dropping
+  the sort each fail a test. Three mutants survive and are equivalent:
+  without the skip of a grown unit by size (the pair test rejects the
+  same pairs); with the sort by removed unit before grown unit (the
+  reviewer's brute force over every candidate graph of 3×3 and 4×4 found
+  no case where the pairs differ); and taking the whole after version
+  when `added` refuses (to reach two thirds of it, the removed unit
+  must be twice the middle of more than 8,192 tokens, so `evidence`
+  refuses the pair). The boundary of the limit, 2^26 pairs exactly, is
+  not pinned: a test would align 2^26 pairs.
 - A short removed function rarely qualifies: its signature and the
   lines around its body are own tokens that do not come along when it
   is inlined. That is the cautious side too.
@@ -266,9 +281,11 @@ only one of them were both credited, and the growth from the second
 went silent. One to one credits only what one body can hold, and the
 longest pair first keeps CL11 credited when `decryptManyV1` also comes
 close. The reviewer timed a function of 12,000 lines changed at both
-ends: 33.6 s for the alignment alone, over the 30-second budget. With
-the limit such a unit is reported in full, the cautious side; no
-function of the 150 pull requests comes near it.
+ends: 33.6 s for the alignment alone, over the 30-second budget, and
+on the second review a helper of 12,000 lines inlined into a short
+function: 15.5 s for its subsequence with the added code. With the
+limit such a unit is reported in full, the cautious side; no function of
+the 150 pull requests comes near it.
 
 *Why own tokens:* complexity is counted on own code, so the evidence
 should be the same code. With an end line, nested named units would get

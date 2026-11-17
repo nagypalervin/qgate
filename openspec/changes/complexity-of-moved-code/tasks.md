@@ -51,7 +51,7 @@ From the re-measurement of PR 2 (Ervin's decision of 2026-11-17, D3):
 
 From the review of PR 2 (Ervin's decision of 2026-11-17, D3):
 
-- [x] 2.5 Pair inlined units one to one, the longest common subsequence first, and give no credit above 2^26 pairs of tokens in the alignment of the added code (D3). Tests: two grown units inlining one helper, one grown unit with two alike removed units, a moved unit that also inlined code, a moved unit not taken as inlined, the ties and the limit of `added`. Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`, and the re-measurement of 3.1 is repeated.
+- [x] 2.5 Pair inlined units one to one, the longest common subsequence first, and give no credit above 2^26 pairs of tokens in the alignment of the added code, nor in the subsequence of a removed unit and that code (D3). Tests: two grown units inlining one helper, one grown unit with two alike removed units, a moved unit that also inlined code, a moved unit not taken as inlined, the ties and the limit of `added` (also through the analyzer), the limit of `evidence` (also through the analyzer). Verified when `cargo test --workspace` passes, along with `cargo fmt` and `clippy -D warnings`, and the re-measurement of 3.1 is repeated.
 
 ## 3. Proof
 

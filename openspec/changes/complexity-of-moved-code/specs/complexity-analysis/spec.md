@@ -124,7 +124,8 @@ complex SHALL have its complexity minus 1 added to that unit's before
 value for the severity. When the after value does not exceed that sum,
 no finding SHALL be reported. A removed unit SHALL count as inlined into
 at most one unit, and at most one removed unit SHALL count as inlined
-into a unit; the pairs with the longest shared code are taken first.
+into a unit; the pairs with the longest shared code are taken first,
+and of two alike removed units in one file, the earlier one.
 
 #### Scenario: Inlined behind a feature flag
 
@@ -172,15 +173,22 @@ before version.
 - **WHEN** the head revision removes `helper`, and `process` now holds `helper`'s code and three more `if` statements of other code, which make up more than a third of the code added to `process`, with complexity 12
 - **THEN** an Error `complexity/cyclomatic-increase` finding is reported for `process`, from 3 to 12 (+9)
 
-### Requirement: Limit of the added code
+### Requirement: Limit of the alignment
 
 A matched unit whose before and after own tokens, without their common
 start and end, form more than 2^26 pairs SHALL NOT be credited with an
-inlined unit, so the time and memory of finding its added code stay
-bounded.
+inlined unit. A removed unit whose own tokens form more than 2^26 pairs
+with the code added to a matched unit SHALL NOT be credited to it. The
+time and memory of the evidence stay bounded.
 
 #### Scenario: A long function changed at both ends
 
 - **GIVEN** a matched unit whose before and after versions differ from their first changed token to their last over more than 8,192 tokens each
 - **WHEN** the head revision also removes a unit whose code it gained
 - **THEN** nothing is credited, and the unit's increase is reported in full
+
+#### Scenario: A very long inlined function
+
+- **GIVEN** a removed unit of more than 8,192 own tokens
+- **WHEN** the head revision removes it and adds its code, and nothing else, to a matched unit
+- **THEN** the removed unit is not credited, and the matched unit's increase is reported in full

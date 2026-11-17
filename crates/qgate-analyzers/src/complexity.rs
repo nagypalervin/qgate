@@ -200,11 +200,11 @@ fn candidates<'a>(
 
 /// The length of the longest common subsequence of a removed unit's own
 /// `tokens` and the `added` code of a grown unit, if it is two thirds of
-/// both (design D3).
+/// both (design D3). `None` above [`ALIGNED_PAIRS`] pairs of tokens.
 fn evidence(tokens: &[usize], added: &[usize]) -> Option<usize> {
     let (short, long) = (tokens.len().min(added.len()), tokens.len().max(added.len()));
     // Two thirds of both needs sizes within a factor of 3/2.
-    if 3 * short < 2 * long {
+    if 3 * short < 2 * long || short.saturating_mul(long) > ALIGNED_PAIRS {
         return None;
     }
     let common = common_in_order(tokens, added);
@@ -230,16 +230,16 @@ fn grown<'a>(
     grown
 }
 
-/// The largest number of token pairs [`added`] aligns: 2^26 bits, 8 MiB
-/// (design D3).
+/// The largest number of token pairs [`added`] aligns (2^26 bits, 8 MiB)
+/// and [`evidence`] compares (design D3).
 const ALIGNED_PAIRS: usize = 1 << 26;
 
 /// The tokens of `after` outside a longest common subsequence with
 /// `before`: the code a change added to a unit (design D3). The common
 /// start and end are cut off first; for the middle, one bit per pair of
 /// tokens records the choice of the dynamic programming, and a tie keeps
-/// the `after` token, so added tokens come as late as they can. `None`
-/// when the middle has more than [`ALIGNED_PAIRS`] pairs.
+/// the `after` token, so within the middle added tokens come as late as
+/// they can. `None` when the middle has more than [`ALIGNED_PAIRS`] pairs.
 fn added(before: &[usize], after: &[usize]) -> Option<Vec<usize>> {
     let start = before.iter().zip(after).take_while(|(b, a)| b == a).count();
     let (before, after) = (&before[start..], &after[start..]);
@@ -1298,6 +1298,8 @@ mod tests {
         // A tie keeps the after token: of the two `1`s, the later is added.
         assert_eq!(added(&[1], &[1, 1]), vec![1]);
         assert_eq!(added(&[2, 1, 3], &[2, 1, 4, 1, 3]), vec![4, 1]);
+        // A tie in the middle: matching `2` rather than `1` adds the `1`.
+        assert_eq!(added(&[1, 2], &[3, 2, 1, 3]), vec![3, 1, 3]);
     }
 
     // Design D3: above 2^26 pairs of tokens, the alignment is not made,
@@ -1308,11 +1310,72 @@ mod tests {
         let before: Vec<usize> = (0..8193).collect();
         let after: Vec<usize> = (1..8194).collect();
         assert_eq!(added(&before, &after), None);
-        let mut wrapped = vec![9; 100_000];
-        wrapped.extend(&after[..10]);
-        let mut around = vec![9; 100_000];
-        around.extend(&before[..10]);
+        let mark = vec![usize::MAX; 100_000];
+        let wrapped = [&mark[..], &after[..10], &mark[..]].concat();
+        let around = [&mark[..], &before[..10], &mark[..]].concat();
         assert_eq!(added(&around, &wrapped), Some(vec![10]));
+    }
+
+    // Design D3: above 2^26 pairs of tokens, a removed unit and the added
+    // code are not compared, so the pair is not credited.
+    #[test]
+    fn evidence_has_a_limit() {
+        assert_eq!(evidence(&[1, 2, 3], &[1, 2, 3]), Some(3));
+        let long = vec![1; 8193];
+        assert_eq!(evidence(&long, &long), None);
+    }
+
+    // Design D3: a removed unit of more than 8,192 own tokens is not
+    // compared with the code added to a unit, so it is not credited, and
+    // the increase is reported in full.
+    #[test]
+    fn a_very_long_inlined_function() {
+        let helper = format!(
+            "{}{}",
+            checks(&["alpha", "beta", "gamma", "delta", "epsilon"]),
+            "    out.push(input.x);\n".repeat(1200)
+        );
+        let start = "    if (input.empty) { return out; }\n";
+        let before = format!(
+            "export class Job {{\n{}\n{}}}\n",
+            method("process", start),
+            method("helper", &helper)
+        );
+        let after = format!(
+            "export class Job {{\n{}}}\n",
+            method("process", &format!("{start}{helper}"))
+        );
+        assert_eq!(
+            run(&before, &after),
+            vec![increase(Severity::Error, "Job.process", 2, 2, 7)]
+        );
+    }
+
+    // Design D3: a unit whose two versions differ at both ends of more
+    // than 8,192 tokens is not aligned, so the helper it inlined is not
+    // credited and its increase is reported in full.
+    #[test]
+    fn a_long_function_changed_at_both_ends() {
+        let helper = checks(&["alpha", "beta", "gamma", "delta", "epsilon"]);
+        let body = "    out.push(input.x);\n".repeat(1200);
+        let process = |first: &str, middle: &str, last: &str| {
+            let first = format!("    if (input.{first}) {{ return out; }}\n");
+            let last = format!("    if (input.{last}) {{ return out; }}\n");
+            method("process", &format!("{first}{middle}{last}"))
+        };
+        let before = format!(
+            "export class Job {{\n{}\n{}}}\n",
+            process("first", &body, "last"),
+            method("helper", &helper)
+        );
+        let after = format!(
+            "export class Job {{\n{}}}\n",
+            process("start", &format!("{body}{helper}"), "end")
+        );
+        assert_eq!(
+            run(&before, &after),
+            vec![increase(Severity::Error, "Job.process", 2, 3, 8)]
+        );
     }
 
     // Design D2: the split at the last `.` outside brackets.

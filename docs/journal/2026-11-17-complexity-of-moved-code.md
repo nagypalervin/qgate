@@ -19,8 +19,9 @@
   the 150 removes two alike helpers next to one grown function, yet the
   reviewer built that case: both were credited and the second one's
   growth went silent. It also timed a 12,000-line function changed at
-  both ends at 33.6 s. One-to-one pairing and a limit on the alignment
-  fixed both, and the replay came out the same.
+  both ends at 33.6 s, and on the next round a 12,000-line helper
+  inlined at 15.5 s. One-to-one pairing and a limit on both alignments
+  fixed them, and the replay came out the same.
 - **One change, two pull requests, the same verdict.** After both, the
   150 reports differ from 0.9.0 in exactly the two findings the
   evaluation named (SV19, CL11); the other 60 complexity findings and 326
@@ -49,7 +50,7 @@
   the cautious side.
 
 **Effort:** a long day; 2 PRs, about 10 commits, the replay run seven
-times plus four diagnostic runs, four review rounds.
+times plus four diagnostic runs, five review rounds.
 
 **Blog idea:** "The fixture passed, the replay didn't." A rule written
 from one real incident (CL11) fit its own fixtures and still fired on
