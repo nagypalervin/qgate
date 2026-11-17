@@ -327,9 +327,10 @@ only the implementation is measured.
 
 ### Requirement: Matching functions between versions
 
-The system SHALL match a unit in the before file with the unit of the same
-qualified name in the after file. A unit with no match in the before file is
-new; a unit with no match in the after file is removed.
+The system SHALL match a unit in the after file with the unit of the same
+qualified name in the before file. A unit with no such match SHALL be
+matched as a moved unit where "Moved functions" allows it; otherwise it
+is new. A unit in the before file that is matched by neither is removed.
 
 #### Scenario: Renamed function
 
@@ -408,3 +409,167 @@ unit.
 
 - **WHEN** a new function `buildInvoice` with complexity 14 is named on line 120
 - **THEN** the finding points to line 120 with message `buildInvoice: new function, cyclomatic complexity 14`
+
+### Requirement: Moved functions
+
+Units without a match by qualified name SHALL be grouped by own name,
+the last segment of the qualified name (for C#, with its parameter
+types), across one language family's changed files and the files the
+change removed from it; units of JavaScript files are left out. An
+after unit and a removed unit of a group SHALL be matched when they have
+the same code, or else when the own tokens they share in order are at
+least half of each one's own tokens, provided neither has another such
+partner.
+
+#### Scenario: Method moved to a class in another file
+
+- **GIVEN** `src/Tests.cs` has `Tests.Run(int)` with complexity 12 at the base revision
+- **WHEN** the head revision moves it unchanged into a new class `Helpers` in a new file `src/Helpers.cs`
+- **THEN** `Helpers.Run(int)` is matched with `Tests.Run(int)`, and no finding is reported for it
+
+#### Scenario: Moved and grown
+
+- **GIVEN** the same move, and the head revision adds two `if` statements to the method
+- **WHEN** the revisions are compared
+- **THEN** a Warning `complexity/cyclomatic-increase` finding is reported for `Helpers.Run(int)`, from 12 to 14
+
+#### Scenario: Moved out of a deleted file
+
+- **GIVEN** `src/legacy.ts` has `Legacy.load` with complexity 15 at the base revision
+- **WHEN** the head revision deletes the file and has `Store.load` with the same code in `src/store.ts`
+- **THEN** no finding is reported for `Store.load`
+
+#### Scenario: Moved out of a deleted JavaScript file
+
+- **GIVEN** `src/legacy.js` has a function `load` with complexity 15 at the base revision
+- **WHEN** the head revision deletes the file and has `Store.load` with the same code in `src/store.ts`
+- **THEN** `Store.load` is new, and a Warning `complexity/cyclomatic-new` finding with complexity 15 is reported for it
+
+#### Scenario: Moved to another class in the same file
+
+- **GIVEN** `Cart.total` with complexity 11 in `src/cart.ts`
+- **WHEN** the head revision moves it unchanged into a class `Pricing` in the same file
+- **THEN** no finding is reported for `Pricing.total`
+
+#### Scenario: Same own name, different code
+
+- **GIVEN** the base revision has `AComponent.ngOnInit` with complexity 15, and the head revision removes it
+- **WHEN** the head revision adds `BComponent.ngOnInit` with complexity 14, in which less than half of the tokens of `AComponent.ngOnInit` appear in order
+- **THEN** `BComponent.ngOnInit` is new, and a Warning `complexity/cyclomatic-new` finding is reported for it
+
+#### Scenario: Short removed namesake
+
+- **GIVEN** the base revision has `AComponent.ngOnInit` with the one statement `this.store.load();`, and the head revision removes it
+- **WHEN** the head revision adds `BComponent.ngOnInit` with complexity 14, which contains that statement among thirteen `if` statements
+- **THEN** `BComponent.ngOnInit` is new, and a Warning `complexity/cyclomatic-new` finding is reported for it
+
+#### Scenario: Ambiguous own name
+
+- **GIVEN** the base revision has `A.load` and `B.load`, each with complexity 12, and the head revision removes both
+- **WHEN** the head revision adds `C.load` with complexity 12, whose code shares more than half of its tokens with each of them
+- **THEN** `C.load` is new, and a Warning `complexity/cyclomatic-new` finding is reported for it
+
+#### Scenario: Same code settles an ambiguous own name
+
+- **GIVEN** the base revision has `A.load` with complexity 12 and `B.load` with complexity 3, and the head revision removes both
+- **WHEN** the head revision adds `C.load` with the code of `A.load`
+- **THEN** `C.load` is matched with `A.load`, and no finding is reported for it
+
+#### Scenario: Another language family
+
+- **GIVEN** the base revision removes a TypeScript function `run` with complexity 12
+- **WHEN** the head revision adds a Rust function `run` with complexity 12
+- **THEN** the Rust function is new, and a Warning `complexity/cyclomatic-new` finding is reported for it
+
+### Requirement: Inlined functions
+
+A removed unit that counts as inlined into a matched unit that got more
+complex SHALL have its complexity minus 1 added to that unit's before
+value for the severity. When the after value does not exceed that sum,
+no finding SHALL be reported. A removed unit SHALL count as inlined into
+at most one unit, and at most one removed unit SHALL count as inlined
+into a unit; the pairs with the longest shared code are taken first,
+and of two alike removed units in one file, the earlier one.
+
+#### Scenario: Inlined behind a feature flag
+
+- **GIVEN** `decryptMany` with complexity 4 chooses between `decryptManyV1` and `decryptManyV2` (complexity 10)
+- **WHEN** the head revision removes the choice and both functions, and `decryptMany` now holds the code of `decryptManyV2`, with complexity 12
+- **THEN** no finding is reported for `decryptMany`
+
+#### Scenario: Inlined and grown beyond it
+
+- **GIVEN** the same base revision
+- **WHEN** `decryptMany` holds the code of `decryptManyV2` plus three more `if` statements, with complexity 15
+- **THEN** a Warning `complexity/cyclomatic-increase` finding is reported for `decryptMany`, for the growth of 2
+
+#### Scenario: Alike removed units
+
+- **GIVEN** `process` with complexity 2, and `checkA` and `checkB` with the same code and complexity 6, in the base revision
+- **WHEN** the head revision removes both, and `process` now holds that code once and one more condition with five decision points, with complexity 12
+- **THEN** an Error `complexity/cyclomatic-increase` finding is reported for `process`, from 2 to 12, for the growth of 5 beyond the inlined `checkA`
+
+### Requirement: Evidence of inlining
+
+A removed unit with decision points SHALL count as inlined into a
+matched unit that got more complex only when the own tokens it shares,
+in order, with the code the change added to the matched unit are at
+least two thirds of the removed unit's own tokens and of that added
+code. The added code is the matched unit's own tokens in its after
+version outside a longest common subsequence with its own tokens in its
+before version.
+
+#### Scenario: Removed but not inlined
+
+- **GIVEN** `process` with complexity 3 and `legacy` with complexity 9 in the base revision
+- **WHEN** the head revision removes `legacy` and adds five `if` statements of other code to `process`
+- **THEN** an Error `complexity/cyclomatic-increase` finding is reported for `process`, from 3 to 8 (+5)
+
+#### Scenario: Removed code that was already there
+
+- **GIVEN** `handle` and `helper`, each with complexity 3 and the same code, in the base revision
+- **WHEN** the head revision removes `helper` and adds one `if` statement of other code to `handle`
+- **THEN** a Warning `complexity/cyclomatic-increase` finding is reported for `handle`, from 3 to 4 (+1)
+
+#### Scenario: Inlined among much new code
+
+- **GIVEN** `process` with complexity 3 and `helper` with complexity 7 in the base revision
+- **WHEN** the head revision removes `helper`, and `process` now holds `helper`'s code and three more `if` statements of other code, which make up more than a third of the code added to `process`, with complexity 12
+- **THEN** an Error `complexity/cyclomatic-increase` finding is reported for `process`, from 3 to 12 (+9)
+
+### Requirement: Limit of the alignment
+
+A matched unit whose before and after own tokens, without their common
+start and end, form more than 2^26 pairs SHALL NOT be credited with an
+inlined unit. A removed unit whose own tokens form more than 2^26 pairs
+with the code added to a matched unit SHALL NOT be credited to it. The
+time and memory of the evidence stay bounded.
+
+#### Scenario: A long function changed at both ends
+
+- **GIVEN** a matched unit whose before and after versions differ from their first changed token to their last over more than 8,192 tokens each
+- **WHEN** the head revision also removes a unit whose code it gained
+- **THEN** nothing is credited, and the unit's increase is reported in full
+
+#### Scenario: A very long inlined function
+
+- **GIVEN** a removed unit of more than 8,192 own tokens
+- **WHEN** the head revision removes it and adds its code, and nothing else, to a matched unit, and the code added to that unit is more than 8,192 tokens as well
+- **THEN** the removed unit is not credited, and the matched unit's increase is reported in full
+
+### Requirement: Messages of moved and inlined units
+
+An increase of a moved unit SHALL append `, moved from <old name>` to the
+message of "Finding content". An increase with an inlined unit SHALL
+write its parenthesis as `(+<delta>, +<growth> beyond the inlined <name>)`,
+and its before and after values SHALL stay the real ones.
+
+#### Scenario: Moved function message
+
+- **WHEN** `Tests.Run(int)` moves to `Helpers.Run(int)` and goes from 12 to 14
+- **THEN** the message is `Helpers.Run(int): cyclomatic complexity 12 -> 14 (+2), moved from Tests.Run(int)`
+
+#### Scenario: Inlined function message
+
+- **WHEN** `decryptMany` goes from 4 to 15 and inlines `decryptManyV2`, which had complexity 10
+- **THEN** the message is `decryptMany: cyclomatic complexity 4 -> 15 (+11, +2 beyond the inlined decryptManyV2)`, with before value 4 and after value 15

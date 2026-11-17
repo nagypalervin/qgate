@@ -122,8 +122,11 @@ None.
 ### Modified Capabilities
 
 - `complexity-analysis`: "Matching functions between versions" matches
-  moved functions across classes and files; a new requirement credits
-  inlined functions; "Finding content" adds the two message forms.
+  moved functions across classes and files; new requirements credit
+  inlined functions, with their evidence and its limit, and add the two
+  message forms ("Messages of moved and inlined units"; kept apart from
+  "Finding content" when archiving, as one text grew past 500
+  characters).
 
 ## Impact
 

@@ -13,37 +13,6 @@ is new. A unit in the before file that is matched by neither is removed.
 - **WHEN** the two files are compared
 - **THEN** `calc` is treated as removed and `calculateTotal` as new
 
-### Requirement: Finding content
-
-Every complexity finding SHALL carry the before and after values, point to
-the line of the unit's name in the after file (or of the function itself for
-an unnamed default export), and use the message
-`<name>: cyclomatic complexity <before> -> <after> (+<delta>)` for an
-increase and `<name>: new function, cyclomatic complexity <after>` for a new
-unit. An increase of a moved unit SHALL append `, moved from <old name>`.
-An increase with an inlined unit SHALL write the parenthesis as
-`(+<delta>, +<growth> beyond the inlined <name of the inlined unit>)`.
-
-#### Scenario: Increase message
-
-- **WHEN** `applyDiscount`, named on line 88 of the after file, goes from 4 to 5
-- **THEN** the finding points to line 88 with message `applyDiscount: cyclomatic complexity 4 -> 5 (+1)`
-
-#### Scenario: New function message
-
-- **WHEN** a new function `buildInvoice` with complexity 14 is named on line 120
-- **THEN** the finding points to line 120 with message `buildInvoice: new function, cyclomatic complexity 14`
-
-#### Scenario: Moved function message
-
-- **WHEN** `Tests.Run(int)` moves to `Helpers.Run(int)` and goes from 12 to 14
-- **THEN** the message is `Helpers.Run(int): cyclomatic complexity 12 -> 14 (+2), moved from Tests.Run(int)`
-
-#### Scenario: Inlined function message
-
-- **WHEN** `decryptMany` goes from 4 to 15 and inlines `decryptManyV2`, which had complexity 10
-- **THEN** the message is `decryptMany: cyclomatic complexity 4 -> 15 (+11, +2 beyond the inlined decryptManyV2)`, with before value 4 and after value 15
-
 ## ADDED Requirements
 
 ### Requirement: Moved functions
@@ -192,3 +161,20 @@ time and memory of the evidence stay bounded.
 - **GIVEN** a removed unit of more than 8,192 own tokens
 - **WHEN** the head revision removes it and adds its code, and nothing else, to a matched unit, and the code added to that unit is more than 8,192 tokens as well
 - **THEN** the removed unit is not credited, and the matched unit's increase is reported in full
+
+### Requirement: Messages of moved and inlined units
+
+An increase of a moved unit SHALL append `, moved from <old name>` to the
+message of "Finding content". An increase with an inlined unit SHALL
+write its parenthesis as `(+<delta>, +<growth> beyond the inlined <name>)`,
+and its before and after values SHALL stay the real ones.
+
+#### Scenario: Moved function message
+
+- **WHEN** `Tests.Run(int)` moves to `Helpers.Run(int)` and goes from 12 to 14
+- **THEN** the message is `Helpers.Run(int): cyclomatic complexity 12 -> 14 (+2), moved from Tests.Run(int)`
+
+#### Scenario: Inlined function message
+
+- **WHEN** `decryptMany` goes from 4 to 15 and inlines `decryptManyV2`, which had complexity 10
+- **THEN** the message is `decryptMany: cyclomatic complexity 4 -> 15 (+11, +2 beyond the inlined decryptManyV2)`, with before value 4 and after value 15
