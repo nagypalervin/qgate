@@ -68,11 +68,12 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
     let mut unmatched: Vec<((usize, usize), Unit<'_>)> = Vec::new();
     let mut removed: Vec<Unit<'_>> = Vec::new();
     for (c, change) in changes.iter().enumerate() {
-        let before: HashMap<&str, u32> = change
+        let before: HashMap<&str, usize> = change
             .before
             .functions
             .iter()
-            .map(|f| (f.name.as_str(), f.cyclomatic))
+            .enumerate()
+            .map(|(b, f)| (f.name.as_str(), b))
             .collect();
         // Matching relies on qgate-lang's guarantee that names are unique
         // within a file; a collision would silently drop a function.
@@ -85,7 +86,7 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
         for (u, after) in change.after.functions.iter().enumerate() {
             let origin = before
                 .get(after.name.as_str())
-                .map(|&old| Origin::Same(old));
+                .map(|&b| Origin::Same(Unit::new(&change.before, b)));
             if origin.is_none() {
                 unmatched.push(((c, u), Unit::new(&change.after, u)));
             }
@@ -112,7 +113,7 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
     let pairs = moves(&unmatched, &removed);
     removed.retain(|old| !pairs.iter().any(|(_, moved)| moved.is(*old)));
     for ((c, u), old) in pairs {
-        origins[c][u] = Some(Origin::Moved(old.function()));
+        origins[c][u] = Some(Origin::Moved(old));
     }
     let credits = inlined(changes, &origins, &removed);
 
@@ -121,9 +122,11 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
         for (u, (unit, origin)) in change.after.functions.iter().zip(file).enumerate() {
             let inlined = credits.get(&(c, u)).map_or(&[][..], Vec::as_slice);
             findings.extend(match origin {
-                Some(Origin::Same(old)) => increase(change, unit, *old, None, inlined),
-                Some(Origin::Moved(old)) => {
-                    increase(change, unit, old.cyclomatic, Some(&old.name), inlined)
+                Some(origin) => {
+                    let old = origin.unit().function();
+                    let moved_from =
+                        matches!(origin, Origin::Moved(_)).then_some(old.name.as_str());
+                    increase(change, unit, old.cyclomatic, moved_from, inlined)
                 }
                 None => new_function(change, unit),
             });
@@ -134,10 +137,10 @@ pub fn analyze(changes: &[&FileChange], gone: &[&FileModel]) -> Vec<Finding> {
 
 /// The units each matched unit that got more complex inlined, by change
 /// and unit index (design D3): a removed unit with decision points counts
-/// as inlined into the grown unit whose after version holds the largest
-/// share of its own tokens in order, if that share is at least half. Ties
-/// go to the first by path, then by line. The units come in the order of
-/// `removed`.
+/// as inlined into the grown unit with the longest common subsequence of
+/// its own tokens and the code the change added to the grown unit, if
+/// that is two thirds of both. Ties go to the first by path, then by
+/// line. The units come in the order of `removed`.
 fn inlined<'a>(
     changes: &[&'a FileChange],
     origins: &[Vec<Option<Origin<'a>>>],
@@ -151,7 +154,10 @@ fn inlined<'a>(
     let mut interner = HashMap::new();
     let grown: Vec<((usize, usize), Vec<usize>)> = grown
         .into_iter()
-        .map(|(key, unit)| (key, unit.tokens(&mut interner)))
+        .map(|(key, after, before)| {
+            let after = after.tokens(&mut interner);
+            (key, added(&before.tokens(&mut interner), &after))
+        })
         .collect();
     for &old in removed.iter().filter(|old| old.function().cyclomatic > 1) {
         let tokens = old.tokens(&mut interner);
@@ -163,59 +169,114 @@ fn inlined<'a>(
 }
 
 /// The matched units that got more complex, by change and unit index,
-/// first by path, then by line.
+/// with their after and before versions, first by path, then by line.
 fn grown<'a>(
     changes: &[&'a FileChange],
     origins: &[Vec<Option<Origin<'a>>>],
-) -> Vec<((usize, usize), Unit<'a>)> {
+) -> Vec<((usize, usize), Unit<'a>, Unit<'a>)> {
     let mut grown = Vec::new();
     for (c, (change, file)) in changes.iter().zip(origins).enumerate() {
         for (u, (unit, origin)) in change.after.functions.iter().zip(file).enumerate() {
-            if origin.is_some_and(|origin| unit.cyclomatic > origin.before()) {
-                grown.push(((c, u), Unit::new(&change.after, u)));
+            let before = origin.map(Origin::unit);
+            if let Some(before) = before.filter(|b| unit.cyclomatic > b.function().cyclomatic) {
+                grown.push(((c, u), Unit::new(&change.after, u), before));
             }
         }
     }
-    grown.sort_by_key(|&((c, _), unit)| (&changes[c].path, unit.function().line));
+    grown.sort_by_key(|&((c, _), unit, _)| (&changes[c].path, unit.function().line));
     grown
 }
 
 /// The grown unit a removed one with these own tokens was inlined into:
-/// the one holding the largest share of them in order, if at least half.
-/// The largest common subsequence is the largest share, as the removed
-/// tokens are the same; a later unit wins only with a larger one.
+/// the one whose added code shares the longest subsequence with them, if
+/// that is two thirds of both (design D3); a later unit wins only with a
+/// longer one.
 fn host(tokens: &[usize], grown: &[((usize, usize), Vec<usize>)]) -> Option<(usize, usize)> {
     if tokens.is_empty() {
         return None;
     }
     let mut best: Option<(usize, (usize, usize))> = None;
-    for (key, after) in grown {
-        if 2 * after.len() < tokens.len() {
+    for (key, added) in grown {
+        // Two thirds of both needs sizes within a factor of 3/2.
+        let (short, long) = (tokens.len().min(added.len()), tokens.len().max(added.len()));
+        if 3 * short < 2 * long {
             continue;
         }
-        let common = common_in_order(tokens, after);
-        if 2 * common >= tokens.len() && best.is_none_or(|(most, _)| common > most) {
+        let common = common_in_order(tokens, added);
+        if 3 * common >= 2 * long && best.is_none_or(|(most, _)| common > most) {
             best = Some((common, *key));
         }
     }
     best.map(|(_, key)| key)
 }
 
+/// The tokens of `after` outside a longest common subsequence with
+/// `before`: the code a change added to a unit (design D3). The common
+/// start and end are cut off first; for the middle, one bit per pair of
+/// tokens records the choice of the dynamic programming.
+fn added(before: &[usize], after: &[usize]) -> Vec<usize> {
+    let start = before.iter().zip(after).take_while(|(b, a)| b == a).count();
+    let (before, after) = (&before[start..], &after[start..]);
+    let end = before
+        .iter()
+        .rev()
+        .zip(after.iter().rev())
+        .take_while(|(b, a)| b == a)
+        .count();
+    let (before, after) = (&before[..before.len() - end], &after[..after.len() - end]);
+    let (n, m) = (before.len(), after.len());
+    // skip[i * m + j]: with before[i] and after[j] unequal, dropping
+    // before[i] keeps the longest common subsequence of before[i..] and
+    // after[j..].
+    let mut skip = vec![0u64; (n * m).div_ceil(64)];
+    // below[j] and row[j]: the longest common subsequence of
+    // before[i + 1..] and before[i..] with after[j..].
+    let mut below = vec![0usize; m + 1];
+    let mut row = vec![0usize; m + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            row[j] = if before[i] == after[j] {
+                below[j + 1] + 1
+            } else if below[j] >= row[j + 1] {
+                let bit = i * m + j;
+                skip[bit / 64] |= 1 << (bit % 64);
+                below[j]
+            } else {
+                row[j + 1]
+            };
+        }
+        std::mem::swap(&mut row, &mut below);
+    }
+    let (mut i, mut added) = (0, Vec::new());
+    let mut j = 0;
+    while j < m {
+        if i < n && before[i] == after[j] {
+            i += 1;
+            j += 1;
+        } else if i < n && skip[(i * m + j) / 64] & (1 << ((i * m + j) % 64)) != 0 {
+            i += 1;
+        } else {
+            added.push(after[j]);
+            j += 1;
+        }
+    }
+    added
+}
+
 /// Where an after unit's before version is.
 #[derive(Clone, Copy)]
 enum Origin<'a> {
-    /// In its own file, under the same name, with this complexity.
-    Same(u32),
+    /// In its own file, under the same name.
+    Same(Unit<'a>),
     /// A removed unit elsewhere: the unit moved.
-    Moved(&'a Function),
+    Moved(Unit<'a>),
 }
 
-impl Origin<'_> {
-    /// The complexity of the before version.
-    fn before(self) -> u32 {
+impl<'a> Origin<'a> {
+    /// The before version.
+    fn unit(self) -> Unit<'a> {
         match self {
-            Self::Same(before) => before,
-            Self::Moved(old) => old.cyclomatic,
+            Self::Same(unit) | Self::Moved(unit) => unit,
         }
     }
 }
@@ -977,14 +1038,44 @@ mod tests {
         );
     }
 
+    // complexity-analysis: "Removed code that was already there". The
+    // tokens of `helper` stand in `handle`, but in its old code: what the
+    // change added to `handle` is one other `if` statement.
+    #[test]
+    fn removed_code_that_was_already_there() {
+        assert_eq!(
+            run(
+                inlined!("already_there_before.ts"),
+                inlined!("already_there_after.ts")
+            ),
+            vec![increase(Severity::Warning, "handle", 1, 3, 4)]
+        );
+    }
+
+    // complexity-analysis: "Inlined among much new code". `process`
+    // holds all of `helper` (7), more than two thirds of its tokens, but
+    // that is less than two thirds of the code added to `process`, so
+    // nothing is credited. Credited, the growth would be 3, a Warning.
+    #[test]
+    fn inlined_among_much_new_code() {
+        assert_eq!(
+            run(
+                inlined!("among_new_before.ts"),
+                inlined!("among_new_after.ts")
+            ),
+            vec![increase(Severity::Error, "process", 1, 3, 12)]
+        );
+    }
+
     // Design D3: a removed unit counts as inlined into one unit, the one
-    // with the larger share. `a` holds all of `helper` (6), `b` three of
-    // its five checks, so only `a` is credited.
+    // with the longer common subsequence. `a` and `b` both hold all five
+    // checks of `helper` (6), but `b` pushes another value in the last
+    // one, so only `a` is credited and `b` keeps its whole increase.
     #[test]
     fn a_removed_unit_is_credited_once() {
         assert_eq!(
             run(inlined!("two_before.ts"), inlined!("two_after.ts")),
-            vec![increase(Severity::Warning, "b", 12, 2, 5)]
+            vec![increase(Severity::Error, "b", 12, 2, 7)]
         );
     }
 
@@ -1018,6 +1109,36 @@ mod tests {
         );
         files.reverse();
         assert_eq!(run_files(Language::TypeScript, &files), vec![expected]);
+    }
+
+    // complexity-analysis: a removed unit counts as inlined only with
+    // decision points. `helper` (1) went into `process` whole, yet the
+    // message names nothing inlined.
+    #[test]
+    fn a_unit_without_decision_points_is_not_credited() {
+        let helper = "  const total = input.items.length * input.price;\n  const tax = total * input.rate;\n  out.push(String(total + tax));\n";
+        let before = format!(
+            "export function process(input: Input): string[] {{\n  const out: string[] = [];\n  if (input.empty) {{ return out; }}\n  return out;\n}}\n\nexport function helper(input: Input, out: string[]): void {{\n{helper}}}\n"
+        );
+        let after = format!(
+            "export function process(input: Input): string[] {{\n  const out: string[] = [];\n  if (input.empty) {{ return out; }}\n{helper}  if (input.gift) {{ out.push('gift'); }}\n  return out;\n}}\n"
+        );
+        assert_eq!(
+            run(&before, &after),
+            vec![increase(Severity::Warning, "process", 1, 2, 3)]
+        );
+    }
+
+    // Design D3: the code a change added is what lies outside a longest
+    // common subsequence with the before version.
+    #[test]
+    fn added_code() {
+        assert_eq!(added(&[1, 2, 3, 4], &[1, 5, 2, 3, 6, 4]), vec![5, 6]);
+        assert_eq!(added(&[1, 2, 3], &[3, 1, 2]), vec![3]);
+        assert_eq!(added(&[1, 2], &[1, 2]), Vec::<usize>::new());
+        assert_eq!(added(&[], &[1, 2]), vec![1, 2]);
+        assert_eq!(added(&[1, 2, 3], &[]), Vec::<usize>::new());
+        assert_eq!(added(&[7, 1, 7, 2, 7], &[1, 8, 2, 9]), vec![8, 9]);
     }
 
     // Design D2: the split at the last `.` outside brackets.

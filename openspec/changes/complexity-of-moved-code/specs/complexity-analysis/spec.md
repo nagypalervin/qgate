@@ -120,12 +120,11 @@ partner.
 
 ### Requirement: Inlined functions
 
-A removed unit SHALL count as inlined into a matched unit that got more
-complex when at least half of the removed unit's tokens appear, in
-order, in the matched unit's after version. Its complexity minus 1 is
-then added to the before value for the severity. When the after value
-does not exceed that sum, no finding SHALL be reported. A removed unit
-SHALL count as inlined into at most one unit.
+A removed unit that counts as inlined into a matched unit that got more
+complex SHALL have its complexity minus 1 added to that unit's before
+value for the severity. When the after value does not exceed that sum,
+no finding SHALL be reported. A removed unit SHALL count as inlined into
+at most one unit.
 
 #### Scenario: Inlined behind a feature flag
 
@@ -139,8 +138,30 @@ SHALL count as inlined into at most one unit.
 - **WHEN** `decryptMany` holds the code of `decryptManyV2` plus three more `if` statements, with complexity 15
 - **THEN** a Warning `complexity/cyclomatic-increase` finding is reported for `decryptMany`, for the growth of 2
 
+### Requirement: Evidence of inlining
+
+A removed unit with decision points SHALL count as inlined into a
+matched unit that got more complex only when the own tokens it shares,
+in order, with the code the change added to the matched unit are at
+least two thirds of the removed unit's own tokens and of that added
+code. The added code is the matched unit's own tokens in its after
+version outside a longest common subsequence with its own tokens in its
+before version.
+
 #### Scenario: Removed but not inlined
 
 - **GIVEN** `process` with complexity 3 and `legacy` with complexity 9 in the base revision
 - **WHEN** the head revision removes `legacy` and adds five `if` statements of other code to `process`
 - **THEN** an Error `complexity/cyclomatic-increase` finding is reported for `process`, from 3 to 8 (+5)
+
+#### Scenario: Removed code that was already there
+
+- **GIVEN** `handle` and `helper`, each with complexity 3 and the same code, in the base revision
+- **WHEN** the head revision removes `helper` and adds one `if` statement of other code to `handle`
+- **THEN** a Warning `complexity/cyclomatic-increase` finding is reported for `handle`, from 3 to 4 (+1)
+
+#### Scenario: Inlined among much new code
+
+- **GIVEN** `process` with complexity 3 and `helper` with complexity 7 in the base revision
+- **WHEN** the head revision removes `helper`, and `process` now holds `helper`'s code and three more `if` statements of other code, which make up more than a third of the code added to `process`, with complexity 12
+- **THEN** an Error `complexity/cyclomatic-increase` finding is reported for `process`, from 3 to 12 (+9)

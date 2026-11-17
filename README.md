@@ -127,7 +127,8 @@ Code that a change only moves does not count as new or more complex:
   complex, and the message says where it came from:
   `Helpers.Run(int): cyclomatic complexity 12 -> 14 (+2), moved from Tests.Run(int)`.
 - **An inlined function** is credited. When a function grows by the code of
-  one the change removed (at least half of its tokens, in order), the
+  one the change removed (the tokens they share in order are at least two
+  thirds of the removed function's and of the code the change added), the
   removed one's decision points are added to the old value, and only the
   growth beyond them counts for the severity:
   `CipherService.decryptMany: cyclomatic complexity 4 -> 15 (+11, +2 beyond the inlined CipherService.decryptManyV2)`.

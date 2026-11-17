@@ -100,6 +100,14 @@ review, he decided that the evidence counts both ways: the shared tokens
 are half of each function's, so a short removed namesake is no evidence
 for a long new function (D2).
 
+On the re-measurement of PR 2, the evidence for inlining (half of the
+removed function's tokens in the grown function) credited four removed
+functions to functions that had grown by logic of their own, one of
+them a finding judged defensible. Ervin decided on 2026-11-17 that it
+counts both ways and on the added code only: the shared tokens are two
+thirds of the removed function's and two thirds of the code the change
+added to the grown function (D3).
+
 ## Capabilities
 
 ### New Capabilities
