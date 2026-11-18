@@ -1,9 +1,14 @@
 """List the last 50 pull requests of each repository's main branch.
 
-A pull request is a first-parent commit of the branch with one parent
-and a `(#N)` in its subject: the three repositories squash pull requests,
-and GitHub appends the number. Other commits on the branch (direct
-pushes, such as version bumps) are counted and left out.
+A pull request is a first-parent commit of the branch:
+- on GitHub, with one parent and a `(#N)` at the end of its subject: the
+  three repositories squash pull requests, and GitHub appends the number;
+- on Azure Repos (the pilot, design "Pilot plan"), with the subject
+  `Merged PR N: ...` that Azure Repos writes, squashed (one parent) or
+  merged (two): the first parent, `C^`, is the target before the pull
+  request in both cases.
+Other commits on the branch (direct pushes, such as version bumps) are
+counted and left out.
 
 Usage: list.py <out.tsv> <repo dir>...
 Prints each repository's head commit and how many commits it skipped.
@@ -14,7 +19,8 @@ import sys
 
 COUNT = 50
 BOTS = ("[bot]", "renovate", "dependabot")
-PR = re.compile(r"\(#(\d+)\)\s*$")
+GITHUB = re.compile(r"\(#(\d+)\)\s*$")
+AZURE = re.compile(r"^Merged PR (\d+):")
 
 
 def git(repo, *args):
@@ -33,8 +39,11 @@ def main():
         taken, skipped = [], 0
         for line in log.splitlines():
             commit, parents, author, email, subject = line.split("\t", 4)
-            pr = PR.search(subject)
-            if len(parents.split()) != 1 or not pr:
+            parent_count = len(parents.split())
+            github, azure = GITHUB.search(subject), AZURE.search(subject)
+            pr = github if parent_count == 1 else None
+            pr = pr or (azure if parent_count in (1, 2) else None)
+            if not pr:
                 skipped += 1
                 continue
             who = (author + " " + email).lower()

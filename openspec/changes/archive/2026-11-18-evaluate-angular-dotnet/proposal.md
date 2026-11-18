@@ -83,7 +83,9 @@ Approved by Ervin on 2026-11-17 with all five recommendations.
    *Recommended: yes.*
 4. **Where the pilot plan lives:** in `design.md` of this change,
    archived next to the evidence it rests on. The README gets only the
-   recipe. *Recommended: yes.*
+   recipe. *Recommended: yes.* (As built, the recipe ends with the switch
+   to blocking in a few lines, because a reader of the README needs to
+   know when comments may become a gate.)
 5. **One pull request,** with the report, the recipe and the archive. If
    a criterion fails, this change waits for the fix change and measures
    again before its pull request. *Recommended: yes.*

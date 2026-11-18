@@ -158,6 +158,15 @@ Written in task 3.2, from the numbers:
 - **Feedback:** where the team reports a finding it disagrees with, and
   how such a report turns into a fix change.
 
+As written: "Pilot plan (task 3.2)" below. Beyond this outline:
+- a test pull request before the start, since the qgate job runs in the
+  pipeline whose policy already gates the build;
+- every Error on the pilot's pull requests is judged, and blocking waits
+  at least four weeks;
+- `list.py` learned the Azure Repos form of a pull request commit, and
+  `sample.py` names any repository. On the three repositories, both
+  still give the same list and sample as before.
+
 ## Evaluation (task 3.1)
 
 Run on 2026-11-17 with the 0.9.0 release binary
@@ -301,8 +310,178 @@ Decided by Ervin on 2026-11-17:
 - **Accepting a known violation goes into the pilot plan (D6)** as a
   condition of the switch to blocking, not into a change now.
 
-This change waits, as Gate 1 agreed: after both fixes, the second
-measurement goes into this section, then tasks 3.2 and 3.3 follow.
+This change waited, as Gate 1 agreed: after both fixes, the second
+measurement below, then tasks 3.2 and 3.3.
+
+### Second measurement: 0.10.0
+
+Run on 2026-11-18 with the 0.10.0 release binary
+(`aarch64-unknown-linux-musl`, checked against its `SHA256SUMS`). The
+same 150 pull requests, clones and frozen configurations were used,
+with `run.py` and `summary.py` unchanged. The fixes it carries are
+`complexity-of-moved-code` with `limit-move-evidence`, and
+`duplication-of-new-code`.
+
+`remeasure.py` compares the run with the first one finding by finding.
+It finds no finding that the first run did not have. So the findings
+left are a subset of the first run's, every Error is still judged, and
+the judged Warnings that are left remain a random sample of the
+Warnings left in each repository. The script prints 22 judged findings
+as gone and SV28 as moved, since it overlaps SV23. By hand, SV28's own
+block is gone, so 23 of the 78 judged findings are gone:
+- 22 of the 24 noise findings: the duplication noise except SV23 and
+  SV27, plus SV19 (the moved function) and CL11 (the false Error);
+- 1 defensible finding: SV30, the known price of
+  `duplication-of-new-code`.
+
+| Criterion | 0.9.0 | 0.10.0 | Pass |
+|---|---|---|---|
+| False Errors | 1 of 17 | 0 of 16 | yes |
+| Commented pull requests | see below | see below | `bitwarden/server` yes; `bitwarden/clients` no, left to week 1 (Ervin's decision above) |
+| Useful or defensible | 54 of 78 (69.2%) | 53 of 55 (96.4%) | yes |
+| Run time, `bitwarden/clients` | slowest 10.9 s | median 5.3 s, slowest 5.6 s | yes |
+
+| Repository | All | Human | Bot |
+|---|---|---|---|
+| `jasontaylordev/CleanArchitecture` | 1 of 50 (2%) | 1 of 9 | 0 of 41 |
+| `bitwarden/server` | 14 of 50 (28%) | 14 of 43 (33%) | 0 of 7 |
+| `bitwarden/clients` | 22 of 50 (44%) | 22 of 43 (51%) | 0 of 7 |
+
+- **`bitwarden/server` drops from 17 to 14 commented pull requests.**
+  Duplication findings fall from 181 to 59, and the pull requests they
+  appear in from 15 to 10.
+- **`bitwarden/clients` keeps 22.** Its duplication falls from 98 to 80
+  findings, in 3 pull requests instead of 5, but those 3 pull requests
+  have other findings too. Its rate is driven by `tests/unchanged-test`
+  (now the only rule in 7 pull requests) and by complexity Warnings, as
+  the first run found.
+- **Pull requests that would fail:** 3 in `bitwarden/server` (8781, 8812,
+  8838) and 4 in `bitwarden/clients` (24324, 24427, 24475, 24690). PR
+  24645 no longer fails, since its only Error was CL11.
+
+### Verdict after the fixes: go for a comment-only pilot
+
+Three of the four criteria pass. The fourth, the comment rate of
+`bitwarden/clients`, is what Ervin decided to judge on the partner's own
+pull requests in week 1 of the pilot. The only false Error is gone, and
+96% of what qgate still reports is useful or defensible. The pilot plan
+(D6) and the recipe follow.
+
+## Pilot plan (task 3.2)
+
+The roles: **Ervin** for qgate, and on the partner's side a **tech
+lead**, who speaks for the team, and a **pipeline owner**, who may edit
+the pipeline and the repository's policies. One person may hold both
+partner roles. The partner's code, reports and judgements stay with the
+partner: this public repository gets only numbers without code, and the
+fix changes they lead to.
+
+1. **Configuration.**
+   - *Who:* Ervin with the tech lead, before the start.
+   - *What:* the recipe's `qgate.toml` (README, "Angular + .NET")
+     adapted to the partner's projects. The layer rules come from the
+     project references and any import lint rules, as in D2, and every
+     rule names its source. The exclusions are `**/Migrations/**` and the
+     folders of generated code.
+   - *Produces:* `qgate.toml` in the partner's repository, merged by a
+     pull request of its own. `qgate check --base HEAD --worktree` runs
+     without a configuration error.
+2. **Comment-only start.**
+   - *Who:* the pipeline owner.
+   - *What:* the recipe's job, with `--fail-on never` on both `qgate
+     check` lines, added to the pipeline that builds the pull requests,
+     on the agent the partner builds on (Linux or Windows), and the build
+     service's permission to comment. That pipeline's policy already
+     gates the build, and the qgate job still fails it when qgate cannot
+     run (exit code `2`) or cannot comment. So the job is tried first on
+     one test pull request with a finding.
+   - *Produces:* the test pull request with its qgate comment; then one
+     qgate comment on each pull request with findings, and a pipeline
+     that qgate does not turn red.
+3. **Week 1: the same measurement on the partner's code.**
+   - *Who:* Ervin runs the scripts and judges, with read access to the
+     repository. If the code may not leave the partner, a developer the
+     tech lead names does both, with the classes and reasons of D3.
+     Whoever did not judge spot-checks: the tech lead, or Ervin in a
+     session where the code stays on the partner's screen.
+   - *What:* the steps of D1–D4 on the partner's last 50 pull requests,
+     with the partner's `qgate.toml` and the release the job installs:
+     `list.py` (which also reads Azure Repos' `Merged PR N:` subjects),
+     `run.py`, `summary.py`, `sample.py`, the judgements and `judge.py`.
+     `list.py` marks bots by the commit's author. In Azure Repos, the
+     author of that commit is whoever completed the pull request, so the
+     bot pull requests are marked by their creator instead, from Azure
+     DevOps. The spot-check takes 10 judgements drawn by
+     `spotcheck.py`; more than 2 disagreements send the judging round
+     again (D3). The run time of the qgate job is read from the week's
+     pull request builds, on the partner's own agents.
+   - *Produces:* the criteria table of D4 for the partner's code, a
+     judged sample in the format of `findings.md` (kept by the
+     partner), and the job's run times.
+   - *Then:*
+     - a false Error is a fix change, and the pilot stays comment-only;
+     - a comment rate above about 1 in 3 is the third change
+       postponed above: `tests/unchanged-test` and small complexity
+       Warnings made quieter (Ervin's decision of 2026-11-17);
+     - other noise with a nameable mechanism is a fix change, as
+       `duplication-of-new-code` was.
+4. **Feedback during the pilot.**
+   - *Who:* a developer who disagrees with a finding, and Ervin with the
+     tech lead.
+   - *What:* the developer answers in the qgate comment's thread with
+     the finding's rule and line and why it is wrong. The thread stays
+     when later builds update the comment. Once a week, Ervin and the
+     tech lead judge, as in D3, each answered finding and every Error
+     that a qgate comment showed that week, answered or not.
+     A finding judged noise with a nameable mechanism becomes a fix
+     change in this repository, with fixtures that describe the
+     mechanism, not the partner's code. A release follows, and the
+     pipeline owner updates the version in the job.
+   - *Produces:* a feedback list with the pull request, finding, reason,
+     judgement and fix change, kept by the partner; the count of the
+     week's Errors and how many were wrong; fix changes and releases
+     here.
+5. **Switch to blocking.**
+   - *Who:* the tech lead and Ervin decide together; the pipeline owner
+     makes the switch.
+   - *When:* all of these hold:
+     - at least four weeks of comments;
+     - 0 false Errors among every Error judged so far: the week-1
+       sample's and those of the pilot's own pull requests (step 4);
+     - an agreed way through a known violation. qgate has no way to
+       accept a finding today (PR 24475 above). Either such a feature
+       is built as a change of its own first, or the team agrees that
+       such a pull request is completed with a policy override by a
+       named person, and the override is noted on the pull request;
+     - the tech lead agrees.
+   - *What:* both `--fail-on never` options are removed, so the default
+     `fail-on` (Errors) gates through the pipeline's policy, which must
+     be *Required*.
+   - *Produces:* a pipeline that blocks a pull request adding an Error,
+     and the date of the switch in the feedback list. Warnings still
+     only comment.
+
+## Recipe (task 3.3)
+
+The README's "Recipe: Angular + .NET in Azure DevOps" has these parts:
+- a `qgate.toml` with the layer rules of the Clean Architecture
+  template, one Angular rule, and the two exclusions the evaluation
+  used: `**/Migrations/**` (`bitwarden/server`) and `**/generated/**`
+  (`bitwarden/clients`);
+- the Linux job in comment-only mode, a note for Windows agents, and
+  a test pull request first (pilot plan, step 2);
+- "Then a gate": the switch to blocking of step 5, in short. The other
+  steps involve the partner and stay here.
+
+Checked on 2026-11-18:
+- **The `qgate.toml` loads.** The recipe's `qgate.toml`, placed in the
+  `jasontaylordev/CleanArchitecture` clone at its head, gives "No
+  regressions found." and exit code `0` with `--base HEAD --worktree`.
+  With an unknown key added, it fails with exit code `2`, so the file
+  is read.
+- **The job is the README's Linux Azure job,** apart from `--fail-on
+  never` on both `qgate check` lines. A script compared the two blocks
+  of the README.
 
 ## Risks / Trade-offs
 
@@ -323,4 +502,4 @@ measurement goes into this section, then tasks 3.2 and 3.3 follow.
 ## Migration Plan
 
 None. Nothing ships. The README recipe is documentation of features
-0.9.0 already has.
+0.10.0 already has.

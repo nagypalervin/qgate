@@ -1141,6 +1141,118 @@ Keep in mind:
   arm64, use the target `aarch64-unknown-linux-musl` or
   `aarch64-pc-windows-msvc`.
 
+### Recipe: Angular + .NET in Azure DevOps
+
+A starting point for an Angular frontend and a .NET backend: first only
+comments, then a gate. It comes from an evaluation of 0.10.0 on 150
+merged pull requests of three public repositories of this stack
+(`bitwarden/clients`, `bitwarden/server`,
+`jasontaylordev/CleanArchitecture`):
+- no Error was wrong, and of the judged findings it still reported,
+  96% were useful or defensible;
+- `jasontaylordev/CleanArchitecture` commented on 2% of the pull
+  requests, `bitwarden/server` on 28% and `bitwarden/clients` on 44%; no
+  dependency-bot pull request got a comment;
+- the slowest check took 5.6 s on an arm64 Linux machine. This is a
+  guide, not a promise for your agents.
+
+The details are in
+[the evaluation](openspec/changes/archive/2026-11-18-evaluate-angular-dotnet/design.md).
+
+**`qgate.toml`**, for a backend laid out like the Clean Architecture
+template, with the Angular app in `src/Web/ClientApp`. Take the layer
+rules from your project references and from the `no-restricted-imports`
+entries of your ESLint configuration:
+
+```toml
+# Domain.csproj references no project.
+[[architecture.forbid]]
+name = "domain-is-pure"
+from = ["src/Domain/**"]
+to_namespaces = ["MyApp.Application", "MyApp.Infrastructure", "MyApp.Web",
+                 "Microsoft.EntityFrameworkCore"]
+
+# Application.csproj references Domain only.
+[[architecture.forbid]]
+name = "application-knows-no-infrastructure"
+from = ["src/Application/**"]
+to_namespaces = ["MyApp.Infrastructure", "MyApp.Web"]
+
+# The Angular app's shared code imports no feature.
+[[architecture.forbid]]
+name = "shared-knows-no-features"
+from = ["src/Web/ClientApp/src/app/shared/**"]
+to = ["src/Web/ClientApp/src/app/features/**"]
+
+[files]
+# EF Core migrations and generated clients are not reviewed code.
+exclude = ["**/Migrations/**", "**/generated/**"]
+```
+
+- **A rule that the compiler or ESLint already enforces never fires on
+  a merged pull request.** In the evaluation, the project-reference rules
+  stayed silent in both .NET repositories. Rules pay off for a boundary
+  that nothing else checks, such as the Angular rule above.
+- **List every committed file of generated code** in `exclude`, or its
+  copies and complexity count as code the team wrote. qgate reads only
+  what git has: the template's NSwag client (`web-api-client.ts`) is
+  ignored by git, but if you commit yours, add it.
+
+**The job, comment-only.** It is the Linux job
+[above](#in-azure-pipelines), with `--fail-on never` on both `qgate check`
+lines. The comment shows every finding, and the build stays green:
+
+```yaml
+- job: qgate
+  condition: eq(variables['Build.Reason'], 'PullRequest')
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+    - checkout: self
+      fetchDepth: 0
+    - bash: |
+        set -euo pipefail
+        v=0.10.0 t=x86_64-unknown-linux-musl
+        base=https://github.com/nagypalervin/qgate/releases/download/v$v
+        curl -fsSL --fail-early -O "$base/qgate-$v-$t.tar.gz" -O "$base/SHA256SUMS"
+        grep " qgate-$v-$t.tar.gz\$" SHA256SUMS | sha256sum -c
+        tar xzf "qgate-$v-$t.tar.gz"
+        echo "##vso[task.prependpath]$PWD/qgate-$v-$t"
+        echo "##vso[task.setvariable variable=QGATE_DIR]$PWD/qgate-$v-$t"
+      displayName: Install qgate
+      workingDirectory: $(Agent.TempDirectory)
+    - bash: |
+        qgate check --base "origin/${TARGET_BRANCH#refs/heads/}" --format markdown --fail-on never > "$AGENT_TEMPDIRECTORY/qgate.md" || [ $? -eq 1 ]
+      displayName: qgate report
+      env:
+        TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+    - pwsh: |
+        & "$env:QGATE_DIR/qgate-pr-comment.ps1" -Report "$env:AGENT_TEMPDIRECTORY/qgate.md"
+      displayName: qgate comment
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    - bash: |
+        qgate check --base "origin/${TARGET_BRANCH#refs/heads/}" --format azure --fail-on never
+      displayName: qgate check
+      env:
+        TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+```
+
+On a Windows agent, add `--fail-on never` to both `qgate check` lines of
+the Windows job above. The [branch policy](#azure-branch-policy) and
+the [comment permission](#azure-comment-permission) are needed as for
+any qgate job. With `--fail-on never`, the job still fails when qgate
+cannot run (exit code `2`) or cannot comment, and the policy of your
+build then blocks the pull request. So try the job on one pull request
+first.
+
+**Then a gate.** Watch the comments for a few weeks, and judge every
+Error they show. Once no Error has been wrong, remove both `--fail-on
+never` options, so that a pull request adding an Error fails. qgate cannot
+accept a known violation yet, such as an import the team allowed with
+`eslint-disable`. Agree first how such a pull request is completed, for
+example by a policy override that a named person gives.
+
 ## Why
 
 AI coding assistants make it cheap to write a lot of code quickly. Speed

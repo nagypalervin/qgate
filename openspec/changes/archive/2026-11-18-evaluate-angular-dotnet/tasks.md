@@ -20,8 +20,8 @@ written to files first.
 ## 3. Verdict, recipe and pilot plan
 
 - [x] 3.1 An "Evaluation" section in `design.md` with the criteria table of D4, per-rule counts, every "no signal" rule, and go or no-go. A failed criterion names the fix change to propose, and the work stops here until Ervin decides. Verified by each number in the table matching `summary.py` output.
-- [ ] 3.2 The pilot plan (D6) in `design.md`: the comment-only start, the week-1 measurement with these scripts, the condition and the step to blocking, the feedback route. Verified by every step naming who does it and what it produces.
-- [ ] 3.3 README "Angular + .NET" recipe: a `qgate.toml` with layer rules and the exclusions the evaluation supports, and the Azure Pipelines job of the README's Azure section with `--fail-on never` on both check lines. Verified by the recipe's `qgate.toml` loading in the `CleanArchitecture` clone without a configuration error, and the job differing from the README's Azure job only in `--fail-on`.
+- [x] 3.2 The pilot plan (D6) in `design.md`: the comment-only start, the week-1 measurement with these scripts, the condition and the step to blocking, the feedback route. Verified by every step naming who does it and what it produces.
+- [x] 3.3 README "Angular + .NET" recipe: a `qgate.toml` with layer rules and the exclusions the evaluation supports, and the Azure Pipelines job of the README's Azure section with `--fail-on never` on both check lines. Verified by the recipe's `qgate.toml` loading in the `CleanArchitecture` clone without a configuration error, and the job differing from the README's Azure job only in `--fail-on`.
 
 ## Workflow follow-up
 

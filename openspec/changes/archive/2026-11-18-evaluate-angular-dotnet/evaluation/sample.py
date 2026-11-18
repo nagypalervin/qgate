@@ -13,6 +13,7 @@ import sys
 
 SEED = 20261117
 WARNINGS = 30
+# Another repository, such as the pilot's, gets its name and a dash.
 PREFIX = {"CleanArchitecture": "CA", "server": "SV", "clients": "CL"}
 
 
@@ -38,7 +39,7 @@ def main():
             where = f"{x.get('path', '')}:{x.get('line', '')}"
             note = " (hotspot)" if x.get("hotspot") else ""
             message = x["message"].replace("|", "\\|")
-            print(f"| {PREFIX[repo]}{n} | {repo} | {r['pr']} | {r['kind']} | {x['severity']} | "
+            print(f"| {PREFIX.get(repo, repo + '-')}{n} | {repo} | {r['pr']} | {r['kind']} | {x['severity']} | "
                   f"{x['rule']} | `{where}` | {message}{note} |  |  |")
 
 
