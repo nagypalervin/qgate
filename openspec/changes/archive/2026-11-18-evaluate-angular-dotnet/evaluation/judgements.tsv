@@ -1,0 +1,79 @@
+id	class	reason
+CA1	defensible	A `??` fallback added to a two-line method; correct, and too small for a reviewer to act on.
+SV1	defensible	A guard and a ternary added to a seeder's factory (+5): correct under the rule, in a test-data tool that a reviewer would let pass.
+SV2	useful	A genuinely new SAML legacy-handling method of complexity 21 next to the existing CouldHandleAsync; worth a reviewer's look.
+SV3	useful	Seat-reservation branches added to a 21-complexity controller method in a hotspot (+5).
+SV4	useful	Seat reservation and email branches added (+5); the same 15 lines also went into SV5's command.
+SV5	useful	The same seat-reservation block as SV4 (+5), so the logic is now in two commands.
+SV6	useful	Reported as a new function because a parameter was added; with the old signature the same code is 14 -> 25 (+11), still an Error. Right verdict, wrong label.
+SV7	noise	PR 8859 splits one SSO test file into many; the repetition that was inside one file is now across files (pattern P1).
+SV8	noise	PR 8854 deletes the 2289-line AccountsControllerTest and splits it into 11 files; both blocks are moved code (P1).
+SV9	noise	Same split as SV8 (P1).
+SV10	noise	Block moved out of the deleted AccountsControllerTest (its line occurs 8 times there); the README says code moved out of a deleted file is not reported.
+SV11	noise	PR 8856 reorganizes the Identity integration tests; moved code (P1).
+SV12	noise	Same reorganization as SV11; block and helper both moved (P1).
+SV13	defensible	The same new test lines added to two controller test classes; a real copy, in tests.
+SV14	noise	Same reorganization as SV11 (P1).
+SV15	noise	Same reorganization as SV11 (P1).
+SV16	noise	Same split as SV7 (P1).
+SV17	noise	Same split as SV7 (P1).
+SV18	noise	Same reorganization as SV11: the test and the helper it duplicates both came from the old files (P1).
+SV19	noise	RunSuccessTestAsync existed in IdentityServerSsoTests and moved into a helper class, so its name changed and it counts as new.
+SV20	defensible	A new test copies the setup of an existing one; real duplication in tests.
+SV21	defensible	A new scene test copies the guard test's setup; real duplication in tests.
+SV22	defensible	A new command test class mirrors its sibling's setup.
+SV23	noise	Same split as SV8, moved out of the deleted file with small edits (P1).
+SV24	defensible	A new integration test copies setup from another project's test.
+SV25	noise	Same reorganization as SV11 (P1).
+SV26	noise	Same reorganization as SV11 (P1).
+SV27	noise	Same split as SV8 (P1).
+SV28	noise	Same split as SV8 (P1).
+SV29	noise	Same reorganization as SV11 (P1).
+SV30	defensible	The same new test added to two test classes, mirroring SV4/SV5's duplicated logic.
+SV31	defensible	New tests copied between two test classes.
+SV32	defensible	A test method gains a branch (+2); correct, a reviewer would let it pass.
+SV33	noise	The block is the constructor's dependency list, already alike in OrganizationsController; the PR added two services to it (pattern P2).
+SV34	defensible	A no-op cookie manager with three trivial methods has no test; correct, rarely worth one.
+SV35	noise	Same split as SV8 (P1).
+SV36	defensible	A five-line error record mirroring another area's; a real copy of a small pattern.
+CL1	useful	+10 in a 745-complexity hotspot's targeted fill method; exactly what a reviewer of autofill wants to see.
+CL2	useful	+5 with a new rule-qualification branch in a hotspot's getPageDetails.
+CL3	defensible	A file moved into libs/angular keeps an import ESLint forbids there; the team suppressed it with eslint-disable, which qgate has no counterpart for.
+CL4	defensible	As CL3.
+CL5	defensible	As CL3.
+CL6	defensible	As CL3.
+CL7	defensible	As CL3.
+CL8	defensible	As CL3.
+CL9	defensible	As CL3.
+CL10	useful	+6: new key handling branches for the inline mode.
+CL11	noise	Removing a feature flag inlined the existing decryptManyV2 into decryptMany and dropped V1; no logic was added, yet the Error would fail the pull request.
+CL12	useful	New CLI commands repeat the same parse-and-validate sequence; a reviewer could ask for a shared helper.
+CL13	defensible	A dependency-injection provider function has no spec; correct, rarely tested.
+CL14	useful	As CL12.
+CL15	defensible	A call swapped for a renamed helper in a casing fix; correct, a reviewer would not ask for a test.
+CL16	defensible	Only `readonly` modifiers added; "changed, but not its test" is true but no behavior changed.
+CL17	useful	As CL12.
+CL18	useful	As CL12.
+CL19	defensible	A one-line guard (+1).
+CL20	defensible	A loop added to a small function (+3); fine for a reviewer.
+CL21	noise	PR 24403 adds `mock<LogService>()` to each importer constructor in its spec; the specs were alike before (pattern P2).
+CL22	defensible	A computed map added and a filter simplified; the spec still covers it.
+CL23	noise	As CL21 (P2).
+CL24	noise	As CL21 (P2).
+CL25	defensible	ngOnInit of a hotspot changed without its spec; correct, often accepted.
+CL26	defensible	New service wiring in a content-script constructor without a spec change.
+CL27	defensible	New spec files repeat setup; real copies, in tests.
+CL28	defensible	As CL27.
+CL29	defensible	`?.` added (+1).
+CL30	useful	+3 in a hotspot's cancel(): reads the stored cipher and handles decryption failure, subtle enough to want a second look.
+CL31	defensible	As CL27.
+CL32	defensible	+1 in a moved and edited service; qgate followed the rename correctly.
+CL33	defensible	+2 in a 52-complexity message switch in a hotspot; correct, though the switch was already that large.
+CL34	defensible	As CL27.
+CL35	useful	A 23-line validation sequence copied between project and machine-account commands.
+CL36	defensible	A constant renamed and its value's meaning changed; the spec not updated, correct under the rule.
+CL37	defensible	As CL16: `readonly` and a signal; little behavior to test.
+CL38	defensible	An i18n key changed; correct, a reviewer would let it pass.
+CL39	defensible	As CL27.
+CL40	useful	As CL12.
+CL41	defensible	A second `case` label and a name fallback (+2) in an importer fix.

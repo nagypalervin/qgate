@@ -1,0 +1,125 @@
+# bitwarden/clients, frozen before the first run (design D2).
+# Every rule is a `no-restricted-imports` entry of eslint.config.mjs,
+# translated as written: `files` -> `from`, the package list -> `to`.
+# Left out, because a qgate pattern cannot say them:
+#   - "Prevent relative imports across libs" (`**/src/**/*` on the raw
+#     import, while qgate resolves relative imports to paths);
+#   - apps/browser background code without @angular or popup/, since its
+#     `ignores` (popup, content, spec files) have no counterpart;
+#   - apps/web's relative patterns (`**/app/core/*` and the like);
+#   - the platform-internal and legacy-crypto patterns that
+#     buildNoRestrictedImports adds to every entry.
+# The rule for libs/legacy-crypto itself is kept: it is a package list.
+
+# COMMON_FORBIDDEN_PACKAGES
+[[architecture.forbid]]
+name = "common"
+from = ["libs/common/src/**"]
+to = ["@bitwarden/admin-console", "@bitwarden/angular", "@bitwarden/auth",
+      "@bitwarden/billing", "@bitwarden/components", "@bitwarden/importer",
+      "@bitwarden/key-management", "@bitwarden/key-management-ui",
+      "@bitwarden/node", "@bitwarden/platform", "@bitwarden/tools",
+      "@bitwarden/ui", "@bitwarden/vault"]
+
+# "Auth can only depend on common, shared, angular, node, platform, eslint"
+[[architecture.forbid]]
+name = "auth"
+from = ["libs/auth/src/**"]
+to = ["@bitwarden/admin-console", "@bitwarden/billing", "@bitwarden/components",
+      "@bitwarden/importer", "@bitwarden/key-management-ui", "@bitwarden/tools",
+      "@bitwarden/ui", "@bitwarden/vault"]
+
+# KEY_MANAGEMENT_FORBIDDEN_PACKAGES
+[[architecture.forbid]]
+name = "key-management"
+from = ["libs/key-management/src/**"]
+to = ["@bitwarden/auth", "@bitwarden/admin-console", "@bitwarden/billing",
+      "@bitwarden/importer", "@bitwarden/key-management-ui", "@bitwarden/tools",
+      "@bitwarden/vault"]
+
+[[architecture.forbid]]
+name = "billing"
+from = ["libs/billing/src/**"]
+to = ["@bitwarden/admin-console", "@bitwarden/importer",
+      "@bitwarden/key-management-ui", "@bitwarden/tools", "@bitwarden/vault"]
+
+# "Components can depend on common, shared"
+[[architecture.forbid]]
+name = "components"
+from = ["libs/components/src/**"]
+to = ["@bitwarden/admin-console", "@bitwarden/auth", "@bitwarden/billing",
+      "@bitwarden/eslint", "@bitwarden/importer", "@bitwarden/key-management-ui",
+      "@bitwarden/node", "@bitwarden/tools", "@bitwarden/vault"]
+
+[[architecture.forbid]]
+name = "key-management-ui"
+from = ["libs/key-management-ui/src/**"]
+to = ["@bitwarden/admin-console", "@bitwarden/billing", "@bitwarden/importer",
+      "@bitwarden/node", "@bitwarden/platform", "@bitwarden/tools",
+      "@bitwarden/vault"]
+
+# "Angular can depend on common, shared, components, ui"
+[[architecture.forbid]]
+name = "angular"
+from = ["libs/angular/src/**"]
+to = ["@bitwarden/admin-console", "@bitwarden/auth", "@bitwarden/billing",
+      "@bitwarden/importer", "@bitwarden/key-management-ui", "@bitwarden/node",
+      "@bitwarden/platform", "@bitwarden/tools", "@bitwarden/vault"]
+
+[[architecture.forbid]]
+name = "vault"
+from = ["libs/vault/src/**"]
+to = ["@bitwarden/admin-console", "@bitwarden/importer", "@bitwarden/tools"]
+
+# "Platform cant depend on most libs"
+[[architecture.forbid]]
+name = "platform"
+from = ["libs/platform/src/**"]
+to = ["@bitwarden/admin-console", "@bitwarden/auth", "@bitwarden/billing",
+      "@bitwarden/importer", "@bitwarden/key-management",
+      "@bitwarden/key-management-ui", "@bitwarden/tools", "@bitwarden/vault"]
+
+[[architecture.forbid]]
+name = "importer"
+from = ["libs/importer/src/**"]
+to = ["@bitwarden/admin-console", "@bitwarden/tools"]
+
+# NODE_FORBIDDEN_PACKAGES
+[[architecture.forbid]]
+name = "node"
+from = ["libs/node/src/**"]
+to = ["@bitwarden/admin-console", "@bitwarden/angular", "@bitwarden/components",
+      "@bitwarden/importer", "@bitwarden/key-management-ui",
+      "@bitwarden/platform", "@bitwarden/tools", "@bitwarden/ui",
+      "@bitwarden/vault"]
+
+# "Legacy crypto can only depend on common, logging, key-management"
+[[architecture.forbid]]
+name = "legacy-crypto"
+from = ["libs/legacy-crypto/src/**"]
+to = ["@bitwarden/admin-console", "@bitwarden/angular", "@bitwarden/auth",
+      "@bitwarden/billing", "@bitwarden/components", "@bitwarden/importer",
+      "@bitwarden/key-management-ui", "@bitwarden/node", "@bitwarden/platform",
+      "@bitwarden/tools", "@bitwarden/ui", "@bitwarden/vault"]
+
+# "bit-pam stays free of Angular so background scripts can use it"
+[[architecture.forbid]]
+name = "bit-pam"
+from = ["bitwarden_license/bit-pam/src/**"]
+to = ["@bitwarden/bit-pam", "@bitwarden/bit-pam-components", "@angular",
+      "@bitwarden/angular", "@bitwarden/components", "@bitwarden/ui-common",
+      "@bitwarden/vault"]
+
+# The apps never import the commercial code. ESLint's `/*` covers
+# everything below, hence `/*` and `/*/**` here.
+[[architecture.forbid]]
+name = "apps-are-not-commercial"
+from = ["apps/**"]
+to = ["bitwarden_license/**", "@bitwarden/bit-common/*", "@bitwarden/bit-common/*/**",
+      "@bitwarden/bit-sm", "@bitwarden/bit-pam", "@bitwarden/bit-pam-components",
+      "@bitwarden/bit-web/*", "@bitwarden/bit-web/*/**",
+      "@bitwarden/bit-cli/*", "@bitwarden/bit-cli/*/**"]
+
+[files]
+# Protocol buffer code generated for the Keeper importer.
+exclude = ["**/generated/**"]

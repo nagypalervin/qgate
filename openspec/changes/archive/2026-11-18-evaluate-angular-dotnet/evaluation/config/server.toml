@@ -1,0 +1,46 @@
+# bitwarden/server, frozen before the first run (design D2).
+# No architecture tests; the boundaries are the project references:
+#   src/Core references only src/Libraries/*;
+#   src/Pam.Domain references only src/Libraries/Data (whose namespace
+#   is Bit.Core, so Bit.Core itself cannot be forbidden there);
+#   bitwarden_license/src/Commercial.Core references src/Core only;
+#   Infrastructure.Dapper and Infrastructure.EntityFramework reference
+#   Core, and the hosts (Api, Admin, Identity, ...) reference those.
+
+[[architecture.forbid]]
+name = "core-knows-no-infrastructure"
+from = ["src/Core/**"]
+to_namespaces = [
+  "Bit.Infrastructure",
+  "Bit.Api", "Bit.Admin", "Bit.Identity", "Bit.Billing", "Bit.Events",
+  "Bit.EventsProcessor", "Bit.Notifications", "Bit.Icons", "Bit.SharedWeb",
+  "Bit.Pam", "Bit.Commercial",
+  # Core.csproj has no package reference to either.
+  "Dapper", "Microsoft.EntityFrameworkCore",
+]
+
+[[architecture.forbid]]
+name = "pam-domain-is-pure"
+from = ["src/Pam.Domain/**"]
+to_namespaces = [
+  "Bit.Infrastructure",
+  "Bit.Api", "Bit.Admin", "Bit.Identity", "Bit.Billing", "Bit.Events",
+  "Bit.EventsProcessor", "Bit.Notifications", "Bit.Icons", "Bit.SharedWeb",
+  "Bit.Commercial",
+  "Dapper", "Microsoft.EntityFrameworkCore",
+]
+
+[[architecture.forbid]]
+name = "commercial-core-knows-no-infrastructure"
+from = ["bitwarden_license/src/Commercial.Core/**"]
+to_namespaces = [
+  "Bit.Infrastructure",
+  "Bit.Api", "Bit.Admin", "Bit.Identity", "Bit.Billing", "Bit.Events",
+  "Bit.EventsProcessor", "Bit.Notifications", "Bit.Icons", "Bit.SharedWeb",
+  "Bit.Pam",
+  "Dapper", "Microsoft.EntityFrameworkCore",
+]
+
+[files]
+# EF Core migrations generated per database (util/*Migrations/Migrations).
+exclude = ["**/Migrations/**"]
