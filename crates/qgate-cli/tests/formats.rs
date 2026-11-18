@@ -120,8 +120,8 @@ fn markdown_report() {
          \n\
          | Severity | Location | Finding | Rule |\n\
          |---|---|---|---|\n\
-         | warning | src/a.ts:1 | f: cyclomatic complexity 2 -\\> 4 (+2) | complexity/cyclomatic-increase |\n\
-         | error | src/domain/order.ts:1 | imports src/ui/W (\"../ui/W\"), forbidden by \"domain-is-pure\" | architecture/forbidden-import |\n",
+         | error | src/domain/order.ts:1 | imports src/ui/W (\"../ui/W\"), forbidden by \"domain-is-pure\" | architecture/forbidden-import |\n\
+         | warning | src/a.ts:1 | f: cyclomatic complexity 2 -\\> 4 (+2) | complexity/cyclomatic-increase |\n",
         "{}",
         stderr(&out)
     );
@@ -129,6 +129,28 @@ fn markdown_report() {
     assert_eq!(out.status.code(), Some(1));
     let again = repo.qgate(&["--base", "main", "--format", "markdown"]);
     assert_eq!(stdout(&again), stdout(&out));
+}
+
+// Requirement: Markdown report document, "Other formats keep their order"
+// (`report-errors-first`): only the Markdown table puts Errors first.
+#[test]
+fn only_markdown_puts_errors_first() {
+    let repo = error_and_warning();
+    let run = |format: &str| stdout(&repo.qgate(&["--base", "main", "--format", format]));
+    let md = run("markdown");
+    let error = md
+        .find("| error | src/domain/order.ts:1 |")
+        .expect("error row");
+    let warning = md.find("| warning | src/a.ts:1 |").expect("warning row");
+    assert!(error < warning, "{md}");
+    for format in ["text", "json", "azure", "github"] {
+        let out = run(format);
+        let a = out.find("src/a.ts").expect("src/a.ts");
+        let domain = out
+            .find("src/domain/order.ts")
+            .expect("src/domain/order.ts");
+        assert!(a < domain, "{format}: {out}");
+    }
 }
 
 // Requirement: Markdown related locations, "A copy the message names", with the

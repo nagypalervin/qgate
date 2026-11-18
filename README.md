@@ -884,7 +884,8 @@ Windows runners, x64 and arm64.
   finding. GitHub shows at most 10 errors and 10 warnings of a step;
   the step's log lists every finding.
 - **The job summary** of the run: the Markdown report, a table of up to
-  50 findings.
+  50 findings, Errors first. When more are found, a list above the
+  table counts the findings of each rule.
 - **One qgate comment** with the same report, posted when a run first
   finds something. Later runs update it, and once the findings are
   gone it says "No regressions found." A pull request that never had a
@@ -1104,10 +1105,11 @@ Build Service identities that is; when it cannot tell, it names both.
 **What the pull request shows:**
 
 - **One qgate comment.** The first build with findings creates it as an
-  active thread with a table of the findings. Later builds update the
-  same comment: with findings, it is set active again; once they are
-  gone, it says "No regressions found." and is closed. A pull request
-  that never had a finding gets no comment.
+  active thread with a table of up to 50 findings, Errors first; when
+  more are found, a list above the table counts the findings of each
+  rule. Later builds update the same comment: with findings, it is set
+  active again; once they are gone, it says "No regressions found." and
+  is closed. A pull request that never had a finding gets no comment.
 - **The build summary.** Each Error and Warning is listed as an issue
   of the build, with its file, line and rule.
 - **The build result.** The `qgate check` step fails the job, and with
