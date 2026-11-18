@@ -1,18 +1,22 @@
 //! The Markdown report (`--format markdown`): the body of a pull request
 //! comment (the `report-formats` spec, design D2 of `add-pr-comments`).
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use qgate_core::{Finding, Location};
+use qgate_core::{Finding, Location, Severity};
 
 use crate::{ReportSummary, path_text, severity_name};
 
-/// The most findings the table shows; the rest are counted below it.
+/// The most findings the table shows, Errors first; the rest are counted
+/// below it, and the rule summary counts every finding per rule.
 pub const MAX_ROWS: usize = 50;
 
-/// Render findings, in the order given, as the Markdown report: a marker
-/// line with the counts, a summary sentence and a table of at most
-/// [`MAX_ROWS`] findings.
+/// Render findings, given in the text format's order, as the Markdown
+/// report: a marker line with the counts, a summary sentence, a rule
+/// summary when not every finding fits, and a table of at most
+/// [`MAX_ROWS`] findings, Errors first, then Warnings, then Infos, each in
+/// the order given (design D1 of `report-errors-first`).
 #[must_use]
 pub fn render_markdown(findings: &[Finding], summary: ReportSummary<'_>) -> String {
     let count = findings.len();
@@ -36,8 +40,15 @@ pub fn render_markdown(findings: &[Finding], summary: ReportSummary<'_>) -> Stri
         findings_word(count),
         summary.fail_on
     );
+    if count > MAX_ROWS {
+        out.push('\n');
+        out.push_str(&rule_summary(findings));
+    }
     out.push_str("\n| Severity | Location | Finding | Rule |\n|---|---|---|---|\n");
-    for f in findings.iter().take(MAX_ROWS) {
+    // A stable sort keeps the given order within a severity.
+    let mut rows: Vec<&Finding> = findings.iter().collect();
+    rows.sort_by_key(|f| std::cmp::Reverse(f.severity));
+    for f in rows.into_iter().take(MAX_ROWS) {
         let _ = writeln!(
             out,
             "| {} | {} | {} | {} |",
@@ -50,6 +61,36 @@ pub fn render_markdown(findings: &[Finding], summary: ReportSummary<'_>) -> Stri
     let hidden = count.saturating_sub(MAX_ROWS);
     if hidden > 0 {
         let _ = writeln!(out, "\n{hidden} more {} not shown.", findings_word(hidden));
+    }
+    out
+}
+
+/// One line per rule, ``- `<rule>`: 2 errors, 15 warnings``, ordered by
+/// the Error, Warning and Info counts descending, then by rule id
+/// (design D2 of `report-errors-first`).
+fn rule_summary(findings: &[Finding]) -> String {
+    // Per rule: Errors, Warnings, Infos.
+    let mut counts: BTreeMap<&str, [usize; 3]> = BTreeMap::new();
+    for f in findings {
+        let slot = match f.severity {
+            Severity::Error => 0,
+            Severity::Warning => 1,
+            Severity::Info => 2,
+        };
+        counts.entry(f.rule.as_str()).or_default()[slot] += 1;
+    }
+    let mut rules: Vec<(&str, [usize; 3])> = counts.into_iter().collect();
+    // Stable, so equal counts keep the rule id order of the map.
+    rules.sort_by_key(|&(_, n)| std::cmp::Reverse(n));
+    let mut out = String::new();
+    for (rule, n) in rules {
+        let parts: Vec<String> = n
+            .iter()
+            .zip(["error", "warning", "info"])
+            .filter(|&(&k, _)| k > 0)
+            .map(|(&k, word)| format!("{k} {word}{}", if k == 1 { "" } else { "s" }))
+            .collect();
+        let _ = writeln!(out, "- `{rule}`: {}", parts.join(", "));
     }
     out
 }
@@ -430,6 +471,171 @@ mod tests {
         let md = render_markdown(&findings, DEFAULT);
         assert!(!md.contains("not shown"), "{md}");
         assert!(md.ends_with("| warning | a.ts:50 | m | r/x |\n"));
+    }
+
+    /// `n` Warnings of `rule`, one per line of `path`.
+    fn warnings(n: u32, rule: &str, path: &str) -> Vec<Finding> {
+        (1..=n)
+            .map(|i| finding(Severity::Warning, rule, "m", at(path, Some(i))))
+            .collect()
+    }
+
+    /// The rule summary lines of a report.
+    fn rule_lines(md: &str) -> Vec<&str> {
+        md.lines().filter(|l| l.starts_with("- `")).collect()
+    }
+
+    #[test]
+    fn errors_before_warnings() {
+        let findings = [
+            finding(Severity::Warning, "r/w", "w", at("src/a.ts", Some(1))),
+            finding(Severity::Error, "r/e", "e", at("src/b.ts", Some(9))),
+        ];
+        assert_eq!(
+            rows(&render_markdown(&findings, DEFAULT)),
+            [
+                "| error | src/b.ts:9 | e | r/e |",
+                "| warning | src/a.ts:1 | w | r/w |"
+            ]
+        );
+    }
+
+    #[test]
+    fn info_after_warnings() {
+        let findings = [
+            finding(Severity::Info, "r/i", "i", at("src/a.ts", Some(1))),
+            finding(Severity::Warning, "r/w", "w", at("src/b.ts", Some(1))),
+        ];
+        assert_eq!(
+            rows(&render_markdown(&findings, DEFAULT)),
+            [
+                "| warning | src/b.ts:1 | w | r/w |",
+                "| info | src/a.ts:1 | i | r/i |"
+            ]
+        );
+    }
+
+    #[test]
+    fn text_order_within_a_severity() {
+        // The input is in the text order; the table keeps it per severity.
+        let findings = [
+            finding(Severity::Warning, "r/w", "1", at("src/a.ts", Some(40))),
+            finding(Severity::Error, "r/e", "2", at("src/a.ts", Some(50))),
+            finding(Severity::Warning, "r/w", "3", at("src/b.ts", Some(5))),
+            finding(Severity::Error, "r/e", "4", at("src/c.ts", Some(1))),
+        ];
+        assert_eq!(
+            rows(&render_markdown(&findings, DEFAULT)),
+            [
+                "| error | src/a.ts:50 | 2 | r/e |",
+                "| error | src/c.ts:1 | 4 | r/e |",
+                "| warning | src/a.ts:40 | 1 | r/w |",
+                "| warning | src/b.ts:5 | 3 | r/w |",
+            ]
+        );
+    }
+
+    #[test]
+    fn errors_after_many_warnings_in_path_order() {
+        let mut findings: Vec<Finding> = (0..60)
+            .map(|i| {
+                finding(
+                    Severity::Warning,
+                    "r/w",
+                    "w",
+                    at(&format!("src/a{i:02}.ts"), Some(1)),
+                )
+            })
+            .collect();
+        findings.push(finding(
+            Severity::Error,
+            "r/e",
+            "e",
+            at("src/z.ts", Some(1)),
+        ));
+        findings.push(finding(
+            Severity::Error,
+            "r/e",
+            "e",
+            at("src/z.ts", Some(2)),
+        ));
+        let md = render_markdown(&findings, DEFAULT);
+        let shown = rows(&md);
+        assert_eq!(shown.len(), MAX_ROWS);
+        assert_eq!(shown[0], "| error | src/z.ts:1 | e | r/e |");
+        assert_eq!(shown[1], "| error | src/z.ts:2 | e | r/e |");
+        assert_eq!(shown[2], "| warning | src/a00.ts:1 | w | r/w |");
+        assert_eq!(shown[49], "| warning | src/a47.ts:1 | w | r/w |");
+        assert!(md.ends_with("\n\n12 more findings not shown.\n"), "{md}");
+    }
+
+    #[test]
+    fn hidden_findings_of_two_rules() {
+        let mut findings = vec![
+            finding(
+                Severity::Warning,
+                "complexity/cyclomatic-increase",
+                "m",
+                at("a.ts", Some(1)),
+            ),
+            finding(
+                Severity::Error,
+                "complexity/cyclomatic-increase",
+                "m",
+                at("a.ts", Some(2)),
+            ),
+        ];
+        findings.extend(warnings(58, "duplication/duplicate-block", "b.ts"));
+        findings.extend(warnings(2, "complexity/cyclomatic-increase", "c.ts"));
+        let md = render_markdown(&findings, DEFAULT);
+        assert_eq!(
+            rule_lines(&md),
+            [
+                "- `complexity/cyclomatic-increase`: 1 error, 3 warnings",
+                "- `duplication/duplicate-block`: 58 warnings",
+            ]
+        );
+        // After the summary sentence, before the table, set off by blank lines.
+        assert!(
+            md.contains(
+                "\n62 findings, none at or above `error`.\n\n\
+                 - `complexity/cyclomatic-increase`: 1 error, 3 warnings\n\
+                 - `duplication/duplicate-block`: 58 warnings\n\n\
+                 | Severity | Location | Finding | Rule |\n"
+            ),
+            "{md}"
+        );
+    }
+
+    #[test]
+    fn rule_summary_order_singular_and_info() {
+        let mut findings = warnings(48, "r/b", "b.ts");
+        // Scenario "Singular and missing severities".
+        findings.extend(warnings(1, "tests/missing-test", "a.ts"));
+        findings.extend(warnings(1, "r/c", "c.ts"));
+        findings.push(finding(Severity::Info, "r/i", "m", at("i.ts", Some(1))));
+        findings.push(finding(Severity::Info, "r/i", "m", at("i.ts", Some(2))));
+        findings.push(finding(Severity::Error, "r/z", "m", at("z.ts", Some(1))));
+        findings.push(finding(Severity::Info, "r/z", "m", at("z.ts", Some(2))));
+        // Errors, then Warnings, then Infos descending, then rule id.
+        assert_eq!(
+            rule_lines(&render_markdown(&findings, DEFAULT)),
+            [
+                "- `r/z`: 1 error, 1 info",
+                "- `r/b`: 48 warnings",
+                "- `r/c`: 1 warning",
+                "- `tests/missing-test`: 1 warning",
+                "- `r/i`: 2 infos",
+            ]
+        );
+    }
+
+    #[test]
+    fn every_finding_fits_has_no_rule_summary() {
+        let md = render_markdown(&warnings(50, "r/x", "a.ts"), DEFAULT);
+        assert!(rule_lines(&md).is_empty(), "{md}");
+        let md = render_markdown(&warnings(51, "r/x", "a.ts"), DEFAULT);
+        assert_eq!(rule_lines(&md), ["- `r/x`: 51 warnings"]);
     }
 
     #[test]
